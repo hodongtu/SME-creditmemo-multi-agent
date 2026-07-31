@@ -6,6 +6,9 @@
 # Logs / run outputs
 logs/
 
+# Customer data — never commit
+testing/samples/
+
 # Python
 __pycache__/
 *.py[cod]
