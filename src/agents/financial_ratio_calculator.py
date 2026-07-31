@@ -1,0 +1,714 @@
+"""Pre-compute financial ratios from extracted financial document text."""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+from dataclasses import dataclass
+from typing import Callable
+
+
+@dataclass
+class MetricDefinition:
+    """Describe one extractable financial statement line item."""
+
+    key: str
+    label: str
+    aliases: tuple[str, ...]
+
+
+@dataclass
+class RatioDefinition:
+    """Describe one computed ratio and its formula."""
+
+    key: str
+    label: str
+    formula: str
+    unit: str
+    compute: Callable[[dict[str, float]], float | None]
+
+
+class FinancialRatioCalculator:
+    """Extract statement line items by year and compute custom financial ratios."""
+
+    METRICS: tuple[MetricDefinition, ...] = (
+        MetricDefinition(
+            "net_revenue",
+            "Doanh thu thuần",
+            ("doanh thu thuần", "doanh thu thuan"),
+        ),
+        MetricDefinition(
+            "gross_revenue",
+            "Doanh thu bán hàng và cung cấp dịch vụ",
+            ("doanh thu bán hàng", "doanh thu ban hang"),
+        ),
+        MetricDefinition("cogs", "Giá vốn hàng bán", ("giá vốn hàng bán", "gia von hang ban")),
+        MetricDefinition("gross_profit", "Lợi nhuận gộp", ("lợi nhuận gộp", "loi nhuan gop")),
+        MetricDefinition("financial_expense", "Chi phí tài chính", ("chi phí tài chính", "chi phi tai chinh")),
+        MetricDefinition("interest_expense", "Chi phí lãi vay", ("chi phí lãi vay", "chi phi lai vay")),
+        MetricDefinition(
+            "profit_before_tax",
+            "Lợi nhuận trước thuế",
+            ("lợi nhuận trước thuế", "loi nhuan truoc thue"),
+        ),
+        MetricDefinition("net_profit", "Lợi nhuận sau thuế", ("lợi nhuận sau thuế", "loi nhuan sau thue")),
+        MetricDefinition("current_assets", "Tài sản ngắn hạn", ("tài sản ngắn hạn", "tai san ngan han")),
+        MetricDefinition(
+            "cash",
+            "Tiền và tương đương tiền",
+            (
+                "tiền và các khoản tương đương tiền",
+                "tien va cac khoan tuong duong tien",
+            ),
+        ),
+        MetricDefinition(
+            "accounts_receivable",
+            "Phải thu khách hàng",
+            (
+                "phải thu ngắn hạn của khách hàng",
+                "phai thu ngan han cua khach hang",
+                "phải thu khách hàng",
+                "phai thu khach hang",
+            ),
+        ),
+        MetricDefinition(
+            "prepaid_suppliers",
+            "Trả trước người bán",
+            (
+                "trả trước cho người bán ngắn hạn",
+                "tra truoc cho nguoi ban ngan han",
+                "trả trước người bán",
+                "tra truoc nguoi ban",
+            ),
+        ),
+        MetricDefinition(
+            "other_receivables",
+            "Phải thu khác",
+            (
+                "phải thu ngắn hạn khác",
+                "phai thu ngan han khac",
+                "phải thu khác",
+                "phai thu khac",
+            ),
+        ),
+        MetricDefinition("inventory", "Hàng tồn kho", ("hàng tồn kho", "hang ton kho")),
+        MetricDefinition("total_assets", "Tổng tài sản", ("tổng tài sản", "tong tai san")),
+        MetricDefinition("current_liabilities", "Nợ ngắn hạn", ("nợ ngắn hạn", "no ngan han")),
+        MetricDefinition(
+            "accounts_payable",
+            "Phải trả người bán",
+            (
+                "phải trả người bán ngắn hạn",
+                "phai tra nguoi ban ngan han",
+                "phải trả người bán",
+                "phai tra nguoi ban",
+            ),
+        ),
+        MetricDefinition(
+            "customer_advances",
+            "Người mua trả tiền trước",
+            (
+                "người mua trả tiền trước ngắn hạn",
+                "nguoi mua tra tien truoc ngan han",
+                "người mua trả tiền trước",
+                "nguoi mua tra tien truoc",
+            ),
+        ),
+        MetricDefinition(
+            "short_term_debt",
+            "Vay và nợ thuê tài chính ngắn hạn",
+            ("vay và nợ thuê tài chính ngắn hạn", "vay ngan han"),
+        ),
+        MetricDefinition(
+            "long_term_debt",
+            "Vay và nợ thuê tài chính dài hạn",
+            ("vay và nợ thuê tài chính dài hạn", "vay dai han"),
+        ),
+        MetricDefinition(
+            "total_liabilities",
+            "Nợ phải trả",
+            ("nợ phải trả", "no phai tra", "tong no phai tra", "tổng nợ phải trả"),
+        ),
+        MetricDefinition("equity", "Vốn chủ sở hữu", ("vốn chủ sở hữu", "von chu so huu")),
+    )
+
+    RATIO_DEFINITIONS: tuple[RatioDefinition, ...] = (
+        RatioDefinition(
+            "net_working_capital",
+            "Vốn lưu động ròng",
+            "Tài sản ngắn hạn - Nợ ngắn hạn",
+            "value",
+            lambda m: _safe_sub(m.get("current_assets"), m.get("current_liabilities")),
+        ),
+        RatioDefinition(
+            "dio",
+            "Số ngày tồn kho",
+            "Hàng tồn kho cuối kỳ / Giá vốn hàng bán * 365",
+            "days",
+            lambda m: _safe_div(m.get("inventory"), m.get("cogs"), 365),
+        ),
+        RatioDefinition(
+            "dso",
+            "Số ngày phải thu",
+            "Phải thu cuối kỳ / Doanh thu thuần * 365",
+            "days",
+            lambda m: _safe_div(m.get("accounts_receivable"), m.get("net_revenue"), 365),
+        ),
+        RatioDefinition(
+            "prepaid_supplier_days",
+            "Số ngày trả trước người bán",
+            "Trả trước người bán cuối kỳ / Doanh thu thuần * 365",
+            "days",
+            lambda m: _safe_div(m.get("prepaid_suppliers"), m.get("net_revenue"), 365),
+        ),
+        RatioDefinition(
+            "receivable_plus_prepaid_days",
+            "Số ngày phải thu + trả trước",
+            "DSO + Số ngày trả trước người bán",
+            "days",
+            lambda m: _safe_sum(
+                _safe_div(m.get("accounts_receivable"), m.get("net_revenue"), 365),
+                _safe_div(m.get("prepaid_suppliers"), m.get("net_revenue"), 365),
+            ),
+        ),
+        RatioDefinition(
+            "dpo",
+            "Số ngày phải trả",
+            "Phải trả cuối kỳ / Giá vốn hàng bán * 365",
+            "days",
+            lambda m: _safe_div(m.get("accounts_payable"), m.get("cogs"), 365),
+        ),
+        RatioDefinition(
+            "customer_advance_days",
+            "Số ngày người mua trả trước",
+            "Người mua trả trước cuối kỳ / Giá vốn hàng bán * 365",
+            "days",
+            lambda m: _safe_div(m.get("customer_advances"), m.get("cogs"), 365),
+        ),
+        RatioDefinition(
+            "payable_plus_advance_days",
+            "Số ngày phải trả + NMTTT",
+            "DPO + Số ngày người mua trả trước",
+            "days",
+            lambda m: _safe_sum(
+                _safe_div(m.get("accounts_payable"), m.get("cogs"), 365),
+                _safe_div(m.get("customer_advances"), m.get("cogs"), 365),
+            ),
+        ),
+        RatioDefinition(
+            "cash_conversion_cycle",
+            "Số ngày thiếu tiền (CCC)",
+            "DSO + DIO + Số ngày trả trước người bán - DPO - Số ngày người mua trả trước",
+            "days",
+            lambda m: _safe_cash_conversion_cycle(m),
+        ),
+        RatioDefinition(
+            "current_ratio",
+            "Chỉ số thanh toán hiện hành",
+            "Tài sản ngắn hạn / Nợ ngắn hạn",
+            "x",
+            lambda m: _safe_div(m.get("current_assets"), m.get("current_liabilities")),
+        ),
+        RatioDefinition(
+            "quick_ratio_custom",
+            "Chỉ số thanh toán nhanh",
+            "(Tài sản ngắn hạn - Trả trước người bán - Phải thu khác) / Nợ ngắn hạn",
+            "x",
+            lambda m: _safe_div(
+                _safe_sub(
+                    m.get("current_assets"),
+                    m.get("prepaid_suppliers"),
+                    m.get("other_receivables"),
+                ),
+                m.get("current_liabilities"),
+            ),
+        ),
+        RatioDefinition(
+            "asset_turnover",
+            "Vòng quay tài sản",
+            "Doanh thu thuần / Tổng tài sản cuối kỳ",
+            "x",
+            lambda m: _safe_div(m.get("net_revenue"), m.get("total_assets")),
+        ),
+        RatioDefinition(
+            "revenue_growth",
+            "Tỷ lệ tăng trưởng doanh thu",
+            "(Doanh thu thuần năm hiện tại - năm trước) / năm trước",
+            "%",
+            lambda m: None,
+        ),
+        RatioDefinition(
+            "gross_margin",
+            "Biên LN gộp",
+            "Lợi nhuận gộp / Doanh thu thuần",
+            "%",
+            lambda m: _safe_div(m.get("gross_profit"), m.get("net_revenue")),
+        ),
+        RatioDefinition(
+            "ros",
+            "ROS",
+            "Lợi nhuận sau thuế / Doanh thu thuần",
+            "%",
+            lambda m: _safe_div(m.get("net_profit"), m.get("net_revenue")),
+        ),
+        RatioDefinition(
+            "roe",
+            "ROE",
+            "Lợi nhuận sau thuế / Vốn chủ sở hữu",
+            "%",
+            lambda m: _safe_div(m.get("net_profit"), m.get("equity")),
+        ),
+        RatioDefinition(
+            "roa",
+            "ROA",
+            "Lợi nhuận sau thuế / Tổng tài sản cuối kỳ",
+            "%",
+            lambda m: _safe_div(m.get("net_profit"), m.get("total_assets")),
+        ),
+        RatioDefinition(
+            "liabilities_to_equity",
+            "Nợ phải trả/VCSH",
+            "Nợ phải trả / Vốn chủ sở hữu",
+            "x",
+            lambda m: _safe_div(m.get("total_liabilities"), m.get("equity")),
+        ),
+        RatioDefinition(
+            "debt_to_equity",
+            "Nợ vay/VCSH",
+            "(Vay ngắn hạn + Vay dài hạn) / Vốn chủ sở hữu",
+            "x",
+            lambda m: _safe_div(
+                _safe_sum(
+                    m.get("short_term_debt"),
+                    m.get("long_term_debt"),
+                ),
+                m.get("equity"),
+            ),
+        ),
+        RatioDefinition(
+            "liabilities_to_assets",
+            "Tổng nợ phải trả/Tổng tài sản",
+            "Nợ phải trả / Tổng tài sản",
+            "%",
+            lambda m: _safe_div(m.get("total_liabilities"), m.get("total_assets")),
+        ),
+        RatioDefinition(
+            "ebitda_to_interest",
+            "EBITDA/Lãi vay",
+            "(Lợi nhuận trước thuế + Chi phí lãi vay) / Chi phí lãi vay; chưa cộng khấu hao nếu tài liệu không có",
+            "x",
+            lambda m: _safe_div(
+                _safe_sum(m.get("profit_before_tax"), m.get("interest_expense")),
+                m.get("interest_expense"),
+            ),
+        ),
+    )
+
+    def build_analysis_block(self, documents: list[dict[str, str]]) -> str:
+        """Return a markdown block with extracted line items and computed ratios."""
+        yearly_metrics = self.extract_yearly_metrics(documents)
+        if not yearly_metrics:
+            return ""
+
+        ratios = self.compute_ratios(yearly_metrics)
+        if not ratios:
+            return ""
+
+        return self.format_markdown(yearly_metrics, ratios)
+
+    def extract_yearly_metrics(
+        self,
+        documents: list[dict[str, str]],
+    ) -> dict[str, dict[str, float]]:
+        """Extract financial statement line items by year from document text.
+
+        Handles two common layouts:
+        1. Inline rows where the year and its value share one line.
+        2. Column tables where a header row lists the years and each following
+           metric row carries only its values (associated positionally). This
+           relies on OCR that preserves columns (see ``ocr.image_to_layout_text``).
+        """
+        yearly_metrics: dict[str, dict[str, float]] = {}
+
+        for document in documents:
+            content = document.get("content", "")
+            current_years: list[str] = []
+            for line in content.splitlines():
+                header_years = self._detect_header_years(line)
+                if header_years:
+                    current_years = header_years
+
+                years = self._extract_year_values(line)
+                if not years and current_years:
+                    years = self._map_values_to_years(line, current_years)
+                if not years:
+                    continue
+
+                normalized_line = _normalize_text(line)
+                for metric in self.METRICS:
+                    if any(
+                        _normalize_text(alias) in normalized_line
+                        for alias in metric.aliases
+                    ):
+                        for year, value in years.items():
+                            yearly_metrics.setdefault(year, {})
+                            yearly_metrics[year].setdefault(metric.key, value)
+                        break
+
+        return dict(sorted(yearly_metrics.items()))
+
+    @staticmethod
+    def _detect_header_years(line: str) -> list[str]:
+        """Return year columns if the line is a header row (years, few values)."""
+        years = re.findall(r"\b(20\d{2})\b", line)
+        if not years:
+            return []
+        year_set = set(years)
+        other_values = [
+            value
+            for value in _extract_numbers(line)
+            if str(int(abs(value))) not in year_set
+        ]
+        # A header row lists years but not (all of) their values on the same line.
+        if len(other_values) < len(years):
+            return years
+        return []
+
+    @staticmethod
+    def _map_values_to_years(
+        line: str,
+        current_years: list[str],
+    ) -> dict[str, float]:
+        """Associate the trailing numeric values of a metric row with header years."""
+        year_set = set(current_years)
+        values = [
+            value
+            for value in _extract_numbers(line)
+            if str(int(abs(value))) not in year_set
+        ]
+        if len(values) < len(current_years):
+            return {}
+        return {
+            year: values[-len(current_years) + index]
+            for index, year in enumerate(current_years)
+        }
+
+    def compute_ratios(
+        self,
+        yearly_metrics: dict[str, dict[str, float]],
+    ) -> dict[str, dict[str, float]]:
+        """Compute configured financial ratios from extracted yearly metrics."""
+        yearly_ratios: dict[str, dict[str, float]] = {}
+        previous_net_revenue: float | None = None
+
+        for year in sorted(yearly_metrics):
+            metrics = yearly_metrics[year]
+            ratio_values: dict[str, float] = {}
+            for ratio in self.RATIO_DEFINITIONS:
+                if ratio.key == "revenue_growth":
+                    value = _safe_growth(metrics.get("net_revenue"), previous_net_revenue)
+                else:
+                    value = ratio.compute(metrics)
+                if value is not None:
+                    ratio_values[ratio.key] = value
+            if metrics.get("net_revenue") is not None:
+                previous_net_revenue = metrics.get("net_revenue")
+            yearly_ratios[year] = ratio_values
+
+        return yearly_ratios
+
+    def format_markdown(
+        self,
+        yearly_metrics: dict[str, dict[str, float]],
+        yearly_ratios: dict[str, dict[str, float]],
+    ) -> str:
+        """Format extracted metrics and computed ratios as markdown for the agent."""
+        years = sorted(yearly_metrics)
+        lines = [
+            "[PRE-COMPUTED FINANCIAL METRICS]",
+            "The following figures were calculated deterministically from extracted documents before LLM analysis.",
+            "Use these values as the primary source for ratio tables when available.",
+            "If a value is missing, say it is unavailable instead of estimating it.",
+            "Đơn vị mọi giá trị tiền tệ (line items) trong block này: **tỷ VNĐ** "
+            "(đã chia 10^9, 2 chữ số thập phân). Giữ nguyên đơn vị này khi trình bày.",
+            "",
+            "Important formula notes from the financial analysis template:",
+        ]
+        lines.extend(f"- {ratio.label}: {ratio.formula}" for ratio in self.RATIO_DEFINITIONS)
+        lines.extend(
+            [
+                "",
+                "Extracted financial statement line items:",
+                self._format_table(years, yearly_metrics, self.METRICS),
+            ]
+        )
+        lines.extend(
+            [
+                "",
+                "Computed financial ratios:",
+                self._format_ratio_table(years, yearly_ratios),
+            ]
+        )
+
+        warnings = self._validation_warnings(years, yearly_metrics)
+        if warnings:
+            lines.extend(
+                [
+                    "",
+                    "Data quality warnings (possible OCR/extraction errors — verify "
+                    "against source before relying on these figures):",
+                ]
+            )
+            lines.extend(f"- {warning}" for warning in warnings)
+
+        lines.append("[/PRE-COMPUTED FINANCIAL METRICS]")
+        return "\n".join(lines)
+
+    def _validation_warnings(
+        self,
+        years: list[str],
+        yearly_metrics: dict[str, dict[str, float]],
+        tolerance: float = 0.02,
+    ) -> list[str]:
+        """Flag figures that fail basic accounting sanity checks."""
+        warnings: list[str] = []
+        for year in years:
+            metrics = yearly_metrics.get(year, {})
+            assets = metrics.get("total_assets")
+            liabilities = metrics.get("total_liabilities")
+            equity = metrics.get("equity")
+
+            # Accounting identity: Tổng tài sản = Nợ phải trả + Vốn chủ sở hữu.
+            if None not in (assets, liabilities, equity) and assets:
+                expected = liabilities + equity
+                if abs(assets - expected) / abs(assets) > tolerance:
+                    warnings.append(
+                        f"{year}: Tổng tài sản ({_format_number(assets, 'value')}) "
+                        f"≠ Nợ phải trả + VCSH "
+                        f"({_format_number(expected, 'value')}); "
+                        "chênh lệch vượt ngưỡng cho phép."
+                    )
+
+            # Gross profit should not exceed net revenue.
+            revenue = metrics.get("net_revenue")
+            gross_profit = metrics.get("gross_profit")
+            if None not in (revenue, gross_profit) and revenue and gross_profit > revenue:
+                warnings.append(
+                    f"{year}: Lợi nhuận gộp "
+                    f"({_format_number(gross_profit, 'value')}) lớn hơn "
+                    f"Doanh thu thuần ({_format_number(revenue, 'value')})."
+                )
+
+            # Any negative that should structurally be non-negative.
+            for key, label in (
+                ("total_assets", "Tổng tài sản"),
+                ("net_revenue", "Doanh thu thuần"),
+                ("equity", "Vốn chủ sở hữu"),
+            ):
+                value = metrics.get(key)
+                if value is not None and value < 0:
+                    warnings.append(
+                        f"{year}: {label} âm ({_format_number(value, 'value')}) "
+                        "— bất thường, nghi ngờ lỗi trích xuất."
+                    )
+        return warnings
+
+    def _format_table(
+        self,
+        years: list[str],
+        values_by_year: dict[str, dict[str, float]],
+        definitions: tuple[MetricDefinition, ...],
+    ) -> str:
+        header = "| Chỉ tiêu | " + " | ".join(years) + " |"
+        separator = "|---|" + "|".join("---:" for _ in years) + "|"
+        rows = [header, separator]
+        for definition in definitions:
+            cells = [
+                _format_number(values_by_year.get(year, {}).get(definition.key), "value")
+                for year in years
+            ]
+            if any(cell != "N/A" for cell in cells):
+                rows.append(f"| {definition.label} | " + " | ".join(cells) + " |")
+        return "\n".join(rows)
+
+    def _format_ratio_table(
+        self,
+        years: list[str],
+        yearly_ratios: dict[str, dict[str, float]],
+    ) -> str:
+        header = "| Chỉ số | Công thức | " + " | ".join(years) + " |"
+        separator = "|---|---|" + "|".join("---:" for _ in years) + "|"
+        rows = [header, separator]
+        for definition in self.RATIO_DEFINITIONS:
+            cells = [
+                _format_number(yearly_ratios.get(year, {}).get(definition.key), definition.unit)
+                for year in years
+            ]
+            if any(cell != "N/A" for cell in cells):
+                rows.append(
+                    f"| {definition.label} | {definition.formula} | "
+                    + " | ".join(cells)
+                    + " |"
+                )
+        return "\n".join(rows)
+
+    @staticmethod
+    def _extract_year_values(line: str) -> dict[str, float]:
+        """Extract year/value pairs from one line using nearby numeric tokens."""
+        years = re.findall(r"\b(20\d{2})\b", line)
+        if not years:
+            return {}
+
+        tokens = _extract_numbers(line)
+        values = [value for value in tokens if str(int(abs(value))) not in set(years)]
+        if len(values) < len(years):
+            return {}
+
+        return {
+            year: values[-len(years) + index]
+            for index, year in enumerate(years)
+        }
+
+
+def _normalize_text(text: str) -> str:
+    """Lowercase and remove Vietnamese accents for robust matching."""
+    decomposed = unicodedata.normalize("NFD", text.lower())
+    return "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+
+
+# Match numeric tokens, including parenthesized accounting negatives "(1.234)".
+# Spaces are NOT allowed inside a token so that space-separated distinct numbers
+# stay separate; space-thousands are collapsed by _SPACE_THOUSANDS beforehand.
+_NUMBER_TOKEN = re.compile(r"\(\s*[-+]?\d[\d.,]*\s*\)|[-+]?\d[\d.,]*")
+# A single space/nbsp that separates a thousands group (followed by exactly 3 digits).
+_SPACE_THOUSANDS = re.compile("(?<=\\d)[ \u00a0](?=\\d{3}\\b)")
+
+
+def _extract_numbers(text: str) -> list[float]:
+    """Extract localized numeric values from text."""
+    # Merge space-separated thousands ("987 654" -> "987654") before tokenizing,
+    # so genuine values survive while distinct numbers stay separate.
+    text = _SPACE_THOUSANDS.sub("", text)
+    values = []
+    for match in _NUMBER_TOKEN.finditer(text):
+        value = _parse_number(match.group())
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _parse_number(raw_number: str) -> float | None:
+    """Parse Vietnamese/English formatted numbers."""
+    text = raw_number.strip()
+    if not text:
+        return None
+
+    # Accounting negatives are wrapped in parentheses: "(1.234)" -> -1234.
+    negative_paren = text.startswith("(") and text.endswith(")")
+    text = text.strip("()").strip()
+    if not text:
+        return None
+
+    sign = -1 if (text.startswith("-") or negative_paren) else 1
+    text = text.lstrip("+-")
+
+    # Collapse space-separated thousands groups; any other embedded space is
+    # ambiguous, so leave it and let the final float() reject the token.
+    text = _SPACE_THOUSANDS.sub("", text)
+
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        parts = text.split(",")
+        if len(parts[-1]) in {1, 2}:
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "." in text:
+        parts = text.split(".")
+        if len(parts) > 2 or len(parts[-1]) == 3:
+            text = text.replace(".", "")
+
+    try:
+        return sign * float(text)
+    except ValueError:
+        return None
+
+
+def _safe_div(
+    numerator: float | None,
+    denominator: float | None,
+    multiplier: float = 1.0,
+) -> float | None:
+    """Safely divide two values."""
+    if numerator is None or denominator in {None, 0}:
+        return None
+    return numerator / denominator * multiplier
+
+
+def _safe_sum(*values: float | None) -> float | None:
+    """Return sum only when at least one input value exists."""
+    available = [value for value in values if value is not None]
+    if not available:
+        return None
+    return sum(available)
+
+
+def _safe_sub(*values: float | None) -> float | None:
+    """Subtract all following values from the first value."""
+    if not values or values[0] is None:
+        return None
+    result = values[0]
+    for value in values[1:]:
+        if value is not None:
+            result -= value
+    return result
+
+
+def _safe_growth(
+    current: float | None,
+    previous: float | None,
+) -> float | None:
+    """Compute growth rate against previous period."""
+    if current is None or previous in {None, 0}:
+        return None
+    return (current - previous) / previous
+
+
+def _safe_cash_conversion_cycle(metrics: dict[str, float]) -> float | None:
+    """Compute CCC using the custom template formula."""
+    dso = _safe_div(metrics.get("accounts_receivable"), metrics.get("net_revenue"), 365)
+    dio = _safe_div(metrics.get("inventory"), metrics.get("cogs"), 365)
+    prepaid_days = _safe_div(metrics.get("prepaid_suppliers"), metrics.get("net_revenue"), 365)
+    dpo = _safe_div(metrics.get("accounts_payable"), metrics.get("cogs"), 365)
+    advance_days = _safe_div(metrics.get("customer_advances"), metrics.get("cogs"), 365)
+
+    if all(value is None for value in [dso, dio, prepaid_days, dpo, advance_days]):
+        return None
+    return (
+        (dso or 0)
+        + (dio or 0)
+        + (prepaid_days or 0)
+        - (dpo or 0)
+        - (advance_days or 0)
+    )
+
+
+def _format_number(value: float | None, unit: str) -> str:
+    """Format ratio values for prompt injection into the analysis agent."""
+    if value is None:
+        return "N/A"
+    if unit == "%":
+        return f"{value * 100:.1f}%"
+    if unit == "days":
+        return f"{value:.1f} ngày"
+    if unit == "x":
+        return f"{value:.2f}x"
+    # Monetary values ("value" unit): show in tỷ VNĐ, Vietnamese formatting
+    # ('.' thousands, ',' decimal). The unit is stated once in the block header.
+    scaled = value / 1_000_000_000
+    formatted = f"{scaled:,.2f}"
+    return formatted.replace(",", "\x00").replace(".", ",").replace("\x00", ".")

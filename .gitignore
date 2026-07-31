@@ -1,0 +1,27 @@
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Logs / run outputs
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OCR / caches
+.cache/
+*.tmp
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
