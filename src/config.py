@@ -13,6 +13,16 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 
 
+def env_flag(name: str, default: str = "false") -> bool:
+    """Read a boolean env var.
+
+    ``os.getenv(name, False)`` returns the raw *string*, so "false" is truthy —
+    read every boolean flag through here instead.
+    """
+
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def build_llm(model_env: str,
               temperature: float = 0.1,
               timeout_env: str = "LLM_TIMEOUT_SECONDS"):
@@ -48,9 +58,15 @@ class Config:
     document_classifier_rule_confidence_threshold: float = 0.65
     enable_plan_and_execute: bool = True
     enable_self_ask_gap_analysis: bool = True
-    enable_hallucination_guardrail: bool = os.getenv("RUN_HALLUCINATION_CHECK", False)
-    enable_safety_guardrails: bool = os.getenv("RUN_SAFETY_GUARDRAILS", False)
-    enable_web_search: bool = os.getenv("RUN_WEB_SEARCH", False)
+    enable_hallucination_guardrail: bool = field(
+        default_factory=lambda: env_flag("RUN_HALLUCINATION_CHECK", "true")
+    )
+    enable_safety_guardrails: bool = field(
+        default_factory=lambda: env_flag("RUN_SAFETY_GUARDRAILS")
+    )
+    enable_web_search: bool = field(
+        default_factory=lambda: env_flag("RUN_WEB_SEARCH")
+    )
     agent_input_char_budgets: dict[str, int] | None = None
 
     def __post_init__(self) -> None:

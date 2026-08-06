@@ -256,14 +256,16 @@ class HallucinationGuardrail:
     def __init__(
         self,
         llm: Any,
-        max_total_evidence_chars: int = 12_000,
+        max_total_evidence_chars: int = 16_000,
         max_document_chars: int = 3_000,
+        max_structured_chars: int = 8_000,
         max_response_chars: int = 12_000,
         max_claims: int = 12,
     ):
         self.llm = llm
         self.max_total_evidence_chars = max_total_evidence_chars
         self.max_document_chars = max_document_chars
+        self.max_structured_chars = max_structured_chars
         self.max_response_chars = max_response_chars
         self.max_claims = max_claims
         self.chain = self._build_chain() if llm else None
@@ -277,6 +279,7 @@ class HallucinationGuardrail:
         web_context: str = "",
         history_context: str = "",
         sub_agent_outputs: dict[str, str] | None = None,
+        metrics_block: str = "",
     ) -> dict[str, Any]:
         if not self.chain:
             return self._skipped("Hallucination judge LLM is not configured.")
@@ -286,6 +289,7 @@ class HallucinationGuardrail:
             web_context,
             history_context,
             sub_agent_outputs or {},
+            metrics_block,
         )
         if not evidence_context.strip():
             return self._skipped("No evidence context was supplied.")
@@ -333,9 +337,31 @@ class HallucinationGuardrail:
                     units, ratios, formulas, company registration, tax code,
                     industry, legal status, and operating status.
 
-                    Return only valid JSON with: hallucination_risk,
-                    final_action, summary, claims, unsupported_claims,
-                    numeric_errors.
+                    Return ONLY valid JSON matching exactly this shape — every
+                    entry of "claims" MUST be an object (never a bare string):
+                    {{
+                      "hallucination_risk": "LOW | MEDIUM | HIGH",
+                      "final_action": "PASS | REVIEW | BLOCK",
+                      "summary": "one or two sentences",
+                      "claims": [
+                        {{"claim": "the exact statement from the response",
+                          "support_status": "SUPPORTED | PARTIALLY_SUPPORTED | UNSUPPORTED | NOT_VERIFIABLE",
+                          "reason": "why, citing the evidence"}}
+                      ],
+                      "unsupported_claims": [
+                        {{"claim": "...", "support_status": "UNSUPPORTED", "reason": "..."}}
+                      ],
+                      "numeric_errors": [
+                        {{"claim": "the figure as written in the response",
+                          "expected": "the value supported by evidence, or null",
+                          "reason": "..."}}
+                      ]
+                    }}
+                    Use empty arrays when there is nothing to report.
+
+                    Write "summary" and every "reason" in Vietnamese — this
+                    output is appended to a Vietnamese credit report. Keep each
+                    "claim" verbatim as it appears in the agent response.
                     """,
                 ),
                 (
@@ -364,15 +390,29 @@ class HallucinationGuardrail:
         web_context: str,
         history_context: str,
         sub_agent_outputs: dict[str, str],
+        metrics_block: str = "",
     ) -> str:
         sections = []
         if evidence_documents:
             docs = []
             for index, doc in enumerate(evidence_documents, start=1):
-                content = truncate_text(
-                    str(doc.get("content", "")),
-                    self.max_document_chars,
-                )
+                # Mirror what _build_user_input gave the agent: a BCTC with a
+                # successful extraction was shown its structured JSON, not the
+                # raw OCR, so judging it against raw OCR would compare against
+                # evidence the agent never saw.
+                extraction = doc.get("bctc_extraction")
+                if doc.get("is_bctc") and isinstance(extraction, dict):
+                    content = truncate_text(
+                        json.dumps(extraction, ensure_ascii=False, indent=2),
+                        self.max_structured_chars,
+                    )
+                    content_label = "Structured extraction (JSON)"
+                else:
+                    content = truncate_text(
+                        str(doc.get("content", "")),
+                        self.max_document_chars,
+                    )
+                    content_label = "Content"
                 docs.append(
                     "\n".join(
                         [
@@ -380,12 +420,18 @@ class HallucinationGuardrail:
                             f"Filename: {doc.get('filename', '')}",
                             f"Assigned agent: {doc.get('agent', '')}",
                             f"Reasoning: {doc.get('reasoning', '')}",
-                            f"Content:\n{content}",
+                            f"{content_label}:\n{content}",
                         ]
                     )
                 )
             sections.append(
                 "[UPLOADED DOCUMENT EVIDENCE]\n" + "\n\n".join(docs)
+            )
+
+        if metrics_block:
+            sections.append(
+                "[DETERMINISTIC PRE-COMPUTED METRICS]\n"
+                + truncate_text(metrics_block, self.max_structured_chars)
             )
 
         if web_context:
@@ -410,28 +456,83 @@ class HallucinationGuardrail:
             self.max_total_evidence_chars,
         )
 
-    @staticmethod
-    def _normalize_result(result: Any) -> dict[str, Any]:
-        if isinstance(result, str):
-            result = json.loads(result)
+    UNSUPPORTED_STATUSES = {
+        "PARTIALLY_SUPPORTED",
+        "UNSUPPORTED",
+        "NOT_VERIFIABLE",
+    }
 
-        risk = str(result.get("hallucination_risk", "UNKNOWN")).upper()
-        action = str(result.get("final_action", "PASS")).upper()
-        claims = result.get("claims", []) or []
-        unsupported = result.get("unsupported_claims", []) or [
+    @staticmethod
+    def _coerce_payload(result: Any) -> dict[str, Any] | None:
+        """Best-effort convert the judge's raw output into a dict."""
+
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except (ValueError, TypeError):
+                return None
+        if isinstance(result, list):
+            # Some models wrap the object in a single-element list.
+            result = next(
+                (item for item in result if isinstance(item, dict)),
+                None,
+            )
+        return result if isinstance(result, dict) else None
+
+    @staticmethod
+    def _as_list(value: Any) -> list[Any]:
+        """Accept a list, a single item, or nothing without raising."""
+
+        if value is None or value == "":
+            return []
+        return value if isinstance(value, list) else [value]
+
+    @classmethod
+    def _claim_status(cls, claim: Any) -> str:
+        """Read a claim's support status; claims may be dicts or plain strings."""
+
+        if not isinstance(claim, dict):
+            return ""
+        return str(
+            claim.get("support_status") or claim.get("status") or ""
+        ).strip().upper()
+
+    @classmethod
+    def _normalize_result(cls, result: Any) -> dict[str, Any]:
+        # The judge is an LLM: its JSON shape is not guaranteed. Never raise
+        # here, or a malformed reply turns into a lost verdict (status=ERROR)
+        # and the report silently loses its confidence warnings.
+        payload = cls._coerce_payload(result)
+        if payload is None:
+            return {
+                "status": "ERROR",
+                "hallucination_risk": "UNKNOWN",
+                "final_action": "PASS",
+                "summary": (
+                    "Hallucination judge returned unparseable output "
+                    f"({type(result).__name__})."
+                ),
+                "claims": [],
+                "unsupported_claims": [],
+                "numeric_errors": [],
+            }
+
+        risk = str(payload.get("hallucination_risk", "UNKNOWN")).upper()
+        action = str(payload.get("final_action", "PASS")).upper()
+        claims = cls._as_list(payload.get("claims"))
+        unsupported = cls._as_list(payload.get("unsupported_claims")) or [
             claim
             for claim in claims
-            if claim.get("support_status")
-            in {"PARTIALLY_SUPPORTED", "UNSUPPORTED", "NOT_VERIFIABLE"}
+            if cls._claim_status(claim) in cls.UNSUPPORTED_STATUSES
         ]
         return {
             "status": "SUCCESS",
             "hallucination_risk": risk,
             "final_action": action,
-            "summary": str(result.get("summary", "")),
+            "summary": str(payload.get("summary", "")),
             "claims": claims,
             "unsupported_claims": unsupported,
-            "numeric_errors": result.get("numeric_errors", []) or [],
+            "numeric_errors": cls._as_list(payload.get("numeric_errors")),
         }
 
     @staticmethod

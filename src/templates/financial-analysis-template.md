@@ -1,5 +1,15 @@
 ## Báo cáo phân tích tài chính
 
+> **CÁCH DÙNG MẪU NÀY**: Đây là **mẫu bố cục tham khảo**, KHÔNG phải biểu mẫu bắt
+> buộc điền kín. Các dấu `-` và `-%` trong bảng chỉ là chỗ minh hoạ định dạng, không
+> phải ô cần điền cho đủ.
+> - Chỉ trình bày dòng/cột/kỳ thực sự có số liệu trong hồ sơ. **Xoá hẳn** dòng không
+>   có dữ liệu thay vì điền `-`, `0` hay số ước lượng.
+> - Nếu cả một bảng không có dữ liệu, bỏ bảng đó và ghi "Không có dữ liệu trong hồ sơ".
+> - Không tự dựng danh sách "Top 5" nếu hồ sơ không đủ dữ liệu để xếp hạng; liệt kê
+>   đúng số lượng có thật.
+> - Không lặp giá trị của kỳ này sang kỳ khác để lấp ô trống.
+
 > **Đơn vị tiền tệ**: Trình bày mọi giá trị tiền tệ bằng **tỷ VNĐ**, làm tròn 2 chữ số
 > thập phân (dấu phẩy là dấu thập phân), ví dụ 3.991.124.661.120 VNĐ → 3.991,12 tỷ VNĐ.
 > Không ghi số đồng thô.

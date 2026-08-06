@@ -44,6 +44,23 @@ class SpecialistAgent:
         thập phân, dùng dấu phẩy làm dấu thập phân và dấu chấm cho hàng nghìn
         (ví dụ: 3.991.124.661.120 VNĐ → 3.991,12 tỷ VNĐ). Không ghi số đồng thô.
 
+        EVIDENCE RULE (quan trọng nhất — ưu tiên cao hơn việc điền đủ mẫu báo cáo):
+        - Mọi con số và mọi nhận định phải truy được về bằng chứng đã cung cấp
+        (nội dung tài liệu, khối [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT], khối
+        [PRE-COMPUTED FINANCIAL METRICS], hoặc kết quả từ tool). Tuyệt đối không
+        dùng kiến thức bên ngoài hồ sơ.
+        - Khi một số liệu hoặc thông tin KHÔNG có trong hồ sơ, ghi đúng chuỗi
+        "Không có dữ liệu trong hồ sơ". Không ước lượng, không suy đoán, không
+        điền 0 hay "-" để lấp chỗ trống.
+        - Không lặp lại giá trị của kỳ này sang kỳ khác để điền cho đủ ô. Nếu chỉ
+        có số liệu của một kỳ, chỉ trình bày kỳ đó.
+        - Với số liệu tự tính (tỷ trọng, tăng trưởng, chỉ số), nêu rõ các số đầu
+        vào đã dùng để tính. Nếu thiếu đầu vào thì không được tự tính.
+        - Không khẳng định thông tin về pháp lý, ngành nghề, thị phần, vị thế
+        cạnh tranh, đăng ký kinh doanh hay quan hệ đối tác nếu không có trong
+        tài liệu được cung cấp.
+        - Thà báo thiếu dữ liệu còn hơn đưa ra một nhận định không có căn cứ.
+
         HIGHLIGHT RULE:
         - Trong mỗi mục "Nhận xét"/"Kết luận" và bất kỳ đoạn phân tích nào, in đậm
         (markdown **bold**) các điểm mấu chốt giúp người đọc nắm nhanh: số liệu/chỉ
@@ -62,8 +79,11 @@ class SpecialistAgent:
         - Lấy "tên file" từ dòng "Document filename:" của tài liệu tương ứng trong
         evidence. Lấy số trang/tên sheet từ các mốc "--- Page N ---" hoặc
         "--- Sheet: ... ---" gần nhất với dữ liệu đó trong nội dung tài liệu; nếu
-        dữ liệu lấy từ khối [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT], dùng trường "page" đi kèm
-        chỉ tiêu đó trong JSON.
+        dữ liệu lấy từ khối [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT], dùng trường "page" của
+        chỉ tiêu đó trong JSON, và nếu chỉ tiêu không có "page" thì dùng "page"
+        của bảng chứa nó (balance_sheet/income_statement/cash_flow_statement).
+        - Citation là BẮT BUỘC cho mọi số liệu và mọi nhận định đã in đậm. Nếu
+        thực sự không xác định được trang/sheet, vẫn phải ghi [tên file].
         - Không bịa số trang hoặc tên file — chỉ trích dẫn khi thực sự xác định
         được từ nguồn được cung cấp.
 
@@ -392,6 +412,11 @@ class CreditMemoComposerAgent:
                     - Giữ nguyên các citation nguồn dạng [tên file, trang X] hoặc
                       [tên file, Sheet Y] đi kèm các điểm in đậm — không xóa bỏ
                       hoặc chỉnh sửa citation khi biên tập lại nội dung.
+                    - Giữ nguyên mọi ghi chú thiếu dữ liệu từ sub-agent, đúng
+                      nguyên văn "Không có dữ liệu trong hồ sơ".
+                      Không được thay bằng số ước lượng, số 0, dấu "-", hay câu
+                      văn làm mờ việc thiếu dữ liệu. Không tự thêm bất kỳ số
+                      liệu hay nhận định nào không có trong output sub-agent.
                     """,
                 ),
                 (

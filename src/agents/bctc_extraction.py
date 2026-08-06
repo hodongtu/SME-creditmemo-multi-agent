@@ -27,6 +27,13 @@ BCTC_EXTRACTION_SYSTEM_PROMPT = """
 Bạn trích xuất dữ liệu có cấu trúc từ văn bản OCR thô của một bộ Báo cáo tài
 chính (BCTC) doanh nghiệp Việt Nam, phục vụ thẩm định tín dụng SME.
 
+YÊU CẦU QUAN TRỌNG NHẤT — TRÍCH XUẤT ĐẦY ĐỦ:
+Với mỗi bảng (cân đối kế toán, kết quả kinh doanh, lưu chuyển tiền tệ), liệt kê
+ĐẦY ĐỦ TỪNG DÒNG chỉ tiêu xuất hiện trong bảng, theo đúng thứ tự trong tài liệu
+— cả dòng tổng hợp lẫn dòng chi tiết. Một bảng cân đối kế toán đầy đủ thường có
+40-60 dòng; nếu bạn chỉ trả về vài dòng tổng hợp là SAI. Tuyệt đối KHÔNG tóm
+lược, KHÔNG chọn lọc "các chỉ tiêu quan trọng", KHÔNG bỏ dòng nào có số liệu.
+
 Chỉ dùng dữ kiện có trong văn bản nguồn. Không tự suy diễn hay bịa số liệu.
 Nếu một trường không xác định được, để giá trị null (hoặc mảng/chuỗi rỗng),
 KHÔNG bỏ qua trường đó.
@@ -34,11 +41,12 @@ KHÔNG bỏ qua trường đó.
 Toàn bộ giá trị tiền tệ ghi bằng SỐ NGUYÊN đơn vị VNĐ (không chia tỷ, không
 định dạng dấu phẩy/chấm), giữ đúng dấu (âm cho khoản mục ghi âm/trong ngoặc).
 
-Văn bản OCR có các mốc "--- Page N ---" đánh dấu ranh giới trang. Với mỗi chỉ
-tiêu trong 3 bảng báo cáo và mỗi mục trong "notes_summary", xác định số trang
-(N, số nguyên) nơi dữ liệu đó xuất hiện dựa vào mốc gần nhất phía trước, và
-điền vào trường "page" tương ứng — phục vụ trích dẫn nguồn cho người đọc. Nếu
-không xác định được, để "page" là null. Không bịa số trang.
+Văn bản OCR có các mốc "--- Page N ---" đánh dấu ranh giới trang, dùng để trích
+dẫn nguồn cho người đọc. Với MỖI BẢNG, bắt buộc điền "page" của bảng đó (số
+trang nơi bảng bắt đầu). Với từng dòng chỉ tiêu, điền "page" nếu xác định được,
+không xác định được thì để null — nhưng việc này TUYỆT ĐỐI KHÔNG được làm giảm
+số dòng bạn trích xuất; đầy đủ dòng quan trọng hơn đầy đủ số trang. Không bịa
+số trang.
 
 Cấu trúc "notes_summary" tóm tắt phần Thuyết minh báo cáo tài chính — đây
 thường là phần dài nhất, chỉ giữ lại nội dung có ý nghĩa cho thẩm định tín
@@ -67,14 +75,16 @@ Trả về CHÍNH XÁC JSON theo schema sau, không thêm text nào khác:
   }},
   "balance_sheet": {{
     "unit": "VNĐ",
+    "page": <số trang nơi bảng bắt đầu, bắt buộc nếu xác định được>,
     "years": ["danh sách các năm/kỳ xuất hiện trong bảng"],
     "line_items": [
       {{"label": "tên chỉ tiêu", "code": "mã số nếu có hoặc null",
         "values": {{"<năm>": <số VNĐ>}}, "page": <số trang nguyên hoặc null>}}
+      // LIỆT KÊ HẾT MỌI DÒNG CỦA BẢNG, không rút gọn
     ]
   }},
-  "income_statement": {{"unit": "VNĐ", "years": [], "line_items": []}},
-  "cash_flow_statement": {{"unit": "VNĐ", "years": [], "line_items": []}},
+  "income_statement": {{"unit": "VNĐ", "page": <số trang>, "years": [], "line_items": []}},
+  "cash_flow_statement": {{"unit": "VNĐ", "page": <số trang>, "years": [], "line_items": []}},
   "notes_summary": {{
     "accounting_policies": "tóm tắt ngắn gọn hoặc chuỗi rỗng (kèm '(trang N)' ở cuối nếu xác định được)",
     "related_party_transactions": [

@@ -1,5 +1,14 @@
 ## Báo cáo phân tích hoạt động kinh doanh
 
+> **CÁCH DÙNG MẪU NÀY**: Đây là **mẫu bố cục tham khảo**, KHÔNG phải biểu mẫu bắt
+> buộc điền kín. Các dấu `-` và `-%` chỉ minh hoạ định dạng.
+> - Chỉ trình bày dòng/mục thực sự có căn cứ trong hồ sơ. **Xoá hẳn** dòng không có
+>   dữ liệu thay vì điền `-` hay suy đoán.
+> - Không tự dựng danh sách "Top 3" khách hàng/đối tác nếu hồ sơ không nêu; liệt kê
+>   đúng những gì có thật.
+> - Các mục yêu cầu vẽ sơ đồ hoặc đánh giá thị trường/đối thủ: chỉ viết khi hồ sơ có
+>   thông tin, ngược lại ghi "Không có dữ liệu trong hồ sơ".
+
 ### [CompanyName]
 
 - **Mã số thuế**: [TaxCode]
