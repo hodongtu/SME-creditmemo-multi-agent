@@ -1,11 +1,15 @@
-"""Pre-compute financial ratios from extracted financial document text."""
+"""Pre-compute financial ratios from BCTC structured-extraction JSON.
+
+Line items and their per-year values come from bctc_extraction (see
+bctc_extraction.py) — an LLM extraction pass over BCTC raw OCR text — not from
+parsing raw OCR text directly here.
+"""
 
 from __future__ import annotations
 
-import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 
 @dataclass
@@ -304,7 +308,7 @@ class FinancialRatioCalculator:
         ),
     )
 
-    def build_analysis_block(self, documents: list[dict[str, str]]) -> str:
+    def build_analysis_block(self, documents: list[dict[str, Any]]) -> str:
         """Return a markdown block with extracted line items and computed ratios."""
         yearly_metrics = self.extract_yearly_metrics(documents)
         if not yearly_metrics:
@@ -316,82 +320,67 @@ class FinancialRatioCalculator:
 
         return self.format_markdown(yearly_metrics, ratios)
 
+    STATEMENT_KEYS = (
+        "balance_sheet",
+        "income_statement",
+        "cash_flow_statement",
+    )
+
     def extract_yearly_metrics(
         self,
-        documents: list[dict[str, str]],
+        documents: list[dict[str, Any]],
     ) -> dict[str, dict[str, float]]:
-        """Extract financial statement line items by year from document text.
+        """Extract financial statement line items by year from bctc_extraction JSON.
 
-        Handles two common layouts:
-        1. Inline rows where the year and its value share one line.
-        2. Column tables where a header row lists the years and each following
-           metric row carries only its values (associated positionally). This
-           relies on OCR that preserves columns (see ``ocr.image_to_layout_text``).
+        Reads each document's ``bctc_extraction`` (the structured JSON produced
+        by the BCTC extraction pass — see bctc_extraction.py), not raw OCR
+        text. A document without a successful extraction (not a BCTC, LLM
+        failed, or no extraction LLM configured) contributes nothing.
         """
         yearly_metrics: dict[str, dict[str, float]] = {}
 
         for document in documents:
-            content = document.get("content", "")
-            current_years: list[str] = []
-            for line in content.splitlines():
-                header_years = self._detect_header_years(line)
-                if header_years:
-                    current_years = header_years
+            extraction = document.get("bctc_extraction")
+            if not isinstance(extraction, dict):
+                continue
 
-                years = self._extract_year_values(line)
-                if not years and current_years:
-                    years = self._map_values_to_years(line, current_years)
-                if not years:
+            for statement_key in self.STATEMENT_KEYS:
+                statement = extraction.get(statement_key)
+                if not isinstance(statement, dict):
                     continue
+                for line_item in statement.get("line_items") or []:
+                    if not isinstance(line_item, dict):
+                        continue
+                    label = line_item.get("label") or ""
+                    values = line_item.get("values")
+                    if not label or not isinstance(values, dict):
+                        continue
 
-                normalized_line = _normalize_text(line)
-                for metric in self.METRICS:
-                    if any(
-                        _normalize_text(alias) in normalized_line
-                        for alias in metric.aliases
-                    ):
-                        for year, value in years.items():
-                            yearly_metrics.setdefault(year, {})
-                            yearly_metrics[year].setdefault(metric.key, value)
-                        break
+                    normalized_label = _normalize_text(label)
+                    metric = next(
+                        (
+                            metric
+                            for metric in self.METRICS
+                            if any(
+                                _normalize_text(alias) in normalized_label
+                                for alias in metric.aliases
+                            )
+                        ),
+                        None,
+                    )
+                    if metric is None:
+                        continue
+
+                    for year, raw_value in values.items():
+                        try:
+                            value = float(raw_value)
+                        except (TypeError, ValueError):
+                            continue
+                        year_key = str(year)
+                        yearly_metrics.setdefault(year_key, {})
+                        yearly_metrics[year_key].setdefault(metric.key, value)
 
         return dict(sorted(yearly_metrics.items()))
-
-    @staticmethod
-    def _detect_header_years(line: str) -> list[str]:
-        """Return year columns if the line is a header row (years, few values)."""
-        years = re.findall(r"\b(20\d{2})\b", line)
-        if not years:
-            return []
-        year_set = set(years)
-        other_values = [
-            value
-            for value in _extract_numbers(line)
-            if str(int(abs(value))) not in year_set
-        ]
-        # A header row lists years but not (all of) their values on the same line.
-        if len(other_values) < len(years):
-            return years
-        return []
-
-    @staticmethod
-    def _map_values_to_years(
-        line: str,
-        current_years: list[str],
-    ) -> dict[str, float]:
-        """Associate the trailing numeric values of a metric row with header years."""
-        year_set = set(current_years)
-        values = [
-            value
-            for value in _extract_numbers(line)
-            if str(int(abs(value))) not in year_set
-        ]
-        if len(values) < len(current_years):
-            return {}
-        return {
-            year: values[-len(current_years) + index]
-            for index, year in enumerate(current_years)
-        }
 
     def compute_ratios(
         self,
@@ -552,90 +541,10 @@ class FinancialRatioCalculator:
                 )
         return "\n".join(rows)
 
-    @staticmethod
-    def _extract_year_values(line: str) -> dict[str, float]:
-        """Extract year/value pairs from one line using nearby numeric tokens."""
-        years = re.findall(r"\b(20\d{2})\b", line)
-        if not years:
-            return {}
-
-        tokens = _extract_numbers(line)
-        values = [value for value in tokens if str(int(abs(value))) not in set(years)]
-        if len(values) < len(years):
-            return {}
-
-        return {
-            year: values[-len(years) + index]
-            for index, year in enumerate(years)
-        }
-
-
 def _normalize_text(text: str) -> str:
     """Lowercase and remove Vietnamese accents for robust matching."""
     decomposed = unicodedata.normalize("NFD", text.lower())
     return "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
-
-
-# Match numeric tokens, including parenthesized accounting negatives "(1.234)".
-# Spaces are NOT allowed inside a token so that space-separated distinct numbers
-# stay separate; space-thousands are collapsed by _SPACE_THOUSANDS beforehand.
-_NUMBER_TOKEN = re.compile(r"\(\s*[-+]?\d[\d.,]*\s*\)|[-+]?\d[\d.,]*")
-# A single space/nbsp that separates a thousands group (followed by exactly 3 digits).
-_SPACE_THOUSANDS = re.compile("(?<=\\d)[ \u00a0](?=\\d{3}\\b)")
-
-
-def _extract_numbers(text: str) -> list[float]:
-    """Extract localized numeric values from text."""
-    # Merge space-separated thousands ("987 654" -> "987654") before tokenizing,
-    # so genuine values survive while distinct numbers stay separate.
-    text = _SPACE_THOUSANDS.sub("", text)
-    values = []
-    for match in _NUMBER_TOKEN.finditer(text):
-        value = _parse_number(match.group())
-        if value is not None:
-            values.append(value)
-    return values
-
-
-def _parse_number(raw_number: str) -> float | None:
-    """Parse Vietnamese/English formatted numbers."""
-    text = raw_number.strip()
-    if not text:
-        return None
-
-    # Accounting negatives are wrapped in parentheses: "(1.234)" -> -1234.
-    negative_paren = text.startswith("(") and text.endswith(")")
-    text = text.strip("()").strip()
-    if not text:
-        return None
-
-    sign = -1 if (text.startswith("-") or negative_paren) else 1
-    text = text.lstrip("+-")
-
-    # Collapse space-separated thousands groups; any other embedded space is
-    # ambiguous, so leave it and let the final float() reject the token.
-    text = _SPACE_THOUSANDS.sub("", text)
-
-    if "," in text and "." in text:
-        if text.rfind(",") > text.rfind("."):
-            text = text.replace(".", "").replace(",", ".")
-        else:
-            text = text.replace(",", "")
-    elif "," in text:
-        parts = text.split(",")
-        if len(parts[-1]) in {1, 2}:
-            text = text.replace(".", "").replace(",", ".")
-        else:
-            text = text.replace(",", "")
-    elif "." in text:
-        parts = text.split(".")
-        if len(parts) > 2 or len(parts[-1]) == 3:
-            text = text.replace(".", "")
-
-    try:
-        return sign * float(text)
-    except ValueError:
-        return None
 
 
 def _safe_div(

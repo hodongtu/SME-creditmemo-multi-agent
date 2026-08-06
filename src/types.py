@@ -50,6 +50,19 @@ class ClassifiedDocument:
     classifier_error_type: str = ""
     classifier_error: str = ""
     agent_scores: dict[str, float] = field(default_factory=dict)
+    llm_secondary_agents: list[str] = field(default_factory=list)
+    # Resolved union of `agent` + every secondary agent from agent_scores/
+    # llm_secondary_agents (see relevant_agents_for_document). Cached at
+    # classification time so it's visible in document_classifications output
+    # for monitoring, and so downstream consumers don't recompute it.
+    relevant_agents: list[str] = field(default_factory=list)
+    # Set only for full BCTC bundles (see is_bctc_document), narrower than
+    # agent == FINANCIAL_ANALYSIS_AGENT. bctc_extraction holds the structured
+    # JSON from the extraction pass, or stays None on failure/no LLM
+    # configured — callers must fall back to raw `content` in that case.
+    is_bctc: bool = False
+    bctc_extraction: dict[str, Any] | None = None
+    bctc_extraction_error: str = ""
 
 
 class UnderwritingGraphState(TypedDict, total=False):

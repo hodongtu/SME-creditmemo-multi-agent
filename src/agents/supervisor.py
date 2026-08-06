@@ -6,6 +6,7 @@ memo workflow, finalize + hallucination + tỷ-VNĐ formatting. See docs/ARCHITE
 
 from __future__ import annotations
 
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
@@ -38,7 +39,13 @@ from src.agents.document_classification import (
     VALID_DOCUMENT_AGENTS,
     compute_file_hash,
     discover_documents,
+    is_bctc_document,
+    relevant_agents_for_document,
     rule_classify_document,
+)
+from src.agents.bctc_extraction import (
+    build_bctc_extraction_chain,
+    extract_bctc_structured_data,
 )
 from src.agents.specialist import (
     BusinessActivityAnalysis,
@@ -186,6 +193,12 @@ VIETNAMESE_CHARS = set(
 class Supervisor:
     """Local  supervisor without API, cache, or database dependencies."""
 
+    # Relative per-document budget weights in _build_user_input: a document's own
+    # primary/general evidence should dominate shared/secondary evidence pulled in
+    # from another agent's primary document.
+    PRIMARY_DOC_BUDGET_WEIGHT = 3
+    SECONDARY_DOC_BUDGET_WEIGHT = 1
+
     def __init__(self, config: Config):
         self.config = config
         self.guardrails = (
@@ -211,6 +224,11 @@ class Supervisor:
         self.document_classifier_chain = (
             self._build_document_classifier_chain()
             if config.document_llm
+            else None
+        )
+        self.bctc_extraction_chain = (
+            build_bctc_extraction_chain(config.bctc_extraction_llm)
+            if config.bctc_extraction_llm
             else None
         )
         self.workflow_graph = self._build_workflow_graph()
@@ -361,13 +379,20 @@ class Supervisor:
     ) -> UnderwritingGraphState:
         """Extract and classify uploaded documents."""
 
+        steps = state.get("steps", [])
         documents = self._prepare_documents(
             state.get("files") or [],
             state.get("query", ""),
             state.get("history_context", ""),
-            state.get("steps", []),
+            steps,
         )
-        document_routes = {doc.agent for doc in documents}
+        self._extract_bctc_documents(documents, steps)
+        document_routes: set[str] = set()
+        for doc in documents:
+            if doc.agent == "GENERAL_CONTEXT":
+                document_routes.add("GENERAL_CONTEXT")
+                continue
+            document_routes.update(doc.relevant_agents)
         document_summary = self._format_document_summary(documents)
         return {
             **state,
@@ -710,8 +735,32 @@ class Supervisor:
                 input_text,
                 history_context,
             )
+            agent_scores = classification.get("scores", {})
+            llm_secondary_agents = classification.get("llm_secondary_agents", [])
+            relevant_agents = sorted(
+                relevant_agents_for_document(
+                    classification["agent"],
+                    agent_scores,
+                    llm_secondary_agents,
+                )
+            )
+            secondary_agents = [
+                agent
+                for agent in relevant_agents
+                if agent != classification["agent"]
+            ]
+            is_bctc = (
+                "FINANCIAL_ANALYSIS_AGENT" in relevant_agents
+                and is_bctc_document(filename, content)
+            )
             steps.append(
                 f"Classified document: {filename} -> {classification['agent']}"
+                + (
+                    f" (also relevant: {', '.join(secondary_agents)})"
+                    if secondary_agents
+                    else ""
+                )
+                + (" [BCTC]" if is_bctc else "")
             )
             documents.append(
                 ClassifiedDocument(
@@ -729,10 +778,61 @@ class Supervisor:
                         "",
                     ),
                     classifier_error=classification.get("classifier_error", ""),
-                    agent_scores=classification.get("scores", {}),
+                    agent_scores=agent_scores,
+                    llm_secondary_agents=llm_secondary_agents,
+                    relevant_agents=relevant_agents,
+                    is_bctc=is_bctc,
                 )
             )
         return documents
+
+    def _extract_bctc_documents(
+        self,
+        documents: list[ClassifiedDocument],
+        steps: list[str],
+    ) -> None:
+        """Run structured JSON extraction for every BCTC-tagged document.
+
+        Multiple BCTC files can be uploaded together (e.g. current + prior
+        year), so extraction runs concurrently, bounded by max_concurrency —
+        same pattern as the parallel analysis agents in
+        _run_credit_memo_workflow. Mutates bctc_extraction/
+        bctc_extraction_error on each doc in place; never raises, so a failed
+        or unconfigured extraction always leaves a clean fallback signal for
+        _build_user_input to fall back to raw OCR content.
+        """
+
+        bctc_docs = [doc for doc in documents if doc.is_bctc]
+        if not bctc_docs:
+            return
+        if not self.bctc_extraction_chain:
+            for doc in bctc_docs:
+                doc.bctc_extraction_error = "No bctc_extraction_llm configured."
+            steps.append(
+                f"Skipped BCTC extraction for {len(bctc_docs)} document(s): "
+                "no bctc_extraction_llm configured."
+            )
+            return
+
+        def _run(doc: ClassifiedDocument):
+            result, error = extract_bctc_structured_data(
+                self.bctc_extraction_chain,
+                doc.filename,
+                doc.content,
+            )
+            return doc, result, error
+
+        max_workers = max(1, min(len(bctc_docs), self.config.max_concurrency))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_run, doc) for doc in bctc_docs]
+            for future in futures:
+                doc, result, error = future.result()
+                doc.bctc_extraction = result
+                doc.bctc_extraction_error = error
+                steps.append(
+                    f"BCTC extraction: {doc.filename} -> "
+                    + ("ok" if result is not None else f"failed: {error}")
+                )
 
     @staticmethod
     def _document_sample(content: str, limit: int = 2_400) -> str:
@@ -780,6 +880,17 @@ class Supervisor:
                 )
                 if result.get("agent") not in VALID_DOCUMENT_AGENTS:
                     return rule
+                # Keyword scores are always computed by the rule pass; keep them
+                # even when the LLM's primary label wins, so secondary-relevance
+                # detection (relevant_agents_for_document) works for every
+                # document, not just rule-confident ones.
+                result["scores"] = rule.get("scores", {})
+                result["llm_secondary_agents"] = [
+                    agent
+                    for agent in result.get("secondary_agents", [])
+                    if agent in VALID_DOCUMENT_AGENTS
+                    and agent not in {result.get("agent"), "GENERAL_CONTEXT"}
+                ]
                 return result
             except Exception as exc:
                 rule["classifier_error_type"] = type(exc).__name__
@@ -1044,8 +1155,15 @@ class Supervisor:
             "GENERAL_CONTEXT": "general_context",
         }
         for doc in documents:
-            bucket = agent_to_bucket.get(doc.agent, "general_context")
-            inventory[bucket].append(doc.filename)
+            if doc.agent == "GENERAL_CONTEXT":
+                inventory["general_context"].append(doc.filename)
+                continue
+            # Count the document toward every agent it's real evidence for, not
+            # just its primary label, so "missing evidence" doesn't fire for
+            # coverage that's actually present in a combined document.
+            for agent in doc.relevant_agents:
+                bucket = agent_to_bucket.get(agent, "general_context")
+                inventory[bucket].append(doc.filename)
 
         required = {
             "CONVERSATION_AGENT": [],
@@ -1517,6 +1635,7 @@ class Supervisor:
             gap_analysis,
             web_context,
             steps + ["Built final response"],
+            self._build_document_selections(documents),
         )
 
     def _run_hallucination_check(
@@ -1578,25 +1697,83 @@ class Supervisor:
         # Only successfully-extracted documents become evidence; failed ones are
         # still listed in the document summary but must not pollute agent input.
         usable = [doc for doc in selected if doc.extraction_status == "success"]
+
+        def _is_primary(doc: ClassifiedDocument) -> bool:
+            return doc.agent == target_agent or doc.agent == "GENERAL_CONTEXT"
+
         metrics_block = self._build_financial_metrics_block(
             usable,
             target_agent,
         )
-        remaining = max(1_000, budget - len(base) - len(metrics_block))
-        per_doc_budget = max(1_000, remaining // max(1, len(usable)))
+        bctc_block = (
+            self._build_bctc_structured_block(usable)
+            if target_agent == "FINANCIAL_ANALYSIS_AGENT"
+            else ""
+        )
+        remaining = max(
+            1_000,
+            budget - len(base) - len(metrics_block) - len(bctc_block),
+        )
+        # Primary/general docs get more budget than secondary/shared docs, so a
+        # document pulled in only because it's also relevant to this agent can't
+        # crowd out the agent's own core evidence.
+        weight_sum = sum(
+            self.PRIMARY_DOC_BUDGET_WEIGHT
+            if _is_primary(doc)
+            else self.SECONDARY_DOC_BUDGET_WEIGHT
+            for doc in usable
+        ) or 1
+        unit_budget = remaining / weight_sum
+
+        def _doc_budget(doc: ClassifiedDocument) -> int:
+            weight = (
+                self.PRIMARY_DOC_BUDGET_WEIGHT
+                if _is_primary(doc)
+                else self.SECONDARY_DOC_BUDGET_WEIGHT
+            )
+            return max(1_000, int(unit_budget * weight))
 
         blocks = []
         for doc in usable:
+            relevance = (
+                "Relevance to this agent: primary"
+                if _is_primary(doc)
+                else (
+                    "Relevance to this agent: shared/secondary evidence "
+                    f"(also classified as {doc.agent})"
+                )
+            )
+            # A successfully-extracted BCTC doc is represented by its
+            # structured JSON (see bctc_block below), not its raw OCR dump —
+            # that's the whole point of the extraction pass. Any other doc
+            # (not BCTC, or extraction failed/unavailable) keeps raw content
+            # so no evidence is ever silently dropped.
+            if (
+                target_agent == "FINANCIAL_ANALYSIS_AGENT"
+                and doc.is_bctc
+                and doc.bctc_extraction
+            ):
+                content_section = (
+                    "Extracted document content: đã trích xuất có cấu trúc "
+                    "— xem [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT] bên dưới."
+                )
+            else:
+                content_section = "\n".join(
+                    [
+                        "Extracted document content:",
+                        truncate_text(doc.content, _doc_budget(doc)),
+                    ]
+                )
             blocks.append(
                 "\n".join(
                     [
                         f"Document filename: {doc.filename}",
                         f"Classified target agent: {doc.agent}",
+                        relevance,
                         f"Classification reason: {doc.reasoning}",
                         f"Extraction status: {doc.extraction_status}",
                         f"Extraction error: {doc.extraction_error}",
-                        "Extracted document content:",
-                        truncate_text(doc.content, per_doc_budget),
+                        content_section,
                     ]
                 )
             )
@@ -1605,6 +1782,7 @@ class Supervisor:
             (
                 f"{base}\n\n"
                 f"{metrics_block}\n\n"
+                f"{bctc_block}\n\n"
                 "Uploaded document extracted content:\n\n"
                 f"{docs_text}"
             ),
@@ -1625,33 +1803,74 @@ class Supervisor:
         except Exception as exc:
             return f"[PRE-COMPUTED FINANCIAL METRICS unavailable: {exc}]"
 
-    RELEVANCE_THRESHOLD = 3
+    @staticmethod
+    def _build_bctc_structured_block(
+        selected: list[ClassifiedDocument],
+    ) -> str:
+        bctc_docs = [
+            doc for doc in selected if doc.is_bctc and doc.bctc_extraction
+        ]
+        if not bctc_docs:
+            return ""
+        parts = ["[DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT]"]
+        for doc in bctc_docs:
+            parts.append(
+                f"--- {doc.filename} ---\n"
+                + json.dumps(doc.bctc_extraction, ensure_ascii=False, indent=2)
+            )
+        return "\n\n".join(parts)
 
     @staticmethod
     def _select_documents_for_agent(
         documents: list[ClassifiedDocument],
         target_agent: str,
     ) -> list[ClassifiedDocument]:
-        target = [doc for doc in documents if doc.agent == target_agent]
+        primary = [doc for doc in documents if doc.agent == target_agent]
         general = [doc for doc in documents if doc.agent == "GENERAL_CONTEXT"]
-        if target:
-            return target + general
-        # No document was classified primarily for this agent. Do NOT dump ALL
-        # documents (cross-contamination + token blow-up when many files are
-        # uploaded); surface only general-context docs plus any document that
-        # still scored as relevant for this agent, ranked by that score.
-        relevant = sorted(
+        # A document that wasn't primarily classified for this agent can still be
+        # real evidence for it (keyword score and/or LLM secondary-label signal).
+        # Do NOT dump ALL documents regardless (cross-contamination + token
+        # blow-up when many files are uploaded) — only documents that clear the
+        # secondary-relevance bar, ranked by their score for this agent.
+        secondary = sorted(
             (
                 doc
                 for doc in documents
-                if doc.agent != "GENERAL_CONTEXT"
-                and doc.agent_scores.get(target_agent, 0)
-                >= Supervisor.RELEVANCE_THRESHOLD
+                if doc.agent != target_agent
+                and doc.agent != "GENERAL_CONTEXT"
+                and target_agent in doc.relevant_agents
             ),
             key=lambda doc: doc.agent_scores.get(target_agent, 0),
             reverse=True,
         )
-        return general + relevant
+        return primary + general + secondary
+
+    @classmethod
+    def _build_document_selections(
+        cls,
+        documents: list[ClassifiedDocument],
+    ) -> dict[str, dict[str, list[str]]]:
+        """Snapshot, per specialist agent, exactly what _build_user_input would
+        feed it — for monitoring/testing, not for prompt construction itself.
+        Recomputed via the same _select_documents_for_agent used at call time,
+        so it can never drift from the real selection."""
+
+        selections: dict[str, dict[str, list[str]]] = {}
+        for target_agent in sorted(VALID_DOCUMENT_AGENTS - {"GENERAL_CONTEXT"}):
+            selected = cls._select_documents_for_agent(documents, target_agent)
+            selections[target_agent] = {
+                "primary": [
+                    doc.filename
+                    for doc in selected
+                    if doc.agent == target_agent or doc.agent == "GENERAL_CONTEXT"
+                ],
+                "secondary": [
+                    doc.filename
+                    for doc in selected
+                    if doc.agent != target_agent and doc.agent != "GENERAL_CONTEXT"
+                ],
+            }
+        return selections
 
     @staticmethod
     def _format_history(
@@ -1668,14 +1887,23 @@ class Supervisor:
 
     @staticmethod
     def _format_document_summary(documents: list[ClassifiedDocument]) -> str:
-        return "\n".join(
-            (
-                f"- {doc.filename}: {doc.agent} "
+        lines = []
+        for doc in documents:
+            secondary = [
+                agent for agent in doc.relevant_agents if agent != doc.agent
+            ]
+            extra = f" (+{', '.join(secondary)})" if secondary else ""
+            bctc_tag = ""
+            if doc.is_bctc:
+                bctc_tag = (
+                    " [BCTC]" if doc.bctc_extraction else " [BCTC, trích xuất lỗi]"
+                )
+            lines.append(
+                f"- {doc.filename}: {doc.agent}{extra}{bctc_tag} "
                 f"(confidence={doc.confidence:.2f}, "
                 f"extraction={doc.extraction_status})"
             )
-            for doc in documents
-        )
+        return "\n".join(lines)
 
     @staticmethod
     def _gap_reason(evidence_type: str) -> str:
@@ -1752,6 +1980,7 @@ class Supervisor:
         gap_analysis: dict[str, Any] | None = None,
         web_context: str = "",
         steps: list[str] | None = None,
+        document_selections: dict[str, dict[str, list[str]]] | None = None,
     ) -> dict[str, Any]:
         return {
             "status": "success",
@@ -1759,6 +1988,10 @@ class Supervisor:
             "agent_name": agent_name,
             "decision": decision or {},
             "document_classifications": to_dict_list(documents or []),
+            # Per-agent snapshot of _select_documents_for_agent's output
+            # (primary vs secondary/shared filenames) — for monitoring/testing
+            # which documents actually feed each specialist's LLM input.
+            "document_selections": document_selections or {},
             "sub_agent_outputs": sub_agent_outputs or {},
             "hallucination_check": hallucination_check or {},
             "execution_plan": execution_plan or {},

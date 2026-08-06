@@ -254,6 +254,45 @@ def normalize_text(text: str) -> str:
 # A hit in the filename is a much stronger routing signal than one in the body.
 FILENAME_KEYWORD_WEIGHT = 3
 
+# A document can be genuine evidence for more than one agent (e.g. a combined scan
+# with both financial statements and a business registration page). A non-primary
+# agent counts as "also relevant" only when its keyword score clears both an
+# absolute floor and a ratio of the document's own top score, so incidental
+# cross-domain keyword noise doesn't turn every document into shared evidence.
+SECONDARY_RELEVANCE_THRESHOLD = 3
+SECONDARY_RELEVANCE_RATIO = 0.5
+
+
+def relevant_agents_for_document(
+    primary_agent: str,
+    agent_scores: dict[str, float] | None,
+    llm_secondary_agents: list[str] | None = None,
+) -> set[str]:
+    """Return every agent this document is real evidence for (primary + secondary).
+
+    Secondary relevance comes from two independent signals that are unioned
+    together: keyword scores (``agent_scores``, computed for every document) and
+    the document classifier LLM's own "secondary_agents" judgment (only present
+    for documents that went through the LLM branch). ``GENERAL_CONTEXT`` is never
+    added as a secondary label.
+    """
+
+    relevant = {primary_agent}
+    if agent_scores:
+        top_score = max(agent_scores.values(), default=0)
+        for agent, score in agent_scores.items():
+            if agent == primary_agent or agent == "GENERAL_CONTEXT":
+                continue
+            if (
+                score >= SECONDARY_RELEVANCE_THRESHOLD
+                and score >= SECONDARY_RELEVANCE_RATIO * top_score
+            ):
+                relevant.add(agent)
+    for agent in llm_secondary_agents or []:
+        if agent in VALID_DOCUMENT_AGENTS and agent != "GENERAL_CONTEXT":
+            relevant.add(agent)
+    return relevant
+
 
 def document_keyword_scores(filename: str, content: str) -> dict[str, int]:
     """Score each document target by weighted keyword hits.
@@ -277,7 +316,7 @@ def document_keyword_scores(filename: str, content: str) -> dict[str, int]:
 DOCUMENT_CLASSIFICATION_SYSTEM_PROMPT = """
 You classify extracted text from SME underwriting documents.
 
-Choose exactly one target agent:
+Choose the single best PRIMARY target agent:
 - FINANCIAL_ANALYSIS_AGENT: balance sheet, income statement, cash flow,
   audit report, financial statement notes, subsidiary ledger, detailed ledger,
   VAT declaration, bank statement, receivables/payables, revenue, expenses,
@@ -286,7 +325,7 @@ Choose exactly one target agent:
 - BUSINESS_ACTIVITY_AGENT: business model, business registration, contracts,
   invoices, purchase orders, customers, suppliers, sales, operations,
   production, market, products.
-  
+
 - CREDIT_RELATIONSHIP_AGENT: internal T24 credit relationship exports,
   CIC/PCB bureau reports, existing facilities, outstanding balance,
   repayment status, overdue debt, debt group, or credit institutions.
@@ -299,9 +338,19 @@ Choose exactly one target agent:
 
 - GENERAL_CONTEXT: useful contextual document but not clearly one of the above.
 
+Additionally, a single document can genuinely contain evidence for more than one
+category (for example one combined scan that includes both financial statement
+pages and a business registration certificate). If — and only if — the document
+has real, substantial supporting content for one or more OTHER categories above
+(not just a passing mention), list those extra categories in "secondary_agents".
+Leave "secondary_agents" as an empty list when the document clearly belongs to
+just one category. Never repeat the primary agent inside "secondary_agents", and
+never put "GENERAL_CONTEXT" there.
+
 Return JSON only with:
 {{
   "agent": "...",
+  "secondary_agents": [],
   "reasoning": "short reason",
   "confidence": 0.0
 }}
@@ -342,3 +391,31 @@ def rule_classify_document(filename: str, content: str) -> dict[str, Any]:
         "confidence": confidence,
         "scores": scores,
     }
+
+
+# A document is a full BCTC (bộ báo cáo tài chính) bundle, not just any
+# finance-related file (bank statement, ledger, VAT filing), when it shows
+# strong dedicated signal. An explicit filename mention is decisive on its
+# own; otherwise require evidence that multiple core statements are actually
+# present in the body, not a single passing mention of "báo cáo tài chính".
+BCTC_FILENAME_MARKERS = ["bctc", "bao cao tai chinh"]
+BCTC_SECTION_MARKERS = [
+    "bang can doi ke toan",
+    "bao cao ket qua kinh doanh",
+    "bao cao ket qua hoat dong kinh doanh",
+    "bao cao luu chuyen tien te",
+    "thuyet minh bao cao tai chinh",
+]
+BCTC_MIN_SECTION_MARKER_HITS = 2
+
+
+def is_bctc_document(filename: str, content: str) -> bool:
+    """Return True only for a full BCTC bundle, not any finance-related file."""
+
+    name = normalize_text(filename)
+    if any(marker in name for marker in BCTC_FILENAME_MARKERS):
+        return True
+
+    body = normalize_text(content)
+    hits = sum(1 for marker in BCTC_SECTION_MARKERS if marker in body)
+    return hits >= BCTC_MIN_SECTION_MARKER_HITS

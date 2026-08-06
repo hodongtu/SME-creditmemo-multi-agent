@@ -1,6 +1,10 @@
 # SME Credit Memo — Python dependencies
 # Install: pip install -r requirements.txt
-# System requirement (not pip): Tesseract OCR — see README.md
+# System requirements (not pip):
+#   - Tesseract OCR — see README.md
+#   - WeasyPrint native libs (Pango/Cairo/GLib), for PDF export:
+#     macOS:  brew install pango cairo glib
+#     Debian: apt-get install libpango-1.0-0 libcairo2 libgdk-pixbuf2.0-0
 
 # --- Agent framework ---
 langgraph==1.2.6
@@ -16,7 +20,10 @@ opencv-python==4.13.0.92
 numpy==2.4.6
 pillow==12.2.0
 pandas==2.3.3
-openpyxl==3.1.5          # xlsx reading via pandas
+openpyxl==3.1.5          # xlsx reading (direct, format-faithful)
+xlrd==2.0.2              # legacy .xls reading via pandas
+markdown==3.10.3         # Markdown -> HTML for PDF export
+weasyprint==69.0         # HTML -> PDF (needs Pango/Cairo/GLib, see above)
 
 # --- Runtime / notebook ---
 python-dotenv==1.2.2

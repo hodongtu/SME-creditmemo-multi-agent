@@ -7,7 +7,7 @@ notebook driver cell so importing this module never needs live credentials.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_openai import ChatOpenAI
@@ -39,9 +39,12 @@ class Config:
     analysis_llm: Any = None
     credit_memo_llm: Any = None
     hallucination_llm: Any = None
+    bctc_extraction_llm: Any = None
     max_files: int = 50
     max_chars_per_document: int = 120_000
-    max_concurrency: int = os.getenv("LLM_MAX_CONCURRENCY", 3)
+    max_concurrency: int = field(
+        default_factory=lambda: int(os.getenv("LLM_MAX_CONCURRENCY", "3"))
+    )
     document_classifier_rule_confidence_threshold: float = 0.65
     enable_plan_and_execute: bool = True
     enable_self_ask_gap_analysis: bool = True

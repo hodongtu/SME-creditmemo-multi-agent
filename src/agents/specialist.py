@@ -44,6 +44,29 @@ class SpecialistAgent:
         thập phân, dùng dấu phẩy làm dấu thập phân và dấu chấm cho hàng nghìn
         (ví dụ: 3.991.124.661.120 VNĐ → 3.991,12 tỷ VNĐ). Không ghi số đồng thô.
 
+        HIGHLIGHT RULE:
+        - Trong mỗi mục "Nhận xét"/"Kết luận" và bất kỳ đoạn phân tích nào, in đậm
+        (markdown **bold**) các điểm mấu chốt giúp người đọc nắm nhanh: số liệu/chỉ
+        số bất thường hoặc biến động lớn, vi phạm ngưỡng an toàn, dấu hiệu rủi ro,
+        và câu kết luận/khuyến nghị chính.
+        - Chỉ in đậm phần thực sự quan trọng (vài từ hoặc một số liệu cụ thể), không
+        in đậm cả câu hoặc cả đoạn — in đậm quá nhiều sẽ mất tác dụng nhấn mạnh.
+        - Với cảnh báo rủi ro nghiêm trọng cần người đọc chú ý ngay, có thể dùng thêm
+        blockquote (> ...). Không dùng emoji hoặc icon.
+
+        CITATION RULE:
+        - Ngay sau mỗi điểm đã in đậm theo HIGHLIGHT RULE, thêm citation nguồn theo
+        định dạng đơn giản: [tên file, trang X] (PDF) hoặc [tên file, Sheet Y]
+        (Excel/CSV nhiều sheet). Nếu không xác định được trang/sheet cụ thể, chỉ
+        ghi [tên file].
+        - Lấy "tên file" từ dòng "Document filename:" của tài liệu tương ứng trong
+        evidence. Lấy số trang/tên sheet từ các mốc "--- Page N ---" hoặc
+        "--- Sheet: ... ---" gần nhất với dữ liệu đó trong nội dung tài liệu; nếu
+        dữ liệu lấy từ khối [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT], dùng trường "page" đi kèm
+        chỉ tiêu đó trong JSON.
+        - Không bịa số trang hoặc tên file — chỉ trích dẫn khi thực sự xác định
+        được từ nguồn được cung cấp.
+
         You must provide your answer in markdown format and always follow the
         markdown template below:
         {self.output_template}
@@ -362,6 +385,13 @@ class CreditMemoComposerAgent:
                       (ví dụ 3.991.124.661.120 VNĐ → 3.991,12 tỷ VNĐ).
                     - Giữ nguyên bảng markdown và bullet quan trọng khi hữu ích.
                     - Giữ nguyên nội dung nguồn, không chỉnh sửa, loại bỏ nội dung.
+                    - Giữ nguyên các đoạn in đậm (**bold**) đánh dấu điểm mấu chốt
+                      (số liệu bất thường, vi phạm ngưỡng, dấu hiệu rủi ro, kết
+                      luận chính) từ các sub-agent — không xóa bỏ định dạng nhấn
+                      mạnh này khi biên tập lại heading/đánh số.
+                    - Giữ nguyên các citation nguồn dạng [tên file, trang X] hoặc
+                      [tên file, Sheet Y] đi kèm các điểm in đậm — không xóa bỏ
+                      hoặc chỉnh sửa citation khi biên tập lại nội dung.
                     """,
                 ),
                 (
