@@ -24,6 +24,11 @@ from src.agents.financial_ratio_calculator import (
 )
 from src.utils.extractors import extract_document_text
 from src.utils.formatting import convert_amounts_in_text
+from src.utils.template_leak import check_template_leakage
+from src.utils.assertion_check import (
+    check_assertion_labelling,
+    check_assertion_separation,
+)
 
 from src.config import Config
 from src.types import (
@@ -1629,6 +1634,10 @@ class Supervisor:
         # "checked and passed" apart from "never checked".
         response += self._format_confidence_warnings(hallucination)
         response += self._format_check_unavailable(hallucination)
+        # Prompt rules are not enforcement: re-read the finished report and
+        # flag places where inference is presented as evidence.
+        response += self._format_assertion_findings(response)
+        response += self._format_template_findings(response)
         return self._build_state(
             input_text,
             response,
@@ -1642,6 +1651,7 @@ class Supervisor:
             web_context,
             steps + ["Built final response"],
             self._build_document_selections(documents),
+            self._build_financial_metrics_data(documents),
         )
 
     @staticmethod
@@ -1765,6 +1775,33 @@ class Supervisor:
                 "dụng.*"
             ),
         ]
+        return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _format_template_findings(response: str) -> str:
+        """Flag layout scaffolding or placeholders copied into the report."""
+
+        findings = check_template_leakage(response)
+        if not findings:
+            return ""
+        lines = ["", "**Lỗi bám mẫu báo cáo:**", ""]
+        lines += [f"- {finding}" for finding in findings]
+        return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _format_assertion_findings(response: str) -> str:
+        """Append findings where evidence and inference were not kept apart."""
+
+        findings = check_assertion_labelling(response)
+        findings += check_assertion_separation(response)
+        if not findings:
+            return ""
+        lines = [
+            "",
+            "**Ranh giới dữ kiện / suy luận:**",
+            "",
+        ]
+        lines += [f"- {finding}" for finding in findings]
         return "\n".join(lines) + "\n"
 
     @classmethod
@@ -1955,6 +1992,16 @@ class Supervisor:
             usable,
             target_agent,
         )
+        # State the periods explicitly: several BCTC files overlap by a year, so
+        # the merged set (e.g. 2 files -> 3 years) does not match the sample
+        # column count in the layout. Telling the agent removes the guesswork.
+        if target_agent == "FINANCIAL_ANALYSIS_AGENT":
+            periods = (self._build_financial_metrics_data(usable) or {}).get("years")
+            if periods:
+                base += (
+                    "\n\nCác kỳ báo cáo có dữ liệu (dùng đúng số cột này cho mọi "
+                    f"bảng theo năm, thứ tự tăng dần): {', '.join(periods)}"
+                )
         bctc_block = (
             self._build_bctc_structured_block(usable)
             if target_agent == "FINANCIAL_ANALYSIS_AGENT"
@@ -2052,6 +2099,42 @@ class Supervisor:
             )
         except Exception as exc:
             return f"[PRE-COMPUTED FINANCIAL METRICS unavailable: {exc}]"
+
+    @staticmethod
+    def _build_financial_metrics_data(
+        documents: list[ClassifiedDocument],
+    ) -> dict[str, Any]:
+        """Structured form of the deterministic ratio computation.
+
+        The agent gets the markdown block; this returns the same numbers as data
+        so a run can be audited afterwards (which line items were matched, what
+        the ratios came out as, which sanity checks failed).
+        """
+
+        usable = [
+            doc for doc in documents if doc.extraction_status == "success"
+        ]
+        if not usable:
+            return {}
+        try:
+            calculator = FinancialRatioCalculator()
+            payload = [asdict(doc) for doc in usable]
+            yearly_metrics = calculator.extract_yearly_metrics(payload)
+            if not yearly_metrics:
+                return {}
+            years = sorted(yearly_metrics)
+            return {
+                "unit": "VNĐ",
+                "years": years,
+                "yearly_metrics": yearly_metrics,
+                "ratios": calculator.compute_ratios(yearly_metrics),
+                "validation_warnings": calculator._validation_warnings(
+                    years,
+                    yearly_metrics,
+                ),
+            }
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
 
     @staticmethod
     def _build_bctc_structured_block(
@@ -2231,6 +2314,7 @@ class Supervisor:
         web_context: str = "",
         steps: list[str] | None = None,
         document_selections: dict[str, dict[str, list[str]]] | None = None,
+        financial_metrics: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "status": "success",
@@ -2242,6 +2326,9 @@ class Supervisor:
             # (primary vs secondary/shared filenames) — for monitoring/testing
             # which documents actually feed each specialist's LLM input.
             "document_selections": document_selections or {},
+            # Deterministic ratio computation as data (not just the markdown
+            # block) so a finished run can be audited afterwards.
+            "financial_metrics": financial_metrics or {},
             "sub_agent_outputs": sub_agent_outputs or {},
             "hallucination_check": hallucination_check or {},
             "execution_plan": execution_plan or {},

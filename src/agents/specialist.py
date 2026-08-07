@@ -13,31 +13,115 @@ from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from src.utils.paths import PROJECT_ROOT
 from src.types import truncate_text
 
+
 class SpecialistAgent:
     """Base wrapper for specialist direct chains or tool agents."""
 
     name = "specialist_agent"
-    template_relative_path = ""
+    # Layout only (headings + empty tables). Never contains instructions: the
+    # model reproduces this file, so anything written here reaches the reader.
+    structure_relative_path = ""
+    # How to analyse. Goes into the rules area, never into the output.
+    guidance_relative_path = ""
     intro = ""
+    require_citations = True
+
+    @staticmethod
+    def _split_frontmatter(text: str) -> tuple[dict[str, str], str]:
+        """Separate Agent-Skills style YAML frontmatter from the body.
+
+        Guidance files carry ``name``/``description`` per the Agent Skills
+        spec so they can be moved to a skills runtime later without rewriting.
+        The metadata is for humans and future tooling — it must never reach the
+        model, or it ends up copied into the report like any other scaffolding.
+
+        Only the flat ``key: value`` and folded ``key: >-`` forms used by the
+        spec are handled, so no YAML dependency is required.
+        """
+
+        if not text.startswith("---"):
+            return {}, text
+        parts = text.split("---", 2)
+        if len(parts) < 3:
+            return {}, text
+
+        metadata: dict[str, str] = {}
+        key = ""
+        for line in parts[1].splitlines():
+            if not line.strip():
+                continue
+            if not line.startswith((" ", "\t")) and ":" in line:
+                key, _, value = line.partition(":")
+                key = key.strip()
+                value = value.strip()
+                metadata[key] = "" if value in {">-", ">", "|", "|-"} else value
+            elif key:
+                metadata[key] = f"{metadata[key]} {line.strip()}".strip()
+        return metadata, parts[2].lstrip("\n")
+
+    @classmethod
+    def _guidance_metadata(cls) -> dict[str, str]:
+        """Frontmatter of this agent's guidance file (name/description)."""
+
+        if not cls.guidance_relative_path:
+            return {}
+        path = PROJECT_ROOT / cls.guidance_relative_path
+        if not path.is_file():
+            return {}
+        metadata, _ = cls._split_frontmatter(path.read_text(encoding="utf-8"))
+        return metadata
+
+    @classmethod
+    def _read_template(cls, relative_path: str) -> str:
+        """Read a template file, dropping any frontmatter."""
+
+        if not relative_path:
+            return ""
+        path = PROJECT_ROOT / relative_path
+        if not path.is_file():
+            return ""
+        _, body = cls._split_frontmatter(path.read_text(encoding="utf-8"))
+        return body
 
     def __init__(self, llm: Any, tools: list[Any] | None = None):
         self.llm = llm
         self.tools = tools or []
-        template_path = PROJECT_ROOT / self.template_relative_path
-        self.output_template = (
-            template_path.read_text(encoding="utf-8")
-            if template_path.is_file()
-            else ""
-        )
+        self.output_template = self._read_template(self.structure_relative_path)
+        self.analysis_guidance = self._read_template(self.guidance_relative_path)
+        # Skill-style metadata: not sent to the model, kept for tooling/logging.
+        self.guidance_metadata = self._guidance_metadata()
+        # Applied only to agents with require_citations = True. The financial agent opts
+        # out: its figures all come from the same structured BCTC block, so a per-number
+        # file/page citation is repetitive and crowds already-dense tables.
+        self.CITATION_RULE = """CITATION RULE:
+        - Ngay sau mỗi điểm đã in đậm theo HIGHLIGHT RULE, thêm citation nguồn theo
+        định dạng đơn giản: [tên file, trang X] (PDF) hoặc [tên file, Sheet Y]
+        (Excel/CSV nhiều sheet). Nếu không xác định được trang/sheet cụ thể, chỉ
+        ghi [tên file].
+        - Lấy "tên file" từ dòng "Document filename:" của tài liệu tương ứng trong
+        evidence. Lấy số trang/tên sheet từ các mốc "--- Page N ---" hoặc
+        "--- Sheet: ... ---" gần nhất với dữ liệu đó trong nội dung tài liệu; nếu
+        dữ liệu lấy từ khối [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT], dùng trường "page" của
+        chỉ tiêu đó trong JSON, và nếu chỉ tiêu không có "page" thì dùng "page"
+        của bảng chứa nó (balance_sheet/income_statement/cash_flow_statement).
+        - Citation là BẮT BUỘC cho mọi số liệu và mọi nhận định đã in đậm. Nếu
+        thực sự không xác định được trang/sheet, vẫn phải ghi [tên file].
+        - Không bịa số trang hoặc tên file — chỉ trích dẫn khi thực sự xác định
+        được từ nguồn được cung cấp.
+        """
         self.system_prompt = f"""
         {self.intro}
 
         LANGUAGE RULE:
-        - Always answer in the same language as the user's request.
-        - If the user's request is Vietnamese, answer fully in Vietnamese.
-        - If the user's request has no clear language, answer in Vietnamese by default.
-        - Keep official names, account names, and technical terms in their original
-        language when needed.
+        - Always write the whole report in Vietnamese, regardless of the language
+        of the user's request. The report template, the required wordings
+        ("Không có dữ liệu trong hồ sơ", "**Căn cứ**", "**Nhận định**") and the
+        downstream checks are all Vietnamese, so an English answer would break
+        them.
+        - If the user writes in another language, still answer in Vietnamese; you
+        may restate their question in Vietnamese first.
+        - Keep official names, system codes (T24, CIC, AASC), account names and
+        technical terms in their original form — do not translate them.
 
         MONETARY UNIT RULE:
         - Trình bày mọi giá trị tiền tệ bằng đơn vị tỷ VNĐ, làm tròn 2 chữ số
@@ -61,6 +145,29 @@ class SpecialistAgent:
         tài liệu được cung cấp.
         - Thà báo thiếu dữ liệu còn hơn đưa ra một nhận định không có căn cứ.
 
+        ASSERTION SEPARATION RULE (bắt buộc, áp dụng cho MỌI mục "Nhận xét",
+        "Kết luận", "Đánh giá"):
+        - Luôn tách thành ĐÚNG hai dòng có nhãn, theo thứ tự này:
+
+          **Căn cứ**: <chỉ những gì ĐỌC ĐƯỢC trực tiếp từ hồ sơ — số liệu, khoản
+          mục, kỳ báo cáo, trích dẫn nguyên văn. Không diễn giải, không quy kết
+          nguyên nhân, không đánh giá tốt/xấu.>
+
+          **Nhận định**: <phần suy luận, diễn giải, đánh giá xu hướng, cảnh báo
+          rủi ro, khuyến nghị của bạn. Nêu rõ đây là suy luận và ghi cần thêm
+          dữ liệu gì để khẳng định chắc chắn.>
+
+        - Các cụm "cho thấy", "chứng tỏ", "phản ánh", "điều này", "có thể",
+        "dự kiến", "nhiều khả năng", "cần theo dõi" là dấu hiệu của SUY LUẬN —
+        chúng chỉ được xuất hiện ở dòng **Nhận định**, TUYỆT ĐỐI không nằm trong
+        dòng **Căn cứ**.
+        - Không gắn citation vào dòng **Nhận định**: citation dùng để chỉ nguồn
+        của dữ kiện, gắn vào suy luận sẽ khiến người đọc tưởng suy luận đó cũng
+        được ghi trong hồ sơ.
+        - Nếu một mục chỉ có dữ kiện mà chưa đủ cơ sở để suy luận, vẫn ghi dòng
+        **Nhận định** và nêu rõ "Chưa đủ cơ sở để đánh giá".
+        - Nếu không có dữ kiện nào, ghi **Căn cứ**: Không có dữ liệu trong hồ sơ.
+
         HIGHLIGHT RULE:
         - Trong mỗi mục "Nhận xét"/"Kết luận" và bất kỳ đoạn phân tích nào, in đậm
         (markdown **bold**) các điểm mấu chốt giúp người đọc nắm nhanh: số liệu/chỉ
@@ -71,24 +178,19 @@ class SpecialistAgent:
         - Với cảnh báo rủi ro nghiêm trọng cần người đọc chú ý ngay, có thể dùng thêm
         blockquote (> ...). Không dùng emoji hoặc icon.
 
-        CITATION RULE:
-        - Ngay sau mỗi điểm đã in đậm theo HIGHLIGHT RULE, thêm citation nguồn theo
-        định dạng đơn giản: [tên file, trang X] (PDF) hoặc [tên file, Sheet Y]
-        (Excel/CSV nhiều sheet). Nếu không xác định được trang/sheet cụ thể, chỉ
-        ghi [tên file].
-        - Lấy "tên file" từ dòng "Document filename:" của tài liệu tương ứng trong
-        evidence. Lấy số trang/tên sheet từ các mốc "--- Page N ---" hoặc
-        "--- Sheet: ... ---" gần nhất với dữ liệu đó trong nội dung tài liệu; nếu
-        dữ liệu lấy từ khối [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT], dùng trường "page" của
-        chỉ tiêu đó trong JSON, và nếu chỉ tiêu không có "page" thì dùng "page"
-        của bảng chứa nó (balance_sheet/income_statement/cash_flow_statement).
-        - Citation là BẮT BUỘC cho mọi số liệu và mọi nhận định đã in đậm. Nếu
-        thực sự không xác định được trang/sheet, vẫn phải ghi [tên file].
-        - Không bịa số trang hoặc tên file — chỉ trích dẫn khi thực sự xác định
-        được từ nguồn được cung cấp.
+        {self.CITATION_RULE if self.require_citations else ""}
+        HƯỚNG DẪN PHÂN TÍCH (chỉ dẫn nội bộ — không được chép vào báo cáo):
+        {self.analysis_guidance}
 
-        You must provide your answer in markdown format and always follow the
-        markdown template below:
+        BỐ CỤC BÁO CÁO:
+        - Trả lời bằng markdown, bám theo bố cục dưới đây.
+        - Bố cục chỉ gồm tiêu đề và khung bảng rỗng. Nhiệm vụ của bạn là ĐIỀN nội
+        dung vào, không phải chép lại khung.
+        - Mọi chỗ dạng {{{{TenTruong}}}} là chỗ cần thay bằng giá trị thật lấy từ
+        hồ sơ. Nếu không có giá trị, ghi "Không có dữ liệu trong hồ sơ".
+        TUYỆT ĐỐI không để lại dấu {{{{ }}}} trong câu trả lời.
+        - Xoá hẳn dòng/bảng/mục không có dữ liệu thay vì để trống hoặc điền "-".
+
         {self.output_template}
         """
         self.agent = None
@@ -147,9 +249,8 @@ class BusinessActivityAnalysis(SpecialistAgent):
     """Business activity analysis specialist."""
 
     name = "business_activity_agent"
-    template_relative_path = (
-        "src/templates/business-activity-template.md"
-    )
+    structure_relative_path = "src/templates/business-activity-structure.md"
+    guidance_relative_path = "src/templates/business-activity-guidance.md"
     intro = """You are an agent among a team of assistants. You are specialized 
     for assessing customer business operations and business performance.
 
@@ -168,9 +269,11 @@ class FinancialAnalysis(SpecialistAgent):
     """Financial analysis specialist."""
 
     name = "financial_analysis_agent"
-    template_relative_path = (
-        "src/templates/financial-analysis-template.md"
-    )
+    # Its figures all trace to the same structured BCTC block, so per-number
+    # file/page citations only add noise to already-dense financial tables.
+    require_citations = False
+    structure_relative_path = "src/templates/financial-analysis-structure.md"
+    guidance_relative_path = "src/templates/financial-analysis-guidance.md"
     intro = """You are an agent among a team of assistants. You are specialized 
     for financial analysis.
 
@@ -194,6 +297,8 @@ class CreditRelationshipAnalysis(SpecialistAgent):
     """Credit relationship specialist using T24 and CIC database tools."""
 
     name = "credit_relationship_agent"
+    structure_relative_path = "src/templates/credit-relationship-structure.md"
+    guidance_relative_path = "src/templates/credit-relationship-guidance.md"
     intro = """You are an agent among a team of assistants. You are specialized
     for credit relationship analysis.
 
@@ -216,9 +321,8 @@ class RiskAssessment(SpecialistAgent):
     """Credit risk assessment specialist."""
 
     name = "risk_assessment_agent"
-    template_relative_path = (
-        "src/templates/risk-assessment-template.md"
-    )
+    structure_relative_path = "src/templates/risk-assessment-structure.md"
+    guidance_relative_path = "src/templates/risk-assessment-guidance.md"
     intro = """You are an agent among a team of assistants. You are
     specialized for credit risk assessment.
 
@@ -412,6 +516,11 @@ class CreditMemoComposerAgent:
                     - Giữ nguyên các citation nguồn dạng [tên file, trang X] hoặc
                       [tên file, Sheet Y] đi kèm các điểm in đậm — không xóa bỏ
                       hoặc chỉnh sửa citation khi biên tập lại nội dung.
+                    - Giữ nguyên cặp dòng **Căn cứ** / **Nhận định** của các
+                      sub-agent. Không gộp hai dòng lại, không chuyển nội dung
+                      từ Nhận định sang Căn cứ, không thêm citation vào dòng
+                      Nhận định — ranh giới giữa dữ kiện và suy luận phải giữ
+                      nguyên như sub-agent đã phân định.
                     - Giữ nguyên mọi ghi chú thiếu dữ liệu từ sub-agent, đúng
                       nguyên văn "Không có dữ liệu trong hồ sơ".
                       Không được thay bằng số ước lượng, số 0, dấu "-", hay câu

@@ -12,13 +12,28 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 
+BALANCE_SHEET = "balance_sheet"
+INCOME_STATEMENT = "income_statement"
+CASH_FLOW = "cash_flow_statement"
+
+
 @dataclass
 class MetricDefinition:
-    """Describe one extractable financial statement line item."""
+    """Describe one extractable financial statement line item.
+
+    ``statements`` restricts where a metric may be read from — without it
+    "Lợi nhuận sau thuế chưa phân phối" (retained earnings, mã 421 on the
+    balance sheet) is picked up as net profit. ``codes`` are Mã số values that
+    corroborate a label match, and ``exclude`` blocks labels that merely contain
+    an alias ("Tài sản ngắn hạn **khác**", "Phải trả người bán **dài hạn**").
+    """
 
     key: str
     label: str
     aliases: tuple[str, ...]
+    statements: tuple[str, ...] = (BALANCE_SHEET,)
+    codes: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
 
 
 @dataclass
@@ -40,23 +55,70 @@ class FinancialRatioCalculator:
             "net_revenue",
             "Doanh thu thuần",
             ("doanh thu thuần", "doanh thu thuan"),
+            statements=(INCOME_STATEMENT,),
+            codes=("10",),
         ),
         MetricDefinition(
             "gross_revenue",
             "Doanh thu bán hàng và cung cấp dịch vụ",
             ("doanh thu bán hàng", "doanh thu ban hang"),
+            statements=(INCOME_STATEMENT,),
+            codes=("01",),
         ),
-        MetricDefinition("cogs", "Giá vốn hàng bán", ("giá vốn hàng bán", "gia von hang ban")),
-        MetricDefinition("gross_profit", "Lợi nhuận gộp", ("lợi nhuận gộp", "loi nhuan gop")),
-        MetricDefinition("financial_expense", "Chi phí tài chính", ("chi phí tài chính", "chi phi tai chinh")),
-        MetricDefinition("interest_expense", "Chi phí lãi vay", ("chi phí lãi vay", "chi phi lai vay")),
+        MetricDefinition(
+            "cogs",
+            "Giá vốn hàng bán",
+            ("giá vốn hàng bán", "gia von hang ban"),
+            statements=(INCOME_STATEMENT,),
+            codes=("11",),
+        ),
+        MetricDefinition(
+            "gross_profit",
+            "Lợi nhuận gộp",
+            ("lợi nhuận gộp", "loi nhuan gop"),
+            statements=(INCOME_STATEMENT,),
+            codes=("20",),
+        ),
+        MetricDefinition(
+            "financial_expense",
+            "Chi phí tài chính",
+            ("chi phí tài chính", "chi phi tai chinh"),
+            statements=(INCOME_STATEMENT,),
+            codes=("22",),
+        ),
+        MetricDefinition(
+            "interest_expense",
+            "Chi phí lãi vay",
+            ("chi phí lãi vay", "chi phi lai vay"),
+            statements=(INCOME_STATEMENT,),
+            codes=("23",),
+        ),
         MetricDefinition(
             "profit_before_tax",
             "Lợi nhuận trước thuế",
             ("lợi nhuận trước thuế", "loi nhuan truoc thue"),
+            # The cash-flow statement opens with the same figure; accept it as a
+            # fallback when the income statement row was not extracted.
+            statements=(INCOME_STATEMENT, CASH_FLOW),
+            codes=("50",),
         ),
-        MetricDefinition("net_profit", "Lợi nhuận sau thuế", ("lợi nhuận sau thuế", "loi nhuan sau thue")),
-        MetricDefinition("current_assets", "Tài sản ngắn hạn", ("tài sản ngắn hạn", "tai san ngan han")),
+        MetricDefinition(
+            "net_profit",
+            "Lợi nhuận sau thuế",
+            ("lợi nhuận sau thuế", "loi nhuan sau thue"),
+            # Never the balance sheet: mã 421 "Lợi nhuận sau thuế chưa phân
+            # phối" is retained earnings, not the period's net profit.
+            statements=(INCOME_STATEMENT,),
+            codes=("60",),
+            exclude=("chưa phân phối", "chua phan phoi"),
+        ),
+        MetricDefinition(
+            "current_assets",
+            "Tài sản ngắn hạn",
+            ("tài sản ngắn hạn", "tai san ngan han"),
+            codes=("100",),
+            exclude=("tài sản ngắn hạn khác", "tai san ngan han khac"),
+        ),
         MetricDefinition(
             "cash",
             "Tiền và tương đương tiền",
@@ -64,6 +126,7 @@ class FinancialRatioCalculator:
                 "tiền và các khoản tương đương tiền",
                 "tien va cac khoan tuong duong tien",
             ),
+            codes=("110",),
         ),
         MetricDefinition(
             "accounts_receivable",
@@ -74,6 +137,7 @@ class FinancialRatioCalculator:
                 "phải thu khách hàng",
                 "phai thu khach hang",
             ),
+            codes=("131",),
         ),
         MetricDefinition(
             "prepaid_suppliers",
@@ -84,6 +148,7 @@ class FinancialRatioCalculator:
                 "trả trước người bán",
                 "tra truoc nguoi ban",
             ),
+            codes=("132",),
         ),
         MetricDefinition(
             "other_receivables",
@@ -94,10 +159,31 @@ class FinancialRatioCalculator:
                 "phải thu khác",
                 "phai thu khac",
             ),
+            codes=("136",),
         ),
-        MetricDefinition("inventory", "Hàng tồn kho", ("hàng tồn kho", "hang ton kho")),
-        MetricDefinition("total_assets", "Tổng tài sản", ("tổng tài sản", "tong tai san")),
-        MetricDefinition("current_liabilities", "Nợ ngắn hạn", ("nợ ngắn hạn", "no ngan han")),
+        MetricDefinition(
+            "inventory",
+            "Hàng tồn kho",
+            ("hàng tồn kho", "hang ton kho"),
+            codes=("140", "141"),
+        ),
+        MetricDefinition(
+            "total_assets",
+            "Tổng tài sản",
+            (
+                "tổng cộng tài sản",
+                "tong cong tai san",
+                "tổng tài sản",
+                "tong tai san",
+            ),
+            codes=("270",),
+        ),
+        MetricDefinition(
+            "current_liabilities",
+            "Nợ ngắn hạn",
+            ("nợ ngắn hạn", "no ngan han"),
+            codes=("310",),
+        ),
         MetricDefinition(
             "accounts_payable",
             "Phải trả người bán",
@@ -106,6 +192,11 @@ class FinancialRatioCalculator:
                 "phai tra nguoi ban ngan han",
                 "phải trả người bán",
                 "phai tra nguoi ban",
+            ),
+            codes=("311",),
+            exclude=(
+                "phải trả người bán dài hạn",
+                "phai tra nguoi ban dai han",
             ),
         ),
         MetricDefinition(
@@ -117,23 +208,32 @@ class FinancialRatioCalculator:
                 "người mua trả tiền trước",
                 "nguoi mua tra tien truoc",
             ),
+            codes=("312",),
         ),
         MetricDefinition(
             "short_term_debt",
             "Vay và nợ thuê tài chính ngắn hạn",
             ("vay và nợ thuê tài chính ngắn hạn", "vay ngan han"),
+            codes=("320",),
         ),
         MetricDefinition(
             "long_term_debt",
             "Vay và nợ thuê tài chính dài hạn",
             ("vay và nợ thuê tài chính dài hạn", "vay dai han"),
+            codes=("338",),
         ),
         MetricDefinition(
             "total_liabilities",
             "Nợ phải trả",
             ("nợ phải trả", "no phai tra", "tong no phai tra", "tổng nợ phải trả"),
+            codes=("300",),
         ),
-        MetricDefinition("equity", "Vốn chủ sở hữu", ("vốn chủ sở hữu", "von chu so huu")),
+        MetricDefinition(
+            "equity",
+            "Vốn chủ sở hữu",
+            ("vốn chủ sở hữu", "von chu so huu"),
+            codes=("400", "410"),
+        ),
     )
 
     RATIO_DEFINITIONS: tuple[RatioDefinition, ...] = (
@@ -320,11 +420,15 @@ class FinancialRatioCalculator:
 
         return self.format_markdown(yearly_metrics, ratios)
 
-    STATEMENT_KEYS = (
-        "balance_sheet",
-        "income_statement",
-        "cash_flow_statement",
-    )
+    STATEMENT_KEYS = (BALANCE_SHEET, INCOME_STATEMENT, CASH_FLOW)
+
+    # Match scoring: a label that equals an alias outright beats a label that
+    # merely contains one; a corroborating Mã số outweighs both; a code with no
+    # label support is the weakest signal that is still worth using.
+    EXACT_LABEL_SCORE = 60
+    ALIAS_BASE_SCORE = 10
+    CODE_AGREEMENT_BONUS = 100
+    CODE_ONLY_SCORE = 40
 
     def extract_yearly_metrics(
         self,
@@ -338,6 +442,9 @@ class FinancialRatioCalculator:
         failed, or no extraction LLM configured) contributes nothing.
         """
         yearly_metrics: dict[str, dict[str, float]] = {}
+        # (year, metric_key) -> match score. Keeping the best-scoring row instead
+        # of the first one makes the result independent of line-item order.
+        best_score: dict[tuple[str, str], int] = {}
 
         for document in documents:
             extraction = document.get("bctc_extraction")
@@ -356,20 +463,14 @@ class FinancialRatioCalculator:
                     if not label or not isinstance(values, dict):
                         continue
 
-                    normalized_label = _normalize_text(label)
-                    metric = next(
-                        (
-                            metric
-                            for metric in self.METRICS
-                            if any(
-                                _normalize_text(alias) in normalized_label
-                                for alias in metric.aliases
-                            )
-                        ),
-                        None,
+                    matched = self.match_metric(
+                        label,
+                        line_item.get("code"),
+                        statement_key,
                     )
-                    if metric is None:
+                    if matched is None:
                         continue
+                    metric, score = matched
 
                     for year, raw_value in values.items():
                         try:
@@ -377,10 +478,78 @@ class FinancialRatioCalculator:
                         except (TypeError, ValueError):
                             continue
                         year_key = str(year)
+                        slot = (year_key, metric.key)
+                        if score <= best_score.get(slot, -1):
+                            continue
                         yearly_metrics.setdefault(year_key, {})
-                        yearly_metrics[year_key].setdefault(metric.key, value)
+                        yearly_metrics[year_key][metric.key] = value
+                        best_score[slot] = score
 
         return dict(sorted(yearly_metrics.items()))
+
+    @classmethod
+    def match_metric(
+        cls,
+        label: str,
+        code: Any,
+        statement_key: str,
+    ) -> tuple[MetricDefinition, int] | None:
+        """Map one statement line to a metric, with a confidence score.
+
+        The label is the primary key and the Mã số only corroborates it. Codes
+        extracted from poor scans are frequently wrong — in one real sample the
+        model returned 311 (phải trả người bán) for "Nợ ngắn hạn" — so letting a
+        code override a clear label would introduce errors rather than remove
+        them. A code is used on its own only when no label matches at all.
+        """
+
+        normalized_label = _normalize_text(label)
+        code_text = "" if code is None else str(code).strip()
+
+        candidates: list[tuple[MetricDefinition, int]] = []
+        for metric in cls.METRICS:
+            if statement_key not in metric.statements:
+                continue
+            if any(
+                _normalize_text(term) in normalized_label
+                for term in metric.exclude
+            ):
+                continue
+            hits = [
+                _normalize_text(alias)
+                for alias in metric.aliases
+                if _normalize_text(alias) in normalized_label
+            ]
+            if not hits:
+                continue
+            longest = max(hits, key=len)
+            # A longer alias is a more specific match than a shorter one.
+            score = (
+                cls.EXACT_LABEL_SCORE
+                if longest == normalized_label
+                else cls.ALIAS_BASE_SCORE + len(longest)
+            )
+            code_rank = _code_rank(code_text, metric.codes)
+            if code_rank is not None:
+                # Codes are listed aggregate-first ("140" before "141", "400"
+                # before "410"), so the earlier code wins a tie deterministically
+                # and the roll-up line beats its own sub-line.
+                score += cls.CODE_AGREEMENT_BONUS + (len(metric.codes) - code_rank)
+            if statement_key == metric.statements[0]:
+                score += 1
+            candidates.append((metric, score))
+
+        if candidates:
+            return max(candidates, key=lambda item: item[1])
+
+        # No label matched — OCR may have mangled it beyond recognition. Fall
+        # back to the code alone, which is the only remaining signal.
+        for metric in cls.METRICS:
+            if statement_key not in metric.statements:
+                continue
+            if _code_matches(code_text, metric.codes):
+                return metric, cls.CODE_ONLY_SCORE
+        return None
 
     def compute_ratios(
         self,
@@ -545,6 +714,28 @@ def _normalize_text(text: str) -> str:
     """Lowercase and remove Vietnamese accents for robust matching."""
     decomposed = unicodedata.normalize("NFD", text.lower())
     return "".join(char for char in decomposed if unicodedata.category(char) != "Mn")
+
+
+def _code_rank(code_text: str, codes: tuple[str, ...]) -> int | None:
+    """Index of ``code_text`` within a metric's whitelist, else None.
+
+    Leading zeros are ignored because statements write the same code as "01" or
+    "1" depending on the template.
+    """
+    if not code_text or not codes:
+        return None
+    candidate = code_text.strip()
+    variants = {candidate, candidate.lstrip("0") or "0"}
+    for index, code in enumerate(codes):
+        code = code.strip()
+        if code in variants or (code.lstrip("0") or "0") in variants:
+            return index
+    return None
+
+
+def _code_matches(code_text: str, codes: tuple[str, ...]) -> bool:
+    """Whether a Mã số is in a metric's whitelist."""
+    return _code_rank(code_text, codes) is not None
 
 
 def _safe_div(

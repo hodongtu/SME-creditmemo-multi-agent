@@ -9,11 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from src.utils.paths import PROJECT_ROOT
-
-from src.agents.financial_ratio_calculator import (
-    FinancialRatioCalculator,
-)
 from src.utils.extractors import extract_document_text
+
 
 SUPPORTED_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".csv", ".txt", ".md"}
 VALID_DOCUMENT_AGENTS = {
