@@ -202,6 +202,11 @@ class Supervisor:
     # Relative per-document budget weights in _build_user_input: a document's own
     # primary/general evidence should dominate shared/secondary evidence pulled in
     # from another agent's primary document.
+    # The deterministic ratio block goes to the agents that reason about the
+    # figures: the financial agent computes from them, the risk agent judges
+    # leverage and debt-service against them.
+    METRICS_BLOCK_AGENTS = ("FINANCIAL_ANALYSIS_AGENT", "RISK_ASSESSMENT_AGENT")
+
     PRIMARY_DOC_BUDGET_WEIGHT = 3
     SECONDARY_DOC_BUDGET_WEIGHT = 1
 
@@ -1905,7 +1910,6 @@ class Supervisor:
     ) -> dict[str, Any]:
         if not self.config.enable_hallucination_guardrail:
             return {"status": "DISABLED"}
-        usable = [doc for doc in documents if doc.extraction_status == "success"]
         return self.hallucination_guardrail.check(
             input_text,
             response,
@@ -1917,7 +1921,7 @@ class Supervisor:
             # The agent saw these deterministic figures; the judge must too,
             # otherwise correctly-derived ratios look unsupported.
             metrics_block=self._build_financial_metrics_block(
-                usable,
+                documents,
                 "FINANCIAL_ANALYSIS_AGENT",
             ),
         )
@@ -1964,7 +1968,7 @@ class Supervisor:
             return doc.agent == target_agent or doc.agent == "GENERAL_CONTEXT"
 
         metrics_block = self._build_financial_metrics_block(
-            usable,
+            documents,
             target_agent,
         )
         # State the periods explicitly: several BCTC files overlap by a year, so
@@ -2063,14 +2067,27 @@ class Supervisor:
 
     @staticmethod
     def _build_financial_metrics_block(
-        selected: list[ClassifiedDocument],
+        documents: list[ClassifiedDocument],
         target_agent: str,
     ) -> str:
-        if target_agent != "FINANCIAL_ANALYSIS_AGENT" or not selected:
+        """Deterministic ratio block for the agents that reason about figures.
+
+        Built from every successfully-extracted document rather than the target
+        agent's routed subset: the ratios are a derived fact about the customer,
+        and the risk agent is routed risk documents, not the BCTC the figures
+        come from — filtering by its own selection would yield an empty block.
+        """
+
+        if target_agent not in Supervisor.METRICS_BLOCK_AGENTS:
+            return ""
+        usable = [
+            doc for doc in documents if doc.extraction_status == "success"
+        ]
+        if not usable:
             return ""
         try:
             return FinancialRatioCalculator().build_analysis_block(
-                [asdict(doc) for doc in selected]
+                [asdict(doc) for doc in usable]
             )
         except Exception as exc:
             return f"[PRE-COMPUTED FINANCIAL METRICS unavailable: {exc}]"
