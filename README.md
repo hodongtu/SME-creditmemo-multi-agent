@@ -110,7 +110,7 @@ extensions: `.pdf .xlsx .xls .csv .txt .md` (capped by `max_files`).
   otherwise it **falls back to an LLM** classifier.
 - Each document is assigned a `DocumentAgentName`, deciding which agent will read it:
   `FINANCIAL_ANALYSIS_AGENT`, `BUSINESS_ACTIVITY_AGENT`, `CREDIT_RELATIONSHIP_AGENT`,
-  `RISK_ASSESSMENT_AGENT`, `CREDIT_PROPOSAL`, or `GENERAL_CONTEXT`.
+  `RISK_ASSESSMENT_AGENT`, `CREDIT_PROPOSAL_AGENT`, or `GENERAL_CONTEXT`.
 
 ### Stage 2 — Routing
 
@@ -146,28 +146,26 @@ This is the highest-value branch. Execution order in
 
 ```
         ┌──────────────────────── run IN PARALLEL (ThreadPoolExecutor) ─────────────────────┐
-        │  BusinessActivityAnalysis   CreditRelationshipAnalysis   FinancialAnalysis         │
-        │  (business ops)             (T24 + CIC/bureau tools)      (statements + ratios)     │
+        │  BusinessActivityAnalysis  CreditRelationshipAnalysis  FinancialAnalysis           │
+        │  (business ops)            (T24 + CIC/bureau)          (statements + ratios)       │
+        │                         CreditProposalAnalysis                                     │
+        │                         (facility, limit, tenor, collateral)                       │
         └───────────────────────────────────┬──────────────────────────────────────────────┘
                                              ▼
-                          CREDIT_PROPOSAL  (calculate_credit_proposal — deterministic)
-                                             ▼
-                          RISK_ASSESSMENT  (receives all 3 analyses + the credit proposal)
+                          RISK_ASSESSMENT  (receives all 4 analyses)
                                              ▼
                     CREDIT_MEMO_COMPOSER  (synthesizes everything into the memo)
                                              ▼
                               _finalize → hallucination check → format tỷ VNĐ
 ```
 
-1. **Three analysis agents run in parallel** — Business Activity, Credit Relationship, and
-   Financial Analysis all read the same document set and are independent, so they run concurrently
-   via `ThreadPoolExecutor` (max 3 workers, bounded by `LLM_MAX_CONCURRENCY` to respect the rate
-   limit).
-2. **Credit Proposal** — the `calculate_credit_proposal` function (deterministic) takes the three
-   analyses + documents to compute the credit proposal.
-3. **Risk Assessment** — receives **all** prior outputs (the three analyses + the credit proposal)
-   to assess overall risk.
-4. **Credit Memo Composer** — `CreditMemoComposerAgent` (LLM `MODEL_CREDIT_MEMO`) synthesizes
+1. **Four analysis agents run in parallel** — Business Activity, Credit Relationship, Financial
+   Analysis and Credit Proposal each read the document set routed to them and are independent, so
+   they run concurrently via `ThreadPoolExecutor` (max 4 workers, bounded by `LLM_MAX_CONCURRENCY`
+   to respect the rate limit).
+2. **Risk Assessment** — receives **all** prior outputs (the four analyses) to assess overall
+   risk.
+3. **Credit Memo Composer** — `CreditMemoComposerAgent` (LLM `MODEL_CREDIT_MEMO`) synthesizes
    everything into the final memo, capped by a character budget (`CREDIT_MEMO`, default 80k).
 
 ### Stage 4 — Finalization (`_finalize`)

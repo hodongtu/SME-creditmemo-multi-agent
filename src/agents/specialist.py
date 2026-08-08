@@ -43,7 +43,7 @@ class SpecialistAgent:
             return {}, text
         parts = text.split("---", 2)
         if len(parts) < 3:
-            return {}, text
+            return {}, text  
 
         metadata: dict[str, str] = {}
         key = ""
@@ -317,6 +317,28 @@ class CreditRelationshipAnalysis(SpecialistAgent):
     """
 
 
+class CreditProposalAnalysis(SpecialistAgent):
+    """Credit proposal specialist."""
+
+    name = "credit_proposal_agent"
+    structure_relative_path = "src/templates/credit-proposal-structure.md"
+    guidance_relative_path = "src/templates/credit-proposal-guidance.md"
+    intro = """You are an agent among a team of assistants. You are specialized
+    for drafting the credit proposal.
+
+    CORE RESPONSIBILITIES:
+    - Capture the customer's stated funding need, purpose and requested amount from
+    the supplied documents.
+    - Propose facility type, limit, tenor, disbursement and repayment method, tied to
+    the financial capacity evidenced in the documents.
+    - Identify the repayment sources and the collateral offered, with the basis for
+    each valuation.
+    - State the credit conditions that follow from the risks visible in the file.
+    - This is a PROPOSAL, not an approval. Never invent a limit, a valuation or a
+    repayment source that the documents do not support.
+    """
+
+
 class RiskAssessment(SpecialistAgent):
     """Credit risk assessment specialist."""
 
@@ -334,39 +356,6 @@ class RiskAssessment(SpecialistAgent):
     - Assess risks from business activity, credit relationship, financial analysis,
     and credit proposal outputs.
     """
-
-
-def calculate_credit_proposal(
-    input_text: str,
-    business_analysis: str,
-    credit_relationship_analysis: str,
-    financial_analysis: str,
-    documents: list[dict[str, Any]] | None = None,
-) -> str:
-    """Placeholder calculator for the Credit Proposal step."""
-
-    def bool_vi(value: bool) -> str:
-        """Render booleans in Vietnamese for the memo output."""
-
-        return "Có" if value else "Không"
-
-    return "\n".join(
-        [
-            "## Credit Proposal",
-            "",
-            "Tạm thời chưa cấu hình calculator đề xuất cấp tín dụng.",
-            "",
-            "### Tóm tắt đầu vào",
-            f"- Yêu cầu người dùng: {input_text}",
-            "- Có phân tích hoạt động kinh doanh: "
-            f"{bool_vi(bool(business_analysis.strip()))}",
-            "- Có phân tích quan hệ tín dụng: "
-            f"{bool_vi(bool(credit_relationship_analysis.strip()))}",
-            "- Có phân tích tài chính: "
-            f"{bool_vi(bool(financial_analysis.strip()))}",
-            f"- Số lượng tài liệu: {len(documents or [])}",
-        ]
-    )
 
 
 def build_credit_memo(

@@ -77,7 +77,7 @@ class Config:
                 "BUSINESS_ACTIVITY_AGENT": 20_000,
                 "CREDIT_RELATIONSHIP_AGENT": 20_000,
                 "RISK_ASSESSMENT_AGENT": 16_000,
-                "CREDIT_PROPOSAL": 8_000,
+                "CREDIT_PROPOSAL_AGENT": 8_000,
                 "CREDIT_MEMO": 80_000,
                 "GENERAL_CONTEXT": 12_000,
             }

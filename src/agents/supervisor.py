@@ -56,10 +56,10 @@ from src.agents.bctc_extraction import (
 from src.agents.specialist import (
     BusinessActivityAnalysis,
     CreditMemoComposerAgent,
+    CreditProposalAnalysis,
     CreditRelationshipAnalysis,
     FinancialAnalysis,
     RiskAssessment,
-    calculate_credit_proposal,
 )
 from src.agents.guardrails import (
     HallucinationGuardrail,
@@ -80,8 +80,8 @@ Available routes:
 - BUSINESS_ACTIVITY_AGENT: business operation or business performance analysis.
 - CREDIT_RELATIONSHIP_AGENT: credit relationship analysis using internal T24
   credit data and CIC/bureau data queried by tools.
-- CREDIT_PROPOSAL: credit proposal analysis or credit facility proposal
-  calculation. This route uses a calculator, not an LLM.
+- CREDIT_PROPOSAL_AGENT: credit proposal — requested facility, limit, tenor,
+  repayment source, collateral and credit conditions.
 - RISK_ASSESSMENT_AGENT: credit risk assessment only. It returns risk analysis,
   not a Credit Memo.
 - CREDIT_MEMO: create, draft, prepare, or generate a full underwriting Credit
@@ -96,14 +96,14 @@ Rules:
   facilities, outstanding balance, or repayment status, use CREDIT_RELATIONSHIP_AGENT.
 - If the user only asks to analyze or calculate a credit proposal, credit
   facility proposal, loan amount proposal, or đề xuất cấp tín dụng, use
-  CREDIT_PROPOSAL.
+  CREDIT_PROPOSAL_AGENT.
 - If the user asks for risk assessment, credit risk, approval view, or risk
   conclusion, use RISK_ASSESSMENT_AGENT.
 - If the user explicitly asks to create, draft, prepare, or generate a Credit
   Memo or báo cáo thẩm định, use CREDIT_MEMO.
 - CREDIT_MEMO must run the full underwriting workflow:
   BUSINESS_ACTIVITY_AGENT -> CREDIT_RELATIONSHIP_AGENT ->
-  FINANCIAL_ANALYSIS_AGENT -> CREDIT_PROPOSAL ->
+  FINANCIAL_ANALYSIS_AGENT -> CREDIT_PROPOSAL_AGENT ->
   RISK_ASSESSMENT_AGENT -> CREDIT_MEMO.
 - Return JSON only with route, reasoning, and confidence.
 """
@@ -583,9 +583,22 @@ class Supervisor:
         self,
         state: UnderwritingGraphState,
     ) -> UnderwritingGraphState:
-        """Run the single Credit Proposal calculator branch."""
+        """Run the standalone Credit Proposal branch."""
 
-        return {**state, "output_state": self._run_credit_proposal(state)}
+        return {
+            **state,
+            "output_state": self._run_single_agent(
+                "CREDIT_PROPOSAL_AGENT",
+                state.get("query", ""),
+                state.get("history_context", ""),
+                state.get("decision") or {},
+                state.get("documents") or [],
+                state.get("web_context", ""),
+                state.get("execution_plan") or {},
+                state.get("gap_analysis") or {},
+                state.get("steps", []),
+            ),
+        }
 
     def _graph_run_credit_memo(
         self,
@@ -641,37 +654,6 @@ class Supervisor:
             state.get("execution_plan") or {},
             state.get("gap_analysis") or {},
             state.get("steps", []),
-        )
-
-    def _run_credit_proposal(
-        self,
-        state: UnderwritingGraphState,
-    ) -> dict[str, Any]:
-        """Run the standalone Credit Proposal calculator."""
-
-        query = state.get("query", "")
-        documents = state.get("documents") or []
-        steps = state.get("steps", [])
-        steps.append("Running CREDIT_PROPOSAL calculator")
-        response = calculate_credit_proposal(
-            input_text=query,
-            business_analysis="",
-            credit_relationship_analysis="",
-            financial_analysis="",
-            documents=[asdict(doc) for doc in documents],
-        )
-        return self._finalize(
-            query,
-            response,
-            "CREDIT_PROPOSAL",
-            state.get("decision") or {},
-            documents,
-            {"CREDIT_PROPOSAL": response},
-            state.get("web_context", ""),
-            state.get("history_context", ""),
-            state.get("execution_plan") or {},
-            state.get("gap_analysis") or {},
-            steps,
         )
 
     def process(
@@ -966,7 +948,7 @@ class Supervisor:
         normalized = input_text.lower()
         keyword_routes = [
             (CREDIT_MEMO_KEYWORDS, "CREDIT_MEMO"),
-            (CREDIT_PROPOSAL_ROUTE_KEYWORDS, "CREDIT_PROPOSAL"),
+            (CREDIT_PROPOSAL_ROUTE_KEYWORDS, "CREDIT_PROPOSAL_AGENT"),
             (RISK_ASSESSMENT_ROUTE_KEYWORDS, "RISK_ASSESSMENT_AGENT"),
             (CREDIT_RELATIONSHIP_ROUTE_KEYWORDS, "CREDIT_RELATIONSHIP_AGENT"),
             (FINANCIAL_ROUTE_KEYWORDS, "FINANCIAL_ANALYSIS_AGENT"),
@@ -1051,7 +1033,7 @@ class Supervisor:
             "CREDIT_RELATIONSHIP_AGENT": "single_credit_relationship",
             "FINANCIAL_ANALYSIS_AGENT": "single_financial_analysis",
             "RISK_ASSESSMENT_AGENT": "single_risk_assessment",
-            "CREDIT_PROPOSAL": "single_credit_proposal",
+            "CREDIT_PROPOSAL_AGENT": "single_credit_proposal",
             "CREDIT_MEMO": "full_credit_memo",
         }
         return route_modes.get(route, "conversation")
@@ -1067,7 +1049,7 @@ class Supervisor:
         if self._contains_any(normalized, CREDIT_MEMO_KEYWORDS):
             return "CREDIT_MEMO"
         if self._contains_any(normalized, CREDIT_PROPOSAL_ROUTE_KEYWORDS):
-            return "CREDIT_PROPOSAL"
+            return "CREDIT_PROPOSAL_AGENT"
         if self._contains_any(normalized, RISK_ASSESSMENT_ROUTE_KEYWORDS):
             return "RISK_ASSESSMENT_AGENT"
         if self._contains_any(normalized, CREDIT_RELATIONSHIP_ROUTE_KEYWORDS):
@@ -1087,7 +1069,7 @@ class Supervisor:
                 "FINANCIAL_ANALYSIS_AGENT",
                 "BUSINESS_ACTIVITY_AGENT",
                 "CREDIT_RELATIONSHIP_AGENT",
-                "CREDIT_PROPOSAL",
+                "CREDIT_PROPOSAL_AGENT",
                 "RISK_ASSESSMENT_AGENT",
             ]:
                 if candidate in document_routes:
@@ -1098,7 +1080,7 @@ class Supervisor:
             "BUSINESS_ACTIVITY_AGENT",
             "CREDIT_RELATIONSHIP_AGENT",
             "RISK_ASSESSMENT_AGENT",
-            "CREDIT_PROPOSAL",
+            "CREDIT_PROPOSAL_AGENT",
             "CREDIT_MEMO",
         }:
             return route
@@ -1109,7 +1091,7 @@ class Supervisor:
         if self._contains_any(normalized, CREDIT_MEMO_KEYWORDS):
             return "CREDIT_MEMO"
         if self._contains_any(normalized, CREDIT_PROPOSAL_ROUTE_KEYWORDS):
-            return "CREDIT_PROPOSAL"
+            return "CREDIT_PROPOSAL_AGENT"
         if self._contains_any(
             normalized,
             RISK_ASSESSMENT_ROUTE_KEYWORDS
@@ -1156,7 +1138,7 @@ class Supervisor:
             "FINANCIAL_ANALYSIS_AGENT": "financial_documents",
             "BUSINESS_ACTIVITY_AGENT": "business_activity_documents",
             "CREDIT_RELATIONSHIP_AGENT": "credit_relationship_documents",
-            "CREDIT_PROPOSAL": "credit_proposal_documents",
+            "CREDIT_PROPOSAL_AGENT": "credit_proposal_documents",
             "RISK_ASSESSMENT_AGENT": "risk_assessment_documents",
             "GENERAL_CONTEXT": "general_context",
         }
@@ -1253,7 +1235,7 @@ class Supervisor:
                 "BUSINESS_ACTIVITY_AGENT",
                 "CREDIT_RELATIONSHIP_AGENT",
                 "FINANCIAL_ANALYSIS_AGENT",
-                "CREDIT_PROPOSAL",
+                "CREDIT_PROPOSAL_AGENT",
                 "RISK_ASSESSMENT_AGENT",
                 "CREDIT_MEMO",
             ]
@@ -1269,8 +1251,8 @@ class Supervisor:
         elif route == "RISK_ASSESSMENT_AGENT":
             agents = ["RISK_ASSESSMENT_AGENT"]
             order = ["risk_assessment", "reflection"]
-        elif route == "CREDIT_PROPOSAL":
-            agents = ["CREDIT_PROPOSAL"]
+        elif route == "CREDIT_PROPOSAL_AGENT":
+            agents = ["CREDIT_PROPOSAL_AGENT"]
             order = ["credit_proposal_calculation", "reflection"]
         elif route in {
             "FINANCIAL_ANALYSIS_AGENT",
@@ -1390,34 +1372,18 @@ class Supervisor:
             web_context,
             gap_analysis,
         )
-        if agent_name == "CREDIT_RELATIONSHIP_AGENT":
-            user_input = f"""
-            {user_input}
-
-            Instruction:
-            - Use T24 and CIC/bureau database tools when customer identifiers
-              are available.
-            - If tool data is unavailable, clearly state the limitation.
-            """
-        if agent_name == "RISK_ASSESSMENT_AGENT":
-            user_input = f"""
-            {user_input}
-
-            Instruction:
-            - Return only the Risk Assessment analysis.
-            - Do not compose a Credit Memo or underwriting report.
-            """
         if agent_name == "FINANCIAL_ANALYSIS_AGENT":
             agent = FinancialAnalysis(self.config.analysis_llm)
         elif agent_name == "CREDIT_RELATIONSHIP_AGENT":
-            agent = CreditRelationshipAnalysis(
-                self.config.analysis_llm
-            )
+            agent = CreditRelationshipAnalysis(self.config.analysis_llm)
         elif agent_name == "RISK_ASSESSMENT_AGENT":
             agent = RiskAssessment(self.config.analysis_llm)
+        elif agent_name == "CREDIT_PROPOSAL_AGENT":
+            agent = CreditProposalAnalysis(self.config.analysis_llm)
         else:
             agent = BusinessActivityAnalysis(self.config.analysis_llm)
         response = extract_text_from_agent_output(agent.analyze(user_input))
+
         return self._finalize(
             input_text,
             response,
@@ -1448,8 +1414,9 @@ class Supervisor:
         # provider rate limit via LLM_MAX_CONCURRENCY). RISK + the memo composer
         # below still receive all three outputs, so report quality is unchanged.
         steps.append(
-            "Running BUSINESS_ACTIVITY / CREDIT_RELATIONSHIP / FINANCIAL "
-            f"agents in parallel (max_concurrency={self.config.max_concurrency})"
+            "Running BUSINESS_ACTIVITY / CREDIT_RELATIONSHIP / FINANCIAL / "
+            "CREDIT_PROPOSAL_AGENT agents in parallel "
+            f"(max_concurrency={self.config.max_concurrency})"
         )
 
         def _run_business() -> str:
@@ -1504,23 +1471,31 @@ class Supervisor:
                 )
             )
 
-        max_workers = max(1, min(3, self.config.max_concurrency))
+        def _run_proposal() -> str:
+            proposal_input = self._build_user_input(
+                input_text,
+                documents,
+                history_context,
+                "CREDIT_PROPOSAL_AGENT",
+                web_context,
+                gap_analysis,
+            )
+            return extract_text_from_agent_output(
+                CreditProposalAnalysis(self.config.analysis_llm).analyze(
+                    proposal_input
+                )
+            )
+
+        max_workers = max(1, min(4, self.config.max_concurrency))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             business_future = executor.submit(_run_business)
             credit_relationship_future = executor.submit(_run_credit_relationship)
             financial_future = executor.submit(_run_financial)
+            proposal_future = executor.submit(_run_proposal)
             business_text = business_future.result()
             credit_relationship_text = credit_relationship_future.result()
             financial_text = financial_future.result()
-
-        steps.append("Running CREDIT_PROPOSAL calculator")
-        credit_proposal_text = calculate_credit_proposal(
-            input_text=input_text,
-            business_analysis=business_text,
-            credit_relationship_analysis=credit_relationship_text,
-            financial_analysis=financial_text,
-            documents=[asdict(doc) for doc in documents],
-        )
+            credit_proposal_text = proposal_future.result()
 
         steps.append("Running RISK_ASSESSMENT_AGENT")
         risk_context = self._build_user_input(
@@ -1543,7 +1518,7 @@ class Supervisor:
         Financial analysis from FINANCIAL_ANALYSIS_AGENT:
         {financial_text}
 
-        Credit proposal from CREDIT_PROPOSAL calculator:
+        Credit proposal from CREDIT_PROPOSAL_AGENT:
         {credit_proposal_text}
         """
         risk_text = extract_text_from_agent_output(
@@ -1569,7 +1544,7 @@ class Supervisor:
             "BUSINESS_ACTIVITY_AGENT": business_text,
             "CREDIT_RELATIONSHIP_AGENT": credit_relationship_text,
             "FINANCIAL_ANALYSIS_AGENT": financial_text,
-            "CREDIT_PROPOSAL": credit_proposal_text,
+            "CREDIT_PROPOSAL_AGENT": credit_proposal_text,
             "RISK_ASSESSMENT_AGENT": risk_text,
             "CREDIT_MEMO": response,
         }
@@ -1578,7 +1553,7 @@ class Supervisor:
             response,
             (
                 "BUSINESS_ACTIVITY_AGENT, CREDIT_RELATIONSHIP_AGENT, "
-                "FINANCIAL_ANALYSIS_AGENT, CREDIT_PROPOSAL, "
+                "FINANCIAL_ANALYSIS_AGENT, CREDIT_PROPOSAL_AGENT, "
                 "RISK_ASSESSMENT_AGENT, CREDIT_MEMO_COMPOSER_AGENT"
             ),
             decision,

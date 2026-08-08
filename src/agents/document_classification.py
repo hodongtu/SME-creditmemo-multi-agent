@@ -17,7 +17,7 @@ VALID_DOCUMENT_AGENTS = {
     "FINANCIAL_ANALYSIS_AGENT",
     "BUSINESS_ACTIVITY_AGENT",
     "CREDIT_RELATIONSHIP_AGENT",
-    "CREDIT_PROPOSAL",
+    "CREDIT_PROPOSAL_AGENT",
     "RISK_ASSESSMENT_AGENT",
     "GENERAL_CONTEXT",
 }
@@ -177,7 +177,7 @@ DOCUMENT_KEYWORD_GROUPS = {
     "FINANCIAL_ANALYSIS_AGENT": FINANCIAL_KEYWORDS,
     "BUSINESS_ACTIVITY_AGENT": BUSINESS_KEYWORDS,
     "CREDIT_RELATIONSHIP_AGENT": CREDIT_RELATIONSHIP_DOCUMENT_KEYWORDS,
-    "CREDIT_PROPOSAL": CREDIT_PROPOSAL_DOCUMENT_KEYWORDS,
+    "CREDIT_PROPOSAL_AGENT": CREDIT_PROPOSAL_DOCUMENT_KEYWORDS,
     "RISK_ASSESSMENT_AGENT": RISK_KEYWORDS,
 }
 
@@ -327,7 +327,7 @@ Choose the single best PRIMARY target agent:
   CIC/PCB bureau reports, existing facilities, outstanding balance,
   repayment status, overdue debt, debt group, or credit institutions.
 
-- CREDIT_PROPOSAL: credit proposal, loan proposal, proposed credit limit,
+- CREDIT_PROPOSAL_AGENT: credit proposal, loan proposal, proposed credit limit,
   facility terms, proposed amount, or đề xuất cấp tín dụng documents.
 
 - RISK_ASSESSMENT_AGENT: collateral, repayment source, risk report, and
