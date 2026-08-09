@@ -25,6 +25,9 @@ xlrd==2.0.2              # legacy .xls reading via pandas
 markdown==3.10.3         # Markdown -> HTML for PDF export
 weasyprint==69.0         # HTML -> PDF (needs Pango/Cairo/GLib, see above)
 
+# --- Configuration ---
+pyyaml==6.0.3            # src/matrix/document_matrix.yaml (document routing)
+
 # --- Runtime / notebook ---
 python-dotenv==1.2.2
 nest-asyncio==1.6.0

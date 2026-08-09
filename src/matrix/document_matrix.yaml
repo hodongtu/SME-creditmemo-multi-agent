@@ -1,0 +1,550 @@
+# =============================================================================
+# MA TRẬN PHÂN LOẠI TÀI LIỆU  (nhóm hồ sơ -> loại tài liệu -> agent sử dụng)
+# =============================================================================
+# Nguồn: docs/document_matrix.xlsx — bản nghiệp vụ, KHÔNG nằm trong repo
+# (xem .gitignore). File này là bản chép tay của workbook đó; sửa workbook thì
+# phải cập nhật lại đây bằng tay.
+#
+# ĐÂY LÀ NGUỒN SỰ THẬT cho việc định tuyến tài liệu. Sửa file này là đổi được
+# tài liệu nào đi tới agent nào — không cần đụng vào code Python.
+#
+# --- Cách đọc một `type` -----------------------------------------------------
+#   id        : khoá kỹ thuật, không đổi (đã ghi vào log/monitoring).
+#   label     : nguyên văn dòng chứng từ trong file Excel gốc.
+#   keywords  : từ khoá nhận diện loại tài liệu này từ TÊN FILE và NỘI DUNG.
+#               Viết không dấu, chữ thường. Hệ thống tự bỏ dấu + hạ chữ thường
+#               cả từ khoá lẫn văn bản trước khi so, nên viết có dấu vẫn chạy;
+#               để không dấu cho thống nhất và thấy rõ dạng đem đi so khớp.
+#               Trùng tên file được tính điểm nặng gấp 3 lần trùng nội dung.
+#   agents    : agent nào dùng loại tài liệu này, kèm mức R/O.
+#                 R = Required — bằng chứng cốt lõi, được ưu tiên ngân sách.
+#                 O = Optional — có thì dùng, xếp sau R.
+#               Giá trị dạng scalar (`R`) = giống nhau ở cả 4 chương trình vay.
+#               Giá trị dạng map = tách theo chương trình, PHẢI ghi đủ cả 4.
+#   requirement : cột "Cấp mới"/"Tái cấp" của file gốc. Hiện CHƯA đấu vào logic,
+#               giữ lại để sau này dựng checklist hồ sơ còn thiếu.
+#   bctc_extraction : true = kích hoạt bước trích xuất BCTC ra JSON có cấu trúc
+#               (src/agents/bctc_extraction.py).
+#
+# --- Chọn agent chính --------------------------------------------------------
+# `primary_agent` khai ở cấp nhóm, áp cho mọi loại trong nhóm. Nếu agent đó
+# không có mặt trong `agents` của loại (vd I.1 chỉ có RA) thì lấy agent mức R
+# đầu tiên theo thứ tự CP > CR > FS > BA > RA. Có thể override ở cấp loại.
+#
+# Nhóm VI không tồn tại trong file gốc (đánh số nhảy V -> VII). Giữ nguyên.
+# =============================================================================
+
+version: 1
+
+# 4 chương trình vay. File Excel gộp B1CP/MISA/PL++ vào một cột vì hiện đang
+# giống nhau; ở đây tách hẳn để khi nào lệch nhau chỉ cần sửa giá trị.
+#
+# `aliases` = cách người dùng có thể gọi chương trình đó trong câu hỏi. Hệ thống
+# dò các cụm này trong prompt để biết dùng cột nào (xem detect_loan_program).
+# Alias được chuẩn hoá y như từ khoá tài liệu: bỏ dấu, hạ chữ thường, mọi ký tự
+# không phải chữ/số thành khoảng trắng — nên "PL++" và "PL+" đều thành "pl".
+# So khớp theo trọn token, vì vậy "P/L" (thành "p l") KHÔNG bị nhận nhầm.
+# Một alias chỉ được trỏ tới một chương trình; trùng là lỗi ngay lúc load.
+loan_programs:
+  - id: B1CP
+    label: "B1CP"
+    aliases: ["b1cp", "b1 cp"]
+  - id: MISA
+    label: "MISA"
+    aliases: ["misa"]
+  - id: PLPP
+    label: "PL++"
+    aliases: ["pl++", "pl+", "plpp", "pl cong cong"]
+  - id: PLO
+    label: "PLO"
+    aliases: ["plo"]
+
+groups:
+
+  # ===========================================================================
+  - id: ho_so_phap_ly
+    label: "Hồ sơ pháp lý"
+    primary_agent: BUSINESS_ACTIVITY_AGENT
+    types:
+
+      - id: giay_dang_ky_kinh_doanh
+        label: >-
+          Giấy chứng nhận đăng ký kinh doanh/Quyết định thành lập và hoạt động/
+          Giấy phép đầu tư, Giấy chứng nhận đầu tư mà đồng thời là Giấy chứng
+          nhận đăng ký kinh doanh/Giấy tờ khác có giá trị pháp lý tương đương
+          theo đúng quy định pháp luật
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Nếu có thông tin cập nhật"
+        agents:
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "giay chung nhan dang ky kinh doanh"
+          - "giay chung nhan dang ky doanh nghiep"
+          - "dang ky kinh doanh"
+          - "dang ky doanh nghiep"
+          - "quyet dinh thanh lap"
+          - "giay phep dau tu"
+          - "giay chung nhan dau tu"
+          - "dkkd"
+          - "gpkd"
+          - "ma so doanh nghiep"
+          - "nganh nghe kinh doanh"
+          - "business registration"
+          - "enterprise registration"
+
+      - id: giay_phep_du_dieu_kien
+        label: >-
+          Giấy phép/Giấy chứng nhận đủ điều kiện áp dụng đối với doanh nghiệp
+          hoạt động trong lĩnh vực, ngành nghề kinh doanh có điều kiện
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Nếu có thông tin cập nhật"
+        agents:
+          BUSINESS_ACTIVITY_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "giay chung nhan du dieu kien"
+          - "du dieu kien"
+          - "nganh nghe kinh doanh co dieu kien"
+          - "giay phep con"
+          - "giay phep hoat dong"
+          - "chung chi hanh nghe"
+          - "giay phep moi truong"
+          - "an toan thuc pham"
+
+      - id: pccc_bao_hiem_chay_no
+        label: >-
+          Bảo hiểm cháy nổ nhà xưởng hoặc Giấy chứng nhận an toàn phòng cháy
+          chữa cháy/Biên bản an toàn PCCC có xác nhận của cán bộ công an.
+        requirement:
+          cap_moi: "Bắt buộc với từng chân dung KH"
+          tai_cap: "Bắt buộc với từng chân dung KH"
+        agents:
+          BUSINESS_ACTIVITY_AGENT: O
+          FINANCIAL_ANALYSIS_AGENT: O
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "bao hiem chay no"
+          - "phong chay chua chay"
+          - "pccc"
+          - "an toan phong chay"
+          - "bien ban an toan pccc"
+          - "chay no bat buoc"
+
+      - id: so_huu_thue_nha_xuong
+        label: >-
+          Giấy tờ chứng minh quyền sở hữu nhà xưởng & chứng từ chứng minh mối
+          quan hệ giữa Đại diện pháp luật/Cổ đông/Cá nhân góp vốn với chủ sở hữu
+          tài sản; hoặc Hợp đồng thuê nhà xưởng
+        requirement:
+          cap_moi: "Bắt buộc với từng chân dung KH"
+          tai_cap: "Bắt buộc với từng chân dung KH"
+        agents:
+          BUSINESS_ACTIVITY_AGENT: R
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "quyen so huu nha xuong"
+          - "hop dong thue nha xuong"
+          - "thue nha xuong"
+          - "nha xuong"
+          - "hop dong thue kho"
+          - "hop dong thue mat bang"
+          - "thue mat bang"
+
+  # ===========================================================================
+  - id: ho_so_tai_chinh
+    label: "Hồ sơ tài chính"
+    primary_agent: FINANCIAL_ANALYSIS_AGENT
+    types:
+
+      - id: bao_cao_tai_chinh
+        label: "Báo cáo tài chính 2 năm gần nhất"
+        requirement:
+          cap_moi: ""
+          tai_cap: ""
+        bctc_extraction: true
+        agents:
+          FINANCIAL_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "bctc"
+          - "bao cao tai chinh"
+          - "thuyet minh bao cao tai chinh"
+          - "tmbctc"
+          - "bao cao luu chuyen tien te"
+          - "luu chuyen tien te"
+          - "lctt"
+          - "bao cao kiem toan"
+          - "financial statement"
+          - "audit report"
+
+      - id: bang_can_doi_ke_toan
+        label: "Bảng cân đối kế toán"
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        bctc_extraction: true
+        agents:
+          FINANCIAL_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "bang can doi ke toan"
+          - "can doi ke toan"
+          - "cdkt"
+          - "balance sheet"
+          - "von chu so huu"
+          - "no phai tra"
+
+      - id: bao_cao_ket_qua_kinh_doanh
+        label: "Báo cáo kết quả kinh doanh"
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        bctc_extraction: true
+        agents:
+          FINANCIAL_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "bao cao ket qua hoat dong kinh doanh"
+          - "bao cao ket qua kinh doanh"
+          - "ket qua kinh doanh"
+          - "kqkd"
+          - "income statement"
+          - "gia von hang ban"
+          - "loi nhuan sau thue"
+
+      - id: to_khai_thue_gtgt
+        label: >-
+          Tờ khai thuế GTGT năm gần nhất và của các tháng/quý liền kề trước thời
+          điểm đề xuất cấp tín dụng của năm hiện tại; HOẶC Sao kê tài khoản của
+          KH tại TCTD 06 tháng gần nhất; HOẶC Ảnh chụp phần mềm bán hàng
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        agents:
+          FINANCIAL_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "to khai thue gtgt"
+          - "to khai gia tri gia tang"
+          - "to khai thue"
+          - "thue gtgt"
+          - "gtgt"
+          - "vat declaration"
+          # "Ảnh chụp phần mềm bán hàng" là một phương án thay thế của chính
+          # dòng này, nên từ khoá đặt ở đây (III.4 cũng nhắc tới nhưng chỉ như
+          # một chứng từ kèm theo).
+          - "phan mem ban hang"
+
+      - id: sao_ke_tai_khoan_tctd
+        label: >-
+          Sao kê tài khoản của KH tại TCTD 06 tháng gần nhất áp dụng đối với các
+          KH chưa đáp ứng tiêu chí tín chấp liên quan đến "Số ngày phải thu +
+          Số ngày tồn kho"
+        requirement:
+          cap_moi: "Bắt buộc với từng chân dung KH"
+          tai_cap: "Bắt buộc với từng chân dung KH"
+        agents:
+          FINANCIAL_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "sao ke tai khoan"
+          - "sao ke ngan hang"
+          - "sao ke tctd"
+          - "sao ke tai khoan thanh toan"
+          - "bank statement"
+          - "phat sinh no"
+          - "phat sinh co"
+
+      - id: bang_ke_xuat_nhap_ton_cong_no
+        label: >-
+          Bảng tổng hợp xuất nhập tồn, phải thu, phải trả của năm tài chính gần
+          nhất hoặc cập nhật đến thời điểm gần nhất; hoặc Bảng kê chi tiết hàng
+          tồn kho, chi tiết công nợ với người mua và người bán
+        requirement:
+          cap_moi: "Bắt buộc với từng chân dung KH"
+          tai_cap: "Bắt buộc với từng chân dung KH"
+        # Dòng DUY NHẤT trong toàn ma trận có mức khác nhau giữa các chương
+        # trình vay: PLO coi là bắt buộc, ba chương trình còn lại là tuỳ chọn.
+        agents:
+          BUSINESS_ACTIVITY_AGENT:  {B1CP: O, MISA: O, PLPP: O, PLO: R}
+          FINANCIAL_ANALYSIS_AGENT: {B1CP: O, MISA: O, PLPP: O, PLO: R}
+          RISK_ASSESSMENT_AGENT:    {B1CP: O, MISA: O, PLPP: O, PLO: R}
+        keywords:
+          - "xuat nhap ton"
+          - "bang tong hop xuat nhap ton"
+          - "bang ke chi tiet hang ton kho"
+          - "chi tiet cong no"
+          - "cong no phai thu"
+          - "cong no phai tra"
+          - "phai thu khach hang"
+          - "phai tra nguoi ban"
+          - "cong no nguoi mua"
+          - "cong no nguoi ban"
+          - "hang ton kho"
+          - "so du dau ky"
+          - "so du cuoi ky"
+
+      - id: so_chi_tiet_khoan_muc_khac
+        label: "Các sổ chi tiết khoản mục khác (nếu có)"
+        requirement:
+          cap_moi: "Khuyến khích"
+          tai_cap: "Khuyến khích"
+        agents:
+          FINANCIAL_ANALYSIS_AGENT: O
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "so chi tiet tai khoan"
+          - "so chi tiet"
+          - "so cai"
+          - "so nhat ky chung"
+          - "bang can doi so phat sinh"
+          - "general ledger"
+
+  # ===========================================================================
+  - id: ho_so_vay_von
+    label: "Hồ sơ vay vốn"
+    primary_agent: CREDIT_PROPOSAL_AGENT
+    types:
+
+      - id: de_nghi_cap_tin_dung
+        label: >-
+          Đề nghị cấp tín dụng/hạn mức kiêm phương án kinh doanh/sử dụng vốn
+          trong đó nêu rõ phương án/kế hoạch kinh doanh/sử dụng vốn của năm đề
+          nghị cấp hạn mức; Đề nghị phát hành bảo lãnh.
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        agents:
+          BUSINESS_ACTIVITY_AGENT: R
+          FINANCIAL_ANALYSIS_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "de nghi cap tin dung"
+          - "giay de nghi vay von"
+          - "de nghi vay von"
+          - "de nghi cap han muc"
+          - "de nghi phat hanh bao lanh"
+          - "phuong an kinh doanh"
+          - "phuong an su dung von"
+          - "phuong an vay von"
+          - "ke hoach kinh doanh"
+          - "nguon tra no"
+          - "phuong an tra no"
+          - "credit proposal"
+          - "loan proposal"
+
+      - id: hop_dong_dau_ra_dau_vao
+        label: >-
+          Một số hợp đồng đầu ra, đầu vào đã thực hiện - tối thiểu 3 hợp đồng
+          cho từng loại với KH đầu vào, đầu ra chính hoặc các hợp đồng có tổng
+          giá trị chiếm trên 50% giá vốn/doanh thu năm gần nhất.
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        agents:
+          BUSINESS_ACTIVITY_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "hop dong dau ra"
+          - "hop dong dau vao"
+          - "hop dong kinh te"
+          - "hop dong mua ban"
+          - "hop dong nguyen tac"
+          - "hop dong cung cap"
+          - "bang ke mua hang"
+          - "don dat hang"
+          - "nha cung cap"
+          - "hoa don"
+
+      - id: ho_so_tien_do_nang_luc_hop_dong
+        label: >-
+          Hồ sơ tiến độ, năng lực thực hiện hợp đồng kì kế hoạch: Bảng tiến độ
+          thực hiện hợp đồng các gói thầu đang thực hiện; hợp đồng đầu ra lớn
+          nhất kèm Biên bản nghiệm thu khối lượng hoàn thành gần nhất và sao kê
+          tài khoản thể hiện giá trị đã thanh toán
+        requirement:
+          cap_moi: "Bắt buộc với từng chân dung KH"
+          tai_cap: "Bắt buộc với từng chân dung KH"
+        agents:
+          BUSINESS_ACTIVITY_AGENT: R
+          FINANCIAL_ANALYSIS_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "bang tien do thuc hien hop dong"
+          - "tien do thuc hien hop dong"
+          - "goi thau"
+          - "nang luc thuc hien hop dong"
+          - "ho so nang luc"
+          - "hop dong dang thuc hien"
+
+      - id: sao_ke_quyet_toan_hop_dong_lon
+        label: >-
+          Hồ sơ sao kê tài khoản/Quyết toán/BBNT/Bảng tiến độ thực hiện các HĐ
+          lớn (chiếm trên 30%DT)/Phần mềm bán hàng
+        requirement:
+          cap_moi: "Bắt buộc với từng chân dung KH"
+          tai_cap: "Bắt buộc với từng chân dung KH"
+        agents:
+          BUSINESS_ACTIVITY_AGENT: R
+          FINANCIAL_ANALYSIS_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "bien ban nghiem thu khoi luong"
+          - "bien ban nghiem thu"
+          - "nghiem thu khoi luong hoan thanh"
+          - "bbnt"
+          - "quyet toan hop dong"
+          - "quyet toan"
+          - "hop dong lon"
+
+  # ===========================================================================
+  - id: ho_so_tai_san_dam_bao
+    label: "Hồ sơ tài sản đảm bảo"
+    primary_agent: RISK_ASSESSMENT_AGENT
+    types:
+
+      - id: ho_so_tsbd
+        label: >-
+          Hồ sơ TSBĐ: Giấy tờ chứng minh quyền sở hữu và quyền sử dụng hợp pháp
+          đối với TSBĐ theo đúng các quy định, hướng dẫn của NH về nhận TSBĐ
+          trong từng thời kỳ
+        requirement:
+          cap_moi: "Không bắt buộc"
+          tai_cap: "Không bắt buộc"
+        agents:
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "tai san bao dam"
+          - "tai san the chap"
+          - "tsbd"
+          - "ho so tsbd"
+          - "giay chung nhan quyen su dung dat"
+          - "quyen su dung dat"
+          - "the chap"
+          - "collateral"
+
+      - id: chung_thu_dinh_gia
+        label: "Phiếu định giá/Chứng thư định giá"
+        requirement:
+          cap_moi: "Không bắt buộc"
+          tai_cap: "Không bắt buộc"
+        agents:
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "chung thu dinh gia"
+          - "phieu dinh gia"
+          - "dinh gia tai san"
+          - "bien ban dinh gia"
+          - "ket qua dinh gia"
+
+  # ===========================================================================
+  - id: ho_so_noi_bo
+    label: "Hồ sơ nội bộ"
+    primary_agent: CREDIT_RELATIONSHIP_AGENT
+    types:
+
+      - id: cic_khach_hang_vay
+        label: "Thông tin CIC của khách hàng vay"
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        agents:
+          FINANCIAL_ANALYSIS_AGENT: R
+          CREDIT_RELATIONSHIP_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "thong tin cic cua khach hang vay"
+          - "cic khach hang vay"
+          - "thong tin cic"
+          - "bao cao cic"
+          - "cic"
+          - "trung tam thong tin tin dung"
+          - "quan he tin dung"
+          - "lich su tin dung"
+          - "nhom no"
+          - "no qua han"
+          - "no xau"
+          - "no can chu y"
+          - "du no vay"
+          - "to chuc tin dung"
+          - "xep hang tin dung"
+          - "credit bureau"
+
+      - id: cic_tai_san_bao_dam
+        label: "Thông tin CIC Tài sản bảo đảm của Khách hàng vay"
+        requirement:
+          cap_moi: "Không bắt buộc"
+          tai_cap: "Không bắt buộc"
+        agents:
+          CREDIT_RELATIONSHIP_AGENT: O
+          RISK_ASSESSMENT_AGENT: O
+        keywords:
+          - "thong tin cic tai san bao dam"
+          - "cic tai san bao dam"
+          - "cic tsbd"
+
+      - id: cic_dai_dien_phap_luat_co_dong
+        label: >-
+          Thông tin CIC Đại diện pháp luật, cổ đông/cá nhân góp vốn sở hữu
+          >= 30% vốn cổ phần
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        agents:
+          CREDIT_RELATIONSHIP_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "thong tin cic dai dien phap luat"
+          - "cic dai dien phap luat"
+          - "cic co dong"
+
+  # ===========================================================================
+  - id: ho_so_soan_thao_noi_bo
+    label: "Hồ sơ soạn thảo nội bộ"
+    primary_agent: BUSINESS_ACTIVITY_AGENT
+    types:
+
+      - id: bao_cao_khao_sat_thuc_dia
+        label: "Báo cáo khảo sát thực địa và đề xuất cấp tín dụng"
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        agents:
+          BUSINESS_ACTIVITY_AGENT: R
+          FINANCIAL_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "bao cao khao sat thuc dia"
+          - "khao sat thuc dia"
+          - "bien ban khao sat"
+          - "tham dinh thuc te"
+          - "bao cao tham dinh"
+          - "to trinh tham dinh"
+          - "to trinh cap tin dung"
+          - "bao cao de xuat cap tin dung"
+          - "de xuat cap tin dung"
+          - "danh gia rui ro"
+
+      - id: bao_cao_gioi_han_tin_dung_nhom_kh
+        label: >-
+          Báo cáo thông tin giới hạn tín dụng của Khách hàng và Nhóm khách hàng
+          liên quan (nếu có)
+        requirement:
+          cap_moi: "Bắt buộc"
+          tai_cap: "Bắt buộc"
+        agents:
+          BUSINESS_ACTIVITY_AGENT: R
+          FINANCIAL_ANALYSIS_AGENT: R
+          RISK_ASSESSMENT_AGENT: R
+        keywords:
+          - "bao cao thong tin gioi han tin dung"
+          - "gioi han tin dung"
+          - "nhom khach hang lien quan"
+          - "khach hang lien quan"
+          - "nguoi co lien quan"

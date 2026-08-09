@@ -1,9 +1,37 @@
-"""Small text matching helpers."""
+"""Small text matching helpers.
+
+Deliberately free of project imports so the lowest-level modules (the document
+matrix loader, classification) can all share ``normalize_text`` without an
+import cycle.
+"""
+
+from __future__ import annotations
+
+import re
+import unicodedata
 
 
 def contains_any(text: str, keywords: list[str]) -> bool:
     """Return True when any keyword appears in the input text."""
     return any(keyword in text for keyword in keywords)
+
+
+def normalize_text(text: str) -> str:
+    """Lowercase and strip Vietnamese accents for robust keyword matching.
+
+    OCR output frequently drops or mangles diacritics, so matching must be
+    accent-insensitive (e.g. "báo cáo" and "bao cao" must match the same key).
+    """
+
+    # Vietnamese "đ"/"Đ" do NOT decompose under NFD, so map them explicitly.
+    lowered = (text or "").lower().replace("đ", "d")
+    decomposed = unicodedata.normalize("NFD", lowered)
+    stripped = "".join(
+        ch for ch in decomposed if unicodedata.category(ch) != "Mn"
+    )
+    # Collapse separators/punctuation to single spaces so filename tokens
+    # ("BCTC_2024", "de_xuat_cap_tin_dung") match space-delimited keywords.
+    return re.sub(r"[^0-9a-z]+", " ", stripped).strip()
 
 
 def show_graph(graph, xray=False):

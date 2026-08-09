@@ -9,6 +9,13 @@ logs/
 # Customer data — never commit
 testing/samples/
 
+# Internal bank source documents — never commit.
+# The routing matrix is transcribed into src/matrix/document_matrix.yaml, which
+# IS tracked because the code cannot load without it; the source workbook stays
+# local. Keep the two in sync by hand.
+docs/*.xlsx
+docs/*.xls
+
 # Python
 __pycache__/
 *.py[cod]

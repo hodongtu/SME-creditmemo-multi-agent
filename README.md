@@ -105,12 +105,33 @@ extensions: `.pdf .xlsx .xls .csv .txt .md` (capped by `max_files`).
 **4. `classify_documents`** — For each file:
 - **Text extraction**: PDF → OCR (`pypdfium2` renders pages → image preprocessing → Tesseract,
   cached by file hash); XLSX/CSV → tabular read via pandas.
-- **Classification**: scores against `DOCUMENT_KEYWORD_GROUPS` (rule-based). If confidence ≥
-  threshold (`document_classifier_rule_confidence_threshold`, default **0.65**) it is used as-is;
-  otherwise it **falls back to an LLM** classifier.
-- Each document is assigned a `DocumentAgentName`, deciding which agent will read it:
-  `FINANCIAL_ANALYSIS_AGENT`, `BUSINESS_ACTIVITY_AGENT`, `CREDIT_RELATIONSHIP_AGENT`,
-  `RISK_ASSESSMENT_AGENT`, `CREDIT_PROPOSAL_AGENT`, or `GENERAL_CONTEXT`.
+- **Classification**: identifies *what kind of document* it is — one of the 23 `document_type`
+  rows in the routing matrix (`src/matrix/document_matrix.yaml`) — by scoring that type's
+  keywords against the filename and body. If confidence ≥ threshold
+  (`document_classifier_rule_confidence_threshold`, default **0.65**) it is used as-is;
+  otherwise it **falls back to an LLM** classifier that picks from the same catalogue.
+  The rule result is also kept when every plausible type feeds the same agents, since an
+  LLM call could only change the label, not the routing.
+- **Routing**: the matrix maps that type to the agents that consume it, each marked `R`
+  (required evidence) or `O` (optional). One document routinely feeds several agents — a BCTC
+  is evidence for both `FINANCIAL_ANALYSIS_AGENT` and `RISK_ASSESSMENT_AGENT`. `R` documents
+  get the larger share of an agent's character budget.
+- A document matching no type falls back to `GENERAL_CONTEXT` and is shared with every agent,
+  so a classification miss never hides evidence.
+
+**Loan program**: the matrix holds an `R`/`O` level per agent **per loan program** (`B1CP`, `MISA`,
+`PL++`, `PLO`). Name the program anywhere in your request — *"Phân tích khách chương trình PLO"* —
+and the matching column is used. Detection is exact string matching against the `aliases` declared in
+the YAML, not an LLM guess. If no program is named, or two are named at once (*"so sánh B1CP với
+PLO"*), the system falls back to the **strongest** level across all programs: that can only
+over-prioritise a document, never demote real evidence. The outcome is always reported in
+`result["loan_program_detection"]` and in the run's step log, so a missed or wrong detection is
+visible rather than silent.
+
+**Editing the routing matrix**: `src/matrix/document_matrix.yaml` is the single source of truth
+(transcribed from `docs/document_matrix.xlsx`). Changing which agents see a kind of document is a
+YAML edit, not a code change. It is validated on load — an unknown agent name, a bad `R`/`O`
+value, or a per-loan-program map missing one of the four programs raises immediately.
 
 ### Stage 2 — Routing
 

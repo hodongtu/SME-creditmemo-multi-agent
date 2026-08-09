@@ -41,13 +41,18 @@ from src.types import (
     truncate_text,
 )
 from src.agents.document_classification import (
-    DOCUMENT_CLASSIFICATION_SYSTEM_PROMPT,
     VALID_DOCUMENT_AGENTS,
+    build_document_classification_prompt,
     compute_file_hash,
+    detect_loan_program,
     discover_documents,
-    is_bctc_document,
-    relevant_agents_for_document,
     rule_classify_document,
+)
+from src.agents.document_matrix import (
+    agent_relevance_for_type,
+    get_type,
+    is_bctc_type,
+    primary_agent_for_type,
 )
 from src.agents.bctc_extraction import (
     build_bctc_extraction_chain,
@@ -199,16 +204,27 @@ VIETNAMESE_CHARS = set(
 class Supervisor:
     """Local  supervisor without API, cache, or database dependencies."""
 
-    # Relative per-document budget weights in _build_user_input: a document's own
-    # primary/general evidence should dominate shared/secondary evidence pulled in
-    # from another agent's primary document.
     # The deterministic ratio block goes to the agents that reason about the
     # figures: the financial agent computes from them, the risk agent judges
     # leverage and debt-service against them.
     METRICS_BLOCK_AGENTS = ("FINANCIAL_ANALYSIS_AGENT", "RISK_ASSESSMENT_AGENT")
 
+    # Numeric form of the matrix's R/O relevance levels, so ranking and budget
+    # code can compare relevance without carrying the R/O vocabulary around.
+    RELEVANCE_SCORE = {"R": 2.0, "O": 1.0}
+
+    # Relative per-document budget weights in _build_user_input. The matrix says
+    # which documents an agent *requires* (R) versus may use (O); required
+    # evidence must not be squeezed out by optional evidence. Documents that
+    # matched no matrix type are shared with everyone and get the optional
+    # weight — they are context, not this agent's core evidence.
     PRIMARY_DOC_BUDGET_WEIGHT = 3
     SECONDARY_DOC_BUDGET_WEIGHT = 1
+
+    # Fixed prompt scaffolding around the document blocks. Named constants so
+    # the budget arithmetic in _build_user_input measures exactly what it emits.
+    DOC_SECTION_HEADER = "Uploaded document extracted content:\n\n"
+    DOC_BLOCK_SEPARATOR = "\n\n---\n\n"
 
     def __init__(self, config: Config):
         self.config = config
@@ -391,11 +407,20 @@ class Supervisor:
         """Extract and classify uploaded documents."""
 
         steps = state.get("steps", [])
+        # Resolved once per run, before any document is classified: it picks
+        # which column of the matrix decides every document's R/O relevance.
+        detection = detect_loan_program(
+            state.get("query", ""),
+            state.get("history_context", ""),
+        )
+        loan_program = detection["program"] or ""
+        steps.append(self._format_loan_program_step(detection))
         documents = self._prepare_documents(
             state.get("files") or [],
             state.get("query", ""),
             state.get("history_context", ""),
             steps,
+            loan_program,
         )
         self._extract_bctc_documents(documents, steps)
         document_routes: set[str] = set()
@@ -407,10 +432,39 @@ class Supervisor:
         document_summary = self._format_document_summary(documents)
         return {
             **state,
+            "loan_program": loan_program,
+            "loan_program_detection": detection,
             "documents": documents,
             "document_routes": document_routes,
             "document_summary": document_summary,
         }
+
+    @staticmethod
+    def _format_loan_program_step(detection: dict[str, Any]) -> str:
+        """Explain the loan program decision in the run's step log.
+
+        Detection comes from free text the user typed, so it has to be visible:
+        a silently wrong (or silently absent) program would quietly change how
+        documents are prioritised with nothing in the output to point at.
+        """
+
+        if detection["program"]:
+            return (
+                f"Loan program: {detection['program']} "
+                f"(matched \"{detection['matched_alias']}\" in the "
+                f"{detection['source']})"
+            )
+        if detection["candidates"]:
+            return (
+                "Loan program: ambiguous — the request names "
+                f"{', '.join(detection['candidates'])}. Using the strongest "
+                "relevance across all programs."
+            )
+        return (
+            "Loan program: not specified in the request. Using the strongest "
+            "relevance across all programs (documents can only be "
+            "over-prioritised, never dropped)."
+        )
 
     def _graph_decide_workflow(
         self,
@@ -691,6 +745,7 @@ class Supervisor:
         input_text: str,
         history_context: str,
         steps: list[str],
+        loan_program: str = "",
     ) -> list[ClassifiedDocument]:
         documents = []
         seen_hashes: set[str] = set()
@@ -728,31 +783,25 @@ class Supervisor:
                 input_text,
                 history_context,
             )
-            agent_scores = classification.get("scores", {})
-            llm_secondary_agents = classification.get("llm_secondary_agents", [])
-            relevant_agents = sorted(
-                relevant_agents_for_document(
-                    classification["agent"],
-                    agent_scores,
-                    llm_secondary_agents,
-                )
+            document_type = classification.get("document_type", "")
+            type_scores = classification.get("scores", {})
+            # The matrix decides the fan-out. A document that matched no type
+            # stays GENERAL_CONTEXT, which _select_documents_for_agent already
+            # shares with every agent, so nothing is dropped on a miss.
+            # An empty loan_program resolves to the strongest level across all
+            # programs — see agent_relevance_for_type.
+            agent_relevance = agent_relevance_for_type(
+                document_type,
+                loan_program or None,
             )
-            secondary_agents = [
-                agent
-                for agent in relevant_agents
-                if agent != classification["agent"]
-            ]
-            is_bctc = (
-                "FINANCIAL_ANALYSIS_AGENT" in relevant_agents
-                and is_bctc_document(filename, content)
-            )
+            relevant_agents = sorted(agent_relevance)
+            matched = get_type(document_type)
+            agent = primary_agent_for_type(document_type) or "GENERAL_CONTEXT"
+            is_bctc = is_bctc_type(document_type)
             steps.append(
-                f"Classified document: {filename} -> {classification['agent']}"
-                + (
-                    f" (also relevant: {', '.join(secondary_agents)})"
-                    if secondary_agents
-                    else ""
-                )
+                f"Classified document: {filename} -> "
+                + (f"{document_type} " if document_type else "(no type matched) ")
+                + f"-> {', '.join(relevant_agents) or 'GENERAL_CONTEXT'}"
                 + (" [BCTC]" if is_bctc else "")
             )
             documents.append(
@@ -760,7 +809,7 @@ class Supervisor:
                     path=file_path,
                     filename=filename,
                     content=content,
-                    agent=classification["agent"],
+                    agent=agent,
                     reasoning=classification.get("reasoning", ""),
                     confidence=float(classification.get("confidence", 0.0)),
                     file_hash=file_hash,
@@ -771,8 +820,15 @@ class Supervisor:
                         "",
                     ),
                     classifier_error=classification.get("classifier_error", ""),
-                    agent_scores=agent_scores,
-                    llm_secondary_agents=llm_secondary_agents,
+                    document_type=document_type,
+                    document_group=matched.group_id if matched else "",
+                    type_scores=type_scores,
+                    agent_relevance=agent_relevance,
+                    loan_program=loan_program,
+                    agent_scores={
+                        name: self.RELEVANCE_SCORE[level]
+                        for name, level in agent_relevance.items()
+                    },
                     relevant_agents=relevant_agents,
                     is_bctc=is_bctc,
                 )
@@ -849,10 +905,13 @@ class Supervisor:
         history_context: str,
     ) -> dict[str, Any]:
         rule = rule_classify_document(filename, content)
-        if (
-            rule["agent"] != "GENERAL_CONTEXT"
-            and rule["confidence"]
+        if rule["document_type"] and (
+            rule["confidence"]
             >= self.config.document_classifier_rule_confidence_threshold
+            # Even a low-confidence rule result is worth keeping when every
+            # plausible type routes to the same agents: the LLM could only
+            # change the label, not where the document goes.
+            or rule["routing_unambiguous"]
         ):
             return rule
 
@@ -871,19 +930,15 @@ class Supervisor:
                         ),
                     }
                 )
-                if result.get("agent") not in VALID_DOCUMENT_AGENTS:
+                document_type = result.get("document_type") or ""
+                # An id the matrix doesn't define would silently route the
+                # document nowhere, so fall back to the rule result instead.
+                if document_type and get_type(document_type) is None:
                     return rule
-                # Keyword scores are always computed by the rule pass; keep them
-                # even when the LLM's primary label wins, so secondary-relevance
-                # detection (relevant_agents_for_document) works for every
-                # document, not just rule-confident ones.
+                result["document_type"] = document_type
+                # Keyword scores always come from the rule pass, so monitoring
+                # can see the runner-up types even when the LLM label wins.
                 result["scores"] = rule.get("scores", {})
-                result["llm_secondary_agents"] = [
-                    agent
-                    for agent in result.get("secondary_agents", [])
-                    if agent in VALID_DOCUMENT_AGENTS
-                    and agent not in {result.get("agent"), "GENERAL_CONTEXT"}
-                ]
                 return result
             except Exception as exc:
                 rule["classifier_error_type"] = type(exc).__name__
@@ -921,7 +976,7 @@ class Supervisor:
     def _build_document_classifier_chain(self):
         prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", DOCUMENT_CLASSIFICATION_SYSTEM_PROMPT),
+                ("system", build_document_classification_prompt()),
                 (
                     "human",
                     """
@@ -1618,6 +1673,21 @@ class Supervisor:
         # flag places where inference is presented as evidence.
         response += self._format_assertion_findings(response)
         response += self._format_template_findings(response)
+        # detect_loan_program is a pure string match over the same two strings
+        # the classify node used (input guardrails pass `query` through
+        # untouched), so recomputing here is exact and avoids threading the
+        # detection dict through five graph nodes and three runner signatures.
+        # The documents carry the program that was actually applied, so cross-
+        # check rather than trust the recomputation blindly.
+        detection = detect_loan_program(input_text, history_context)
+        applied = next((doc.loan_program for doc in documents), "")
+        if documents and (detection["program"] or "") != applied:
+            detection = {
+                "program": applied or None,
+                "matched_alias": "",
+                "candidates": [],
+                "source": "applied-at-classification",
+            }
         return self._build_state(
             input_text,
             response,
@@ -1632,6 +1702,8 @@ class Supervisor:
             steps + ["Built final response"],
             self._build_document_selections(documents),
             self._build_financial_metrics_data(documents),
+            loan_program=applied,
+            loan_program_detection=detection,
         )
 
     @staticmethod
@@ -1965,7 +2037,9 @@ class Supervisor:
         usable = [doc for doc in selected if doc.extraction_status == "success"]
 
         def _is_primary(doc: ClassifiedDocument) -> bool:
-            return doc.agent == target_agent or doc.agent == "GENERAL_CONTEXT"
+            """Required evidence for this agent, per the matrix."""
+
+            return doc.agent_relevance.get(target_agent) == "R"
 
         metrics_block = self._build_financial_metrics_block(
             documents,
@@ -1986,13 +2060,27 @@ class Supervisor:
             if target_agent == "FINANCIAL_ANALYSIS_AGENT"
             else ""
         )
+        # Every block spends characters on its own header (filename, document
+        # type, relevance, extraction status) plus a separator, before any
+        # content. That overhead has to come out of the budget up front: without
+        # it the assembled prompt overshoots and the final truncate_text lops
+        # whole documents off the end — the risk agent, which the matrix feeds
+        # every document type, loses its last files entirely.
+        block_overhead = sum(
+            len(self._document_block_header(doc, target_agent)) for doc in usable
+        ) + len(self.DOC_BLOCK_SEPARATOR) * max(0, len(usable) - 1)
         remaining = max(
             1_000,
-            budget - len(base) - len(metrics_block) - len(bctc_block),
+            budget
+            - len(base)
+            - len(metrics_block)
+            - len(bctc_block)
+            - len(self.DOC_SECTION_HEADER)
+            - block_overhead,
         )
-        # Primary/general docs get more budget than secondary/shared docs, so a
-        # document pulled in only because it's also relevant to this agent can't
-        # crowd out the agent's own core evidence.
+        # Required evidence gets more budget than optional evidence, so a
+        # document the matrix marks optional for this agent can't crowd out the
+        # documents it actually needs.
         weight_sum = sum(
             self.PRIMARY_DOC_BUDGET_WEIGHT
             if _is_primary(doc)
@@ -2011,14 +2099,6 @@ class Supervisor:
 
         blocks = []
         for doc in usable:
-            relevance = (
-                "Relevance to this agent: primary"
-                if _is_primary(doc)
-                else (
-                    "Relevance to this agent: shared/secondary evidence "
-                    f"(also classified as {doc.agent})"
-                )
-            )
             # A successfully-extracted BCTC doc is represented by its
             # structured JSON (see bctc_block below), not its raw OCR dump —
             # that's the whole point of the extraction pass. Any other doc
@@ -2041,28 +2121,61 @@ class Supervisor:
                     ]
                 )
             blocks.append(
-                "\n".join(
-                    [
-                        f"Document filename: {doc.filename}",
-                        f"Classified target agent: {doc.agent}",
-                        relevance,
-                        f"Classification reason: {doc.reasoning}",
-                        f"Extraction status: {doc.extraction_status}",
-                        f"Extraction error: {doc.extraction_error}",
-                        content_section,
-                    ]
-                )
+                self._document_block_header(doc, target_agent) + content_section
             )
-        docs_text = "\n\n---\n\n".join(blocks)
+        docs_text = self.DOC_BLOCK_SEPARATOR.join(blocks)
         return truncate_text(
             (
                 f"{base}\n\n"
                 f"{metrics_block}\n\n"
                 f"{bctc_block}\n\n"
-                "Uploaded document extracted content:\n\n"
+                f"{self.DOC_SECTION_HEADER}"
                 f"{docs_text}"
             ),
             budget,
+        )
+
+    @staticmethod
+    def _document_block_header(
+        doc: ClassifiedDocument,
+        target_agent: str,
+    ) -> str:
+        """The metadata lines that precede a document's content in the prompt.
+
+        Split out from block assembly so _build_user_input can measure the
+        overhead before dividing the remaining characters between documents.
+        """
+
+        level = doc.agent_relevance.get(target_agent)
+        if level == "R":
+            relevance = "Relevance to this agent: required evidence"
+        elif level == "O":
+            relevance = "Relevance to this agent: optional supporting evidence"
+        else:
+            relevance = (
+                "Relevance to this agent: general context — this document "
+                "matched no known document type, so it is shared with every "
+                "agent. Use it only if it is genuinely relevant."
+            )
+        matched_type = get_type(doc.document_type)
+        return "\n".join(
+            [
+                f"Document filename: {doc.filename}",
+                # Naming the document *type* tells the agent what it is holding
+                # (a VAT return reads very differently from a bank statement);
+                # the agent list alone would not.
+                "Document type: "
+                + (
+                    f"{doc.document_type} — {matched_type.label}"
+                    if matched_type
+                    else "không xác định"
+                ),
+                relevance,
+                f"Classification reason: {doc.reasoning}",
+                f"Extraction status: {doc.extraction_status}",
+                f"Extraction error: {doc.extraction_error}",
+                "",
+            ]
         )
 
     @staticmethod
@@ -2150,25 +2263,25 @@ class Supervisor:
         documents: list[ClassifiedDocument],
         target_agent: str,
     ) -> list[ClassifiedDocument]:
-        primary = [doc for doc in documents if doc.agent == target_agent]
-        general = [doc for doc in documents if doc.agent == "GENERAL_CONTEXT"]
-        # A document that wasn't primarily classified for this agent can still be
-        # real evidence for it (keyword score and/or LLM secondary-label signal).
-        # Do NOT dump ALL documents regardless (cross-contamination + token
-        # blow-up when many files are uploaded) — only documents that clear the
-        # secondary-relevance bar, ranked by their score for this agent.
-        secondary = sorted(
-            (
-                doc
-                for doc in documents
-                if doc.agent != target_agent
-                and doc.agent != "GENERAL_CONTEXT"
-                and target_agent in doc.relevant_agents
-            ),
-            key=lambda doc: doc.agent_scores.get(target_agent, 0),
-            reverse=True,
-        )
-        return primary + general + secondary
+        # Membership comes from the matrix, not from which agent "owns" the
+        # document: one document legitimately feeds several agents (a BCTC is
+        # evidence for both FINANCIAL and RISK). Required evidence goes first so
+        # it wins the char budget when many files are uploaded.
+        required: list[ClassifiedDocument] = []
+        optional: list[ClassifiedDocument] = []
+        # Documents that matched no matrix type are shared with every agent, so
+        # a classification miss degrades to "everyone sees it" instead of
+        # silently hiding evidence from the agent that needed it.
+        unmatched: list[ClassifiedDocument] = []
+        for doc in documents:
+            level = doc.agent_relevance.get(target_agent)
+            if level == "R":
+                required.append(doc)
+            elif level:
+                optional.append(doc)
+            elif doc.agent == "GENERAL_CONTEXT":
+                unmatched.append(doc)
+        return required + optional + unmatched
 
     @classmethod
     def _build_document_selections(
@@ -2184,15 +2297,20 @@ class Supervisor:
         for target_agent in sorted(VALID_DOCUMENT_AGENTS - {"GENERAL_CONTEXT"}):
             selected = cls._select_documents_for_agent(documents, target_agent)
             selections[target_agent] = {
-                "primary": [
-                    doc.filename
+                "required": [
+                    f"{doc.filename} [{doc.document_type}]"
                     for doc in selected
-                    if doc.agent == target_agent or doc.agent == "GENERAL_CONTEXT"
+                    if doc.agent_relevance.get(target_agent) == "R"
                 ],
-                "secondary": [
+                "optional": [
+                    f"{doc.filename} [{doc.document_type}]"
+                    for doc in selected
+                    if doc.agent_relevance.get(target_agent) == "O"
+                ],
+                "unmatched_shared": [
                     doc.filename
                     for doc in selected
-                    if doc.agent != target_agent and doc.agent != "GENERAL_CONTEXT"
+                    if target_agent not in doc.agent_relevance
                 ],
             }
         return selections
@@ -2214,18 +2332,21 @@ class Supervisor:
     def _format_document_summary(documents: list[ClassifiedDocument]) -> str:
         lines = []
         for doc in documents:
-            secondary = [
-                agent for agent in doc.relevant_agents if agent != doc.agent
-            ]
-            extra = f" (+{', '.join(secondary)})" if secondary else ""
+            routing = (
+                ", ".join(
+                    f"{agent}:{level}"
+                    for agent, level in sorted(doc.agent_relevance.items())
+                )
+                or "GENERAL_CONTEXT (không khớp loại nào)"
+            )
             bctc_tag = ""
             if doc.is_bctc:
                 bctc_tag = (
                     " [BCTC]" if doc.bctc_extraction else " [BCTC, trích xuất lỗi]"
                 )
             lines.append(
-                f"- {doc.filename}: {doc.agent}{extra}{bctc_tag} "
-                f"(confidence={doc.confidence:.2f}, "
+                f"- {doc.filename}: {doc.document_type or '-'} -> {routing}"
+                f"{bctc_tag} (confidence={doc.confidence:.2f}, "
                 f"extraction={doc.extraction_status})"
             )
         return "\n".join(lines)
@@ -2307,12 +2428,22 @@ class Supervisor:
         steps: list[str] | None = None,
         document_selections: dict[str, dict[str, list[str]]] | None = None,
         financial_metrics: dict[str, Any] | None = None,
+        # Appended last, and always passed by keyword: two call sites supply the
+        # earlier parameters positionally, so inserting anywhere above would
+        # silently shift their arguments.
+        loan_program: str = "",
+        loan_program_detection: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "status": "success",
             "response": response,
             "agent_name": agent_name,
             "decision": decision or {},
+            # Which loan program column of the document matrix was used, and how
+            # it was determined — the R/O levels in document_classifications are
+            # only interpretable against it.
+            "loan_program": loan_program,
+            "loan_program_detection": loan_program_detection or {},
             "document_classifications": to_dict_list(documents or []),
             # Per-agent snapshot of _select_documents_for_agent's output
             # (primary vs secondary/shared filenames) — for monitoring/testing

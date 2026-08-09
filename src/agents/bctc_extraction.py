@@ -1,6 +1,7 @@
 """LLM extraction of full BCTC (báo cáo tài chính) bundles into structured JSON.
 
-Runs once per document tagged by ``is_bctc_document`` (see document_classification.py),
+Runs once per document whose matrix type is flagged ``bctc_extraction``
+(see src/matrix/document_matrix.yaml and ``is_bctc_type``),
 turning noisy raw OCR text into a compact structured record — report type, period,
 audit opinion, the 3 core statements, and a bounded summary of the notes section —
 so FINANCIAL_ANALYSIS_AGENT can consume clean data instead of a multi-page raw dump.

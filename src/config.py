@@ -76,8 +76,17 @@ class Config:
                 "FINANCIAL_ANALYSIS_AGENT": 60_000,
                 "BUSINESS_ACTIVITY_AGENT": 20_000,
                 "CREDIT_RELATIONSHIP_AGENT": 20_000,
-                "RISK_ASSESSMENT_AGENT": 16_000,
-                "CREDIT_PROPOSAL_AGENT": 8_000,
+                # The routing matrix routes every one of its document types to
+                # the risk agent, so it sees more evidence than any other
+                # specialist and needs headroom to match.
+                "RISK_ASSESSMENT_AGENT": 40_000,
+                # 8_000 dated from when credit proposal was a deterministic
+                # calculator. It is a full LLM specialist now, and the matrix
+                # feeds it 4 document types plus every unmatched document, which
+                # left the last block truncated to a few hundred characters.
+                # Matched to CREDIT_RELATIONSHIP_AGENT, which consumes the same
+                # number of document types.
+                "CREDIT_PROPOSAL_AGENT": 20_000,
                 "CREDIT_MEMO": 80_000,
                 "GENERAL_CONTEXT": 12_000,
             }

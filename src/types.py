@@ -33,6 +33,18 @@ DocumentAgentName = Literal[
     "GENERAL_CONTEXT",
 ]
 
+# Agents a document can be routed to by the matrix. GENERAL_CONTEXT is
+# deliberately excluded: it is the fallback bucket for documents no matrix row
+# matched, never something the matrix itself assigns.
+SPECIALIST_DOCUMENT_AGENTS = frozenset({
+    "FINANCIAL_ANALYSIS_AGENT",
+    "BUSINESS_ACTIVITY_AGENT",
+    "CREDIT_RELATIONSHIP_AGENT",
+    "CREDIT_PROPOSAL_AGENT",
+    "RISK_ASSESSMENT_AGENT",
+})
+VALID_DOCUMENT_AGENTS = SPECIALIST_DOCUMENT_AGENTS | {"GENERAL_CONTEXT"}
+
 
 @dataclass
 class ClassifiedDocument:
@@ -49,17 +61,33 @@ class ClassifiedDocument:
     extraction_error: str = ""
     classifier_error_type: str = ""
     classifier_error: str = ""
+    # Matrix row this document matched (src/matrix/document_matrix.yaml), plus
+    # the group it belongs to. Empty when nothing matched — the document then
+    # falls back to agent == GENERAL_CONTEXT and is shared with every agent.
+    document_type: str = ""
+    document_group: str = ""
+    # Keyword score per candidate document type, kept for monitoring: it shows
+    # how close the runner-up was and whether the matrix needs a new keyword.
+    type_scores: dict[str, float] = field(default_factory=dict)
+    # {agent: "R"|"O"} straight from the matrix — who consumes this document and
+    # how strongly. Drives both the fan-out and the prompt budget weighting.
+    agent_relevance: dict[str, str] = field(default_factory=dict)
+    # Which loan program agent_relevance above was resolved under. Empty means
+    # no program was named in the request, so the strongest level across every
+    # program was used — recorded per document so the monitoring output explains
+    # its own R/O values instead of leaving them unattributable.
+    loan_program: str = ""
+    # Numeric mirror of agent_relevance (R -> 2, O -> 1) so ranking code can
+    # sort by relevance without carrying the R/O vocabulary around.
     agent_scores: dict[str, float] = field(default_factory=dict)
-    llm_secondary_agents: list[str] = field(default_factory=list)
-    # Resolved union of `agent` + every secondary agent from agent_scores/
-    # llm_secondary_agents (see relevant_agents_for_document). Cached at
-    # classification time so it's visible in document_classifications output
-    # for monitoring, and so downstream consumers don't recompute it.
+    # Every agent this document is evidence for == sorted(agent_relevance).
+    # Cached at classification time so it shows up in document_classifications
+    # output for monitoring, and downstream consumers don't recompute it.
     relevant_agents: list[str] = field(default_factory=list)
-    # Set only for full BCTC bundles (see is_bctc_document), narrower than
-    # agent == FINANCIAL_ANALYSIS_AGENT. bctc_extraction holds the structured
-    # JSON from the extraction pass, or stays None on failure/no LLM
-    # configured — callers must fall back to raw `content` in that case.
+    # True when document_type is flagged bctc_extraction in the matrix.
+    # bctc_extraction holds the structured JSON from the extraction pass, or
+    # stays None on failure/no LLM configured — callers must fall back to raw
+    # `content` in that case.
     is_bctc: bool = False
     bctc_extraction: dict[str, Any] | None = None
     bctc_extraction_error: str = ""
@@ -73,6 +101,11 @@ class UnderwritingGraphState(TypedDict, total=False):
     conversation_history: list[dict[str, str]]
     history_context: str
     files: list[str]
+    # Loan program named in the request (see detect_loan_program), or "" when
+    # none was named / two were named. Selects which column of the document
+    # matrix decides each document's R/O relevance.
+    loan_program: str
+    loan_program_detection: dict[str, Any]
     documents: list[ClassifiedDocument]
     document_routes: set[str]
     document_summary: str
