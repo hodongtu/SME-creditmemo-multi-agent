@@ -50,6 +50,12 @@ flowchart TD
 | Đầu ra chính | Mặt hàng | Doanh số {{Nam}} | Tỷ trọng | Phương thức ký HĐ | Phương thức giao hàng | Phương thức thanh toán |
 |---|---|---:|---:|---|---|---|
 
+```mermaid
+flowchart LR
+  KH[{{TenKhachHang}}] -->|{{TyTrongDauRa1}}| R1[{{DoiTacDauRa1}}]
+  KH -->|{{TyTrongDauRa2}}| R2[{{DoiTacDauRa2}}]
+```
+
 **Căn cứ**:
 
 **Nhận định**:
@@ -58,6 +64,12 @@ flowchart TD
 
 | Đầu vào chính | Mặt hàng | Doanh số {{Nam}} | Tỷ trọng | Phương thức ký HĐ | Phương thức giao hàng | Phương thức thanh toán |
 |---|---|---:|---:|---|---|---|
+
+```mermaid
+flowchart LR
+  V1[{{DoiTacDauVao1}}] -->|{{TyTrongDauVao1}}| KH[{{TenKhachHang}}]
+  V2[{{DoiTacDauVao2}}] -->|{{TyTrongDauVao2}}| KH
+```
 
 **Căn cứ**:
 

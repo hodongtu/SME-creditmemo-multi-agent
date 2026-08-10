@@ -15,6 +15,12 @@ testing/samples/
 # local. Keep the two in sync by hand.
 docs/*.xlsx
 docs/*.xls
+# Screenshots and scans dropped in here as design references are real customer
+# material — business models, partner names, revenue shares, warehouse sites.
+docs/*.jpg
+docs/*.jpeg
+docs/*.png
+docs/*.pdf
 
 # Python
 __pycache__/
