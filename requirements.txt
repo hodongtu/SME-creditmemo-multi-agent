@@ -32,6 +32,10 @@ pyyaml==6.0.3            # src/matrix/document_matrix.yaml (document routing)
 python-dotenv==1.2.2
 nest-asyncio==1.6.0
 ipython==9.14.1
+# Strips notebook outputs on commit so customer data from a real run never
+# reaches the repository. Needs a one-time `nbstripout --install` per clone —
+# see README, "Notebook outputs".
+nbstripout==0.9.1
 
 # --- Optional ---
 langchain-tavily==0.2.18  # web search enrichment (RUN_WEB_SEARCH=true)

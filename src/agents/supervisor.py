@@ -30,7 +30,7 @@ from src.utils.assertion_check import (
     check_assertion_separation,
 )
 
-from src.config import Config
+from src.config import Config, shared_rate_limiter
 from src.types import (
     AgentName,
     ClassifiedDocument,
@@ -1688,6 +1688,9 @@ class Supervisor:
                 "candidates": [],
                 "source": "applied-at-classification",
             }
+        # Throttling is otherwise indistinguishable from a hang: report how many
+        # LLM calls the run made and how long the rate limiter held them back.
+        rate_limit = shared_rate_limiter().snapshot()
         return self._build_state(
             input_text,
             response,
@@ -1699,11 +1702,19 @@ class Supervisor:
             execution_plan,
             gap_analysis,
             web_context,
-            steps + ["Built final response"],
+            steps
+            + [
+                f"LLM: {rate_limit['llm_calls']} calls at a "
+                f"{rate_limit['requests_per_minute']}/min limit — this run "
+                f"could not finish faster than "
+                f"{rate_limit['minimum_seconds_for_these_calls']}s",
+                "Built final response",
+            ],
             self._build_document_selections(documents),
             self._build_financial_metrics_data(documents),
             loan_program=applied,
             loan_program_detection=detection,
+            rate_limit=rate_limit,
         )
 
     @staticmethod
@@ -2433,6 +2444,7 @@ class Supervisor:
         # silently shift their arguments.
         loan_program: str = "",
         loan_program_detection: dict[str, Any] | None = None,
+        rate_limit: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "status": "success",
@@ -2444,6 +2456,9 @@ class Supervisor:
             # only interpretable against it.
             "loan_program": loan_program,
             "loan_program_detection": loan_program_detection or {},
+            # LLM call count and seconds spent waiting on the rate limiter, so a
+            # slow run can be told apart from a stuck one.
+            "rate_limit": rate_limit or {},
             "document_classifications": to_dict_list(documents or []),
             # Per-agent snapshot of _select_documents_for_agent's output
             # (primary vs secondary/shared filenames) — for monitoring/testing

@@ -271,8 +271,28 @@ sudo apt-get install tesseract-ocr tesseract-ocr-vie
 ```bash
 pip install langgraph langchain langchain-core langchain-openai \
             openai pandas pypdfium2 pytesseract opencv-python numpy pillow \
-            python-dotenv nest-asyncio ipython
+            python-dotenv nest-asyncio ipython pyyaml nbstripout
 # Optional: langchain-tavily (web search), langsmith (tracing)
+```
+
+### Notebook outputs — run this once per clone
+
+```bash
+nbstripout --install --attributes .gitattributes
+```
+
+Running the notebook against real files leaves the customer's document names and financial figures in
+the notebook's output cells, and this repository is public. The `nbstripout` git filter removes
+outputs from what gets **committed** while leaving them on screen in your editor, so nothing has to be
+remembered before each commit.
+
+`.gitattributes` is in the repository, but the filter itself lives in `.git/config`, which is not.
+**Without running the command above, git silently commits the notebook unchanged** — the attribute
+alone does nothing. Verify it took effect with:
+
+```bash
+git add local_underwriting_agents.ipynb
+git show :local_underwriting_agents.ipynb | grep -c '"output_type"'   # must print 0
 ```
 
 ---
@@ -310,11 +330,30 @@ RUN_WEB_SEARCH=false          # Tavily enrichment (needs TAVILY_API_KEY)
 **Performance & OCR:**
 
 ```env
+LLM_REQUESTS_PER_MINUTE=9      # hard ceiling shared by every LLM client
+LLM_CLIENT_MAX_RETRIES=3       # backs off on 429, honours Retry-After
 LLM_MAX_CONCURRENCY=3          # specialists run in parallel in full_credit_memo
 LLM_TIMEOUT_SECONDS=60
 LLM_ANALYZE_TIMEOUT_SECONDS=...
 OCR_LANG=vie+eng  OCR_DPI=...  OCR_PSM=...  OCR_CACHE_DIR=...
 ```
+
+**Staying under a provider rate limit.** All seven LLM clients share **one**
+`InMemoryRateLimiter` (`shared_rate_limiter()` in [src/config.py](src/config.py)), so
+`LLM_REQUESTS_PER_MINUTE` is a whole-process ceiling rather than a per-client one. Bursting is
+disabled (`max_bucket_size=1`), which is what makes exceeding the quota impossible instead of merely
+unlikely: the four parallel specialists queue on the limiter rather than firing at once.
+
+Set the value **below** your provider's real quota. One full credit memo run costs about **10 LLM
+calls** — four parallel specialists, risk assessment, the memo composer, the hallucination judge, one
+BCTC extraction per financial statement, and one per document the keyword pass was unsure about. At
+9/minute that means a full run cannot finish in under a minute; that is the price of never seeing a
+429. Every run reports its own numbers under `result["rate_limit"]` and in the step log, so a
+throttled run can be told apart from a stuck one.
+
+To go faster: raise the limit if your quota allows, set `RUN_HALLUCINATION_CHECK=false` (one call
+less), name documents clearly so they resolve on the keyword pass instead of costing a
+classification call, or run a single agent (about 3 calls) instead of the full memo.
 
 **Tracing (optional):** `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`.
 
