@@ -197,6 +197,13 @@ def rule_classify_document(filename: str, content: str) -> dict[str, Any]:
     }
 
 
+# Substituted by plain string replacement, never str.format() or an f-string.
+# The template below is consumed as a LangChain ChatPromptTemplate, where `{{`
+# and `}}` mean "literal brace". str.format() would eat exactly that escaping
+# and hand LangChain a bare `{`, which it then parses as the start of a template
+# variable — turning the JSON example into a phantom required input.
+_CATALOGUE_PLACEHOLDER = "__DOCUMENT_TYPE_CATALOGUE__"
+
 _CLASSIFICATION_PROMPT_TEMPLATE = """
 You classify extracted text from SME underwriting documents.
 
@@ -204,7 +211,7 @@ Pick the ONE document type from the catalogue below that best describes this
 document. Answer with its exact id string (the value in quotes).
 
 Document type catalogue:
-{catalogue}
+__DOCUMENT_TYPE_CATALOGUE__
 
 Rules:
 - Judge what the document *is*, not what it mentions. A business plan that
@@ -229,12 +236,18 @@ def build_document_classification_prompt() -> str:
 
     Generated rather than hand-written so the prompt can never drift from the
     matrix — a type added to the YAML is offered to the LLM automatically.
-    Braces in the catalogue are escaped because the result is consumed as a
-    ChatPromptTemplate.
+
+    The result is consumed as a ChatPromptTemplate, so every literal brace it
+    contains must stay doubled: the catalogue is escaped here, and the template
+    itself is substituted by str.replace rather than str.format (see
+    _CATALOGUE_PLACEHOLDER).
     """
 
     catalogue = describe_types_for_prompt().replace("{", "{{").replace("}", "}}")
-    return _CLASSIFICATION_PROMPT_TEMPLATE.format(catalogue=catalogue)
+    return _CLASSIFICATION_PROMPT_TEMPLATE.replace(
+        _CATALOGUE_PLACEHOLDER,
+        catalogue,
+    )
 
 
 @lru_cache(maxsize=1)
