@@ -11,6 +11,11 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from src.agents.bctc_extraction import (
+    normalize_period_label,
+    resolve_report_years,
+)
+
 
 BALANCE_SHEET = "balance_sheet"
 INCOME_STATEMENT = "income_statement"
@@ -450,6 +455,10 @@ class FinancialRatioCalculator:
             extraction = document.get("bctc_extraction")
             if not isinstance(extraction, dict):
                 continue
+            # Columns named by position ("Số cuối kỳ") only mean something
+            # relative to the statement they came from, so the anchor is read
+            # per document rather than once for the whole set.
+            current_year, previous_year = resolve_report_years(extraction)
 
             for statement_key in self.STATEMENT_KEYS:
                 statement = extraction.get(statement_key)
@@ -477,7 +486,14 @@ class FinancialRatioCalculator:
                             value = float(raw_value)
                         except (TypeError, ValueError):
                             continue
-                        year_key = str(year)
+                        # Normalized again here, not just at extraction time:
+                        # this also covers extractions produced before that
+                        # existed, and a mixed spelling silently splits one
+                        # year into two columns whose growth ratio then
+                        # compares the year against itself. Idempotent.
+                        year_key = normalize_period_label(
+                            year, current_year, previous_year
+                        )
                         slot = (year_key, metric.key)
                         if score <= best_score.get(slot, -1):
                             continue
