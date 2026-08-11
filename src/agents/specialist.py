@@ -187,7 +187,7 @@ class SpecialistAgent:
         - Bố cục chỉ gồm tiêu đề và khung bảng rỗng. Nhiệm vụ của bạn là ĐIỀN nội
         dung vào, không phải chép lại khung.
         - Mọi chỗ dạng {{{{TenTruong}}}} là chỗ cần thay bằng giá trị thật lấy từ
-        hồ sơ. Nếu không có giá trị, ghi "Không có dữ liệu trong hồ sơ".
+        hồ sơ. Nếu không có giá trị, ghi "Không có dữ liệu".
         TUYỆT ĐỐI không để lại dấu {{{{ }}}} trong câu trả lời.
         - Xoá hẳn dòng/bảng/mục không có dữ liệu thay vì để trống hoặc điền "-".
 

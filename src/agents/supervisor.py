@@ -2513,8 +2513,40 @@ class Supervisor:
             lines.append(f"{item.get('role', 'user')}: {content}")
         return "\n".join(lines)
 
-    @staticmethod
-    def _format_document_summary(documents: list[ClassifiedDocument]) -> str:
+    # (flag attribute, result attribute, label) for each structured-extraction
+    # pass, so the summary tag is written once instead of once per pass. A third
+    # pass added later shows up here and nowhere else.
+    EXTRACTION_PASSES = (
+        ("is_bctc", "bctc_extraction", "bctc_extraction_error", "BCTC"),
+        (
+            "is_proposal",
+            "proposal_extraction",
+            "proposal_extraction_error",
+            "ĐỀ NGHỊ",
+        ),
+    )
+
+    @classmethod
+    def _extraction_tags(cls, doc: ClassifiedDocument) -> str:
+        """Mark which structured extractions ran on a document, and which failed.
+
+        A failed extraction silently drops the agent back to raw OCR — the report
+        still comes out, just without the structured figures — so the failure has
+        to be visible in the summary the decision LLM reads.
+        """
+
+        tags = []
+        for flag_attr, result_attr, _, label in cls.EXTRACTION_PASSES:
+            if getattr(doc, flag_attr):
+                tags.append(
+                    f" [{label}]"
+                    if getattr(doc, result_attr)
+                    else f" [{label}, trích xuất lỗi]"
+                )
+        return "".join(tags)
+
+    @classmethod
+    def _format_document_summary(cls, documents: list[ClassifiedDocument]) -> str:
         lines = []
         for doc in documents:
             routing = (
@@ -2524,14 +2556,9 @@ class Supervisor:
                 )
                 or "GENERAL_CONTEXT (không khớp loại nào)"
             )
-            bctc_tag = ""
-            if doc.is_bctc:
-                bctc_tag = (
-                    " [BCTC]" if doc.bctc_extraction else " [BCTC, trích xuất lỗi]"
-                )
             lines.append(
                 f"- {doc.filename}: {doc.document_type or '-'} -> {routing}"
-                f"{bctc_tag} (confidence={doc.confidence:.2f}, "
+                f"{cls._extraction_tags(doc)} (confidence={doc.confidence:.2f}, "
                 f"extraction={doc.extraction_status})"
             )
         return "\n".join(lines)
