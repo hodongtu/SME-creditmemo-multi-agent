@@ -212,7 +212,28 @@ class Supervisor:
     # The deterministic ratio block goes to the agents that reason about the
     # figures: the financial agent computes from them, the risk agent judges
     # leverage and debt-service against them.
-    METRICS_BLOCK_AGENTS = ("FINANCIAL_ANALYSIS_AGENT", "RISK_ASSESSMENT_AGENT")
+    # Credit proposal is here because its guidance asks it to tie the limit and
+    # the repayment source to working-capital turnover — the cash conversion
+    # cycle and inventory days the calculator already produces. Without the
+    # block it would be deriving those from raw line items, which is the
+    # arithmetic the calculator exists to take off it.
+    METRICS_BLOCK_AGENTS = (
+        "FINANCIAL_ANALYSIS_AGENT",
+        "RISK_ASSESSMENT_AGENT",
+        "CREDIT_PROPOSAL_AGENT",
+    )
+
+    # Every structured block states its own money unit, and they disagree: the
+    # metrics table is in tỷ VNĐ while the extractions are in đồng. One revenue
+    # figure therefore appears as both "240,80" and "240800000000" in the same
+    # prompt. Said out loud whenever more than one of them is present.
+    MIXED_UNIT_WARNING = (
+        "LƯU Ý ĐƠN VỊ TIỀN: các khối dữ liệu dưới đây dùng ĐƠN VỊ KHÁC NHAU và "
+        "mỗi khối tự ghi đơn vị của nó ở ngay đầu khối. Đọc đúng đơn vị của "
+        "khối đang trích. TUYỆT ĐỐI không lấy số của khối này đặt cạnh số của "
+        "khối khác khi chưa quy đổi — cùng một chỉ tiêu có thể xuất hiện ở hai "
+        "khối với hai đơn vị."
+    )
 
     # Which agents read a BCTC as structured JSON, and how much of it. Being in
     # this table has two inseparable consequences: the agent gets the
@@ -2155,6 +2176,15 @@ class Supervisor:
             if reads_proposal_json
             else ""
         )
+        # The units only clash once two of these blocks are present, so the
+        # warning appears exactly then — a prompt carrying one block needs no
+        # reconciling and should not gain a line telling it otherwise.
+        money_blocks = sum(
+            1 for block in (metrics_block, bctc_block, proposal_block) if block
+        )
+        unit_warning = (
+            f"{self.MIXED_UNIT_WARNING}\n\n" if money_blocks > 1 else ""
+        )
         # Every block spends characters on its own header (filename, document
         # type, relevance, extraction status) plus a separator, before any
         # content. That overhead has to come out of the budget up front: without
@@ -2172,6 +2202,7 @@ class Supervisor:
             - len(bctc_block)
             - len(self.DOC_SECTION_HEADER)
             - len(proposal_block)
+            - len(unit_warning)
             - block_overhead,
         )
         # Required evidence gets more budget than optional evidence, so a
@@ -2230,6 +2261,7 @@ class Supervisor:
         return truncate_text(
             (
                 f"{base}\n\n"
+                f"{unit_warning}"
                 f"{metrics_block}\n\n"
                 f"{bctc_block}\n\n"
                 f"{proposal_section}"
