@@ -9,18 +9,16 @@ logs/
 # Customer data — never commit
 testing/samples/
 
-# Internal bank source documents — never commit.
+# docs/ is where bank source material lands: workbooks, scanned application
+# forms, screenshots of real customer business models. Ignore everything in it
+# and allow the written documentation back in, rather than listing extensions —
+# an extension list only covered files sitting directly in docs/, so a folder of
+# scanned forms at docs/proposal/ slipped straight past it.
 # The routing matrix is transcribed into src/matrix/document_matrix.yaml, which
 # IS tracked because the code cannot load without it; the source workbook stays
 # local. Keep the two in sync by hand.
-docs/*.xlsx
-docs/*.xls
-# Screenshots and scans dropped in here as design references are real customer
-# material — business models, partner names, revenue shares, warehouse sites.
-docs/*.jpg
-docs/*.jpeg
-docs/*.png
-docs/*.pdf
+docs/*
+!docs/*.md
 
 # Python
 __pycache__/

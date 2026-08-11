@@ -52,11 +52,16 @@ from src.agents.document_matrix import (
     agent_relevance_for_type,
     get_type,
     is_bctc_type,
+    is_proposal_type,
     primary_agent_for_type,
 )
 from src.agents.bctc_extraction import (
     build_bctc_extraction_chain,
     extract_bctc_structured_data,
+)
+from src.agents.proposal_extraction import (
+    build_proposal_extraction_chain,
+    extract_proposal_structured_data,
 )
 from src.agents.specialist import (
     BusinessActivityAnalysis,
@@ -209,6 +214,27 @@ class Supervisor:
     # leverage and debt-service against them.
     METRICS_BLOCK_AGENTS = ("FINANCIAL_ANALYSIS_AGENT", "RISK_ASSESSMENT_AGENT")
 
+    # Which agents read a BCTC as structured JSON, and how much of it. Being in
+    # this table has two inseparable consequences: the agent gets the
+    # [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT] block, AND the statement's raw OCR is replaced
+    # by a pointer to that block. Enabling only one of the two would bill the
+    # same content twice, so both read this single table.
+    #
+    # None means the whole extraction. Credit proposal argues repayment capacity
+    # out of earnings, so it takes the income statement alone — the full record
+    # runs 23k characters against its 20k budget, and would be cut mid-JSON.
+    BCTC_JSON_STATEMENTS: dict[str, tuple[str, ...] | None] = {
+        "FINANCIAL_ANALYSIS_AGENT": None,
+        "CREDIT_PROPOSAL_AGENT": ("income_statement",),
+    }
+
+    # Same arrangement for the credit application form: these agents read it as
+    # JSON and therefore do NOT get its raw OCR. Risk assessment is here because
+    # sections C and the repayment plan are its subject matter; business
+    # activity and financial analysis keep the raw form, which is all they use
+    # it for.
+    PROPOSAL_JSON_AGENTS = ("CREDIT_PROPOSAL_AGENT", "RISK_ASSESSMENT_AGENT")
+
     # Numeric form of the matrix's R/O relevance levels, so ranking and budget
     # code can compare relevance without carrying the R/O vocabulary around.
     RELEVANCE_SCORE = {"R": 2.0, "O": 1.0}
@@ -256,6 +282,11 @@ class Supervisor:
         self.bctc_extraction_chain = (
             build_bctc_extraction_chain(config.bctc_extraction_llm)
             if config.bctc_extraction_llm
+            else None
+        )
+        self.proposal_extraction_chain = (
+            build_proposal_extraction_chain(config.proposal_extraction_llm)
+            if config.proposal_extraction_llm
             else None
         )
         self.workflow_graph = self._build_workflow_graph()
@@ -423,6 +454,7 @@ class Supervisor:
             loan_program,
         )
         self._extract_bctc_documents(documents, steps)
+        self._extract_proposal_documents(documents, steps)
         document_routes: set[str] = set()
         for doc in documents:
             if doc.agent == "GENERAL_CONTEXT":
@@ -798,6 +830,7 @@ class Supervisor:
             matched = get_type(document_type)
             agent = primary_agent_for_type(document_type) or "GENERAL_CONTEXT"
             is_bctc = is_bctc_type(document_type)
+            is_proposal = is_proposal_type(document_type)
             steps.append(
                 f"Classified document: {filename} -> "
                 + (f"{document_type} " if document_type else "(no type matched) ")
@@ -831,57 +864,98 @@ class Supervisor:
                     },
                     relevant_agents=relevant_agents,
                     is_bctc=is_bctc,
+                    is_proposal=is_proposal,
                 )
             )
         return documents
+
+    def _run_structured_extraction(
+        self,
+        documents: list[ClassifiedDocument],
+        steps: list[str],
+        *,
+        flag_attr: str,
+        chain: Any,
+        extract: Any,
+        result_attr: str,
+        error_attr: str,
+        label: str,
+        missing_llm_message: str,
+    ) -> None:
+        """Run one structured-extraction pass over the documents it applies to.
+
+        Several files can need the same pass in one run (current + prior year
+        statements, say), so it goes concurrently, bounded by max_concurrency —
+        the same pattern as the parallel analysis agents. Results are written
+        onto each document in place and nothing raises, so a failed or
+        unconfigured extraction always leaves _build_user_input a clean signal
+        to fall back to the raw OCR text.
+
+        Shared by the BCTC and credit-application passes: they differ only in
+        which documents they apply to and where the result is stored.
+        """
+
+        targets = [doc for doc in documents if getattr(doc, flag_attr)]
+        if not targets:
+            return
+        if not chain:
+            for doc in targets:
+                setattr(doc, error_attr, missing_llm_message)
+            steps.append(
+                f"Skipped {label} extraction for {len(targets)} document(s): "
+                f"{missing_llm_message}"
+            )
+            return
+
+        def _run(doc: ClassifiedDocument):
+            result, error = extract(chain, doc.filename, doc.content)
+            return doc, result, error
+
+        max_workers = max(1, min(len(targets), self.config.max_concurrency))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_run, doc) for doc in targets]
+            for future in futures:
+                doc, result, error = future.result()
+                setattr(doc, result_attr, result)
+                setattr(doc, error_attr, error)
+                steps.append(
+                    f"{label} extraction: {doc.filename} -> "
+                    + ("ok" if result is not None else f"failed: {error}")
+                )
 
     def _extract_bctc_documents(
         self,
         documents: list[ClassifiedDocument],
         steps: list[str],
     ) -> None:
-        """Run structured JSON extraction for every BCTC-tagged document.
+        self._run_structured_extraction(
+            documents,
+            steps,
+            flag_attr="is_bctc",
+            chain=self.bctc_extraction_chain,
+            extract=extract_bctc_structured_data,
+            result_attr="bctc_extraction",
+            error_attr="bctc_extraction_error",
+            label="BCTC",
+            missing_llm_message="No bctc_extraction_llm configured.",
+        )
 
-        Multiple BCTC files can be uploaded together (e.g. current + prior
-        year), so extraction runs concurrently, bounded by max_concurrency —
-        same pattern as the parallel analysis agents in
-        _run_credit_memo_workflow. Mutates bctc_extraction/
-        bctc_extraction_error on each doc in place; never raises, so a failed
-        or unconfigured extraction always leaves a clean fallback signal for
-        _build_user_input to fall back to raw OCR content.
-        """
-
-        bctc_docs = [doc for doc in documents if doc.is_bctc]
-        if not bctc_docs:
-            return
-        if not self.bctc_extraction_chain:
-            for doc in bctc_docs:
-                doc.bctc_extraction_error = "No bctc_extraction_llm configured."
-            steps.append(
-                f"Skipped BCTC extraction for {len(bctc_docs)} document(s): "
-                "no bctc_extraction_llm configured."
-            )
-            return
-
-        def _run(doc: ClassifiedDocument):
-            result, error = extract_bctc_structured_data(
-                self.bctc_extraction_chain,
-                doc.filename,
-                doc.content,
-            )
-            return doc, result, error
-
-        max_workers = max(1, min(len(bctc_docs), self.config.max_concurrency))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_run, doc) for doc in bctc_docs]
-            for future in futures:
-                doc, result, error = future.result()
-                doc.bctc_extraction = result
-                doc.bctc_extraction_error = error
-                steps.append(
-                    f"BCTC extraction: {doc.filename} -> "
-                    + ("ok" if result is not None else f"failed: {error}")
-                )
+    def _extract_proposal_documents(
+        self,
+        documents: list[ClassifiedDocument],
+        steps: list[str],
+    ) -> None:
+        self._run_structured_extraction(
+            documents,
+            steps,
+            flag_attr="is_proposal",
+            chain=self.proposal_extraction_chain,
+            extract=extract_proposal_structured_data,
+            result_attr="proposal_extraction",
+            error_attr="proposal_extraction_error",
+            label="Proposal",
+            missing_llm_message="No proposal_extraction_llm configured.",
+        )
 
     @staticmethod
     def _document_sample(content: str, limit: int = 2_400) -> str:
@@ -2059,7 +2133,8 @@ class Supervisor:
         # State the periods explicitly: several BCTC files overlap by a year, so
         # the merged set (e.g. 2 files -> 3 years) does not match the sample
         # column count in the layout. Telling the agent removes the guesswork.
-        if target_agent == "FINANCIAL_ANALYSIS_AGENT":
+        reads_bctc_json = target_agent in self.BCTC_JSON_STATEMENTS
+        if reads_bctc_json:
             periods = (self._build_financial_metrics_data(usable) or {}).get("years")
             if periods:
                 base += (
@@ -2067,8 +2142,17 @@ class Supervisor:
                     f"bảng theo năm, thứ tự tăng dần): {', '.join(periods)}"
                 )
         bctc_block = (
-            self._build_bctc_structured_block(usable)
-            if target_agent == "FINANCIAL_ANALYSIS_AGENT"
+            self._build_bctc_structured_block(
+                usable,
+                self.BCTC_JSON_STATEMENTS[target_agent],
+            )
+            if reads_bctc_json
+            else ""
+        )
+        reads_proposal_json = target_agent in self.PROPOSAL_JSON_AGENTS
+        proposal_block = (
+            self._build_proposal_structured_block(usable)
+            if reads_proposal_json
             else ""
         )
         # Every block spends characters on its own header (filename, document
@@ -2087,6 +2171,7 @@ class Supervisor:
             - len(metrics_block)
             - len(bctc_block)
             - len(self.DOC_SECTION_HEADER)
+            - len(proposal_block)
             - block_overhead,
         )
         # Required evidence gets more budget than optional evidence, so a
@@ -2111,18 +2196,21 @@ class Supervisor:
         blocks = []
         for doc in usable:
             # A successfully-extracted BCTC doc is represented by its
-            # structured JSON (see bctc_block below), not its raw OCR dump —
-            # that's the whole point of the extraction pass. Any other doc
+            # structured JSON (see bctc_block above), not its raw OCR dump —
+            # that's the whole point of the extraction pass. Gated on the same
+            # table as the block itself, because sending one without the other
+            # either bills the content twice or loses it entirely. Any other doc
             # (not BCTC, or extraction failed/unavailable) keeps raw content
             # so no evidence is ever silently dropped.
-            if (
-                target_agent == "FINANCIAL_ANALYSIS_AGENT"
-                and doc.is_bctc
-                and doc.bctc_extraction
-            ):
+            if reads_bctc_json and doc.is_bctc and doc.bctc_extraction:
                 content_section = (
                     "Extracted document content: đã trích xuất có cấu trúc "
                     "— xem [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT] bên dưới."
+                )
+            elif reads_proposal_json and doc.is_proposal and doc.proposal_extraction:
+                content_section = (
+                    "Extracted document content: đã trích xuất có cấu trúc "
+                    "— xem [DỮ LIỆU ĐỀ NGHỊ CẤP TÍN DỤNG] bên dưới."
                 )
             else:
                 content_section = "\n".join(
@@ -2135,11 +2223,16 @@ class Supervisor:
                 self._document_block_header(doc, target_agent) + content_section
             )
         docs_text = self.DOC_BLOCK_SEPARATOR.join(blocks)
+        # Emitted only when there is something to say: an empty slot would add
+        # blank lines to every prompt that has no credit application, churning
+        # them for nothing.
+        proposal_section = f"{proposal_block}\n\n" if proposal_block else ""
         return truncate_text(
             (
                 f"{base}\n\n"
                 f"{metrics_block}\n\n"
                 f"{bctc_block}\n\n"
+                f"{proposal_section}"
                 f"{self.DOC_SECTION_HEADER}"
                 f"{docs_text}"
             ),
@@ -2253,9 +2346,49 @@ class Supervisor:
             return {"error": f"{type(exc).__name__}: {exc}"}
 
     @staticmethod
-    def _build_bctc_structured_block(
+    def _build_proposal_structured_block(
         selected: list[ClassifiedDocument],
     ) -> str:
+        """Render the extracted credit application records.
+
+        Amounts arrive already converted to đồng by the extraction pass, and the
+        unit each figure was read in is kept in ``source_unit`` — the form mixes
+        đồng, triệu đồng and tỷ đồng between adjacent tables, so the note says so
+        rather than leaving the agent to infer it.
+        """
+
+        proposal_docs = [
+            doc for doc in selected if doc.is_proposal and doc.proposal_extraction
+        ]
+        if not proposal_docs:
+            return ""
+        parts = [
+            "[DỮ LIỆU ĐỀ NGHỊ CẤP TÍN DỤNG]",
+            "Trích xuất từ mục B (phương án sử dụng vốn, kế hoạch kinh doanh, "
+            "hiệu quả, phương án trả nợ), mục C (tài sản bảo đảm) và mục D "
+            "(đề nghị cấp tín dụng) của giấy đề nghị.",
+            "Mọi số tiền đã quy về ĐỒNG (VNĐ). Trường \"source_unit\" là đơn vị "
+            "ghi trên bản gốc, chỉ để đối chiếu — không nhân/chia lại lần nữa.",
+        ]
+        for doc in proposal_docs:
+            parts.append(
+                f"--- {doc.filename} ---\n"
+                + json.dumps(doc.proposal_extraction, ensure_ascii=False, indent=2)
+            )
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _build_bctc_structured_block(
+        selected: list[ClassifiedDocument],
+        statements: tuple[str, ...] | None = None,
+    ) -> str:
+        """Render the extracted BCTC records, optionally trimmed to some statements.
+
+        ``statements=None`` emits the whole record. Narrowing it keeps an agent
+        that only reasons about one statement from spending its entire character
+        budget on the other two — see BCTC_JSON_STATEMENTS.
+        """
+
         bctc_docs = [
             doc for doc in selected if doc.is_bctc and doc.bctc_extraction
         ]
@@ -2263,11 +2396,20 @@ class Supervisor:
             return ""
         parts = ["[DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT]"]
         for doc in bctc_docs:
+            extraction = doc.bctc_extraction
+            if statements is not None:
+                extraction = {
+                    key: value
+                    for key, value in extraction.items()
+                    if key in statements
+                }
+                if not extraction:
+                    continue
             parts.append(
                 f"--- {doc.filename} ---\n"
-                + json.dumps(doc.bctc_extraction, ensure_ascii=False, indent=2)
+                + json.dumps(extraction, ensure_ascii=False, indent=2)
             )
-        return "\n\n".join(parts)
+        return "\n\n".join(parts) if len(parts) > 1 else ""
 
     @staticmethod
     def _select_documents_for_agent(

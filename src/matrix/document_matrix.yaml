@@ -167,6 +167,7 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           RISK_ASSESSMENT_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
         keywords:
           - "bctc"
           - "bao cao tai chinh"
@@ -205,6 +206,7 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           RISK_ASSESSMENT_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
         keywords:
           - "bao cao ket qua hoat dong kinh doanh"
           - "bao cao ket qua kinh doanh"
@@ -313,6 +315,10 @@ groups:
           Đề nghị cấp tín dụng/hạn mức kiêm phương án kinh doanh/sử dụng vốn
           trong đó nêu rõ phương án/kế hoạch kinh doanh/sử dụng vốn của năm đề
           nghị cấp hạn mức; Đề nghị phát hành bảo lãnh.
+        # Mục B (phương án vốn + kế hoạch kinh doanh + hiệu quả + trả nợ),
+        # mục C (tài sản bảo đảm) và mục D (đề nghị cấp tín dụng) được trích
+        # xuất ra JSON — xem src/agents/proposal_extraction.py.
+        proposal_extraction: true
         requirement:
           cap_moi: "Bắt buộc"
           tai_cap: "Bắt buộc"

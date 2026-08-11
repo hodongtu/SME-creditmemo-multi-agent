@@ -66,6 +66,7 @@ class DocumentType:
     primary_agent: str
     requirement: dict[str, str] = field(default_factory=dict)
     bctc_extraction: bool = False
+    proposal_extraction: bool = False
 
     @property
     def routing_signature(self) -> frozenset[str]:
@@ -298,6 +299,9 @@ def _load(path: Path) -> DocumentMatrix:
                     for key, value in requirement.items()
                 },
                 bctc_extraction=bool(entry.get("bctc_extraction", False)),
+                proposal_extraction=bool(
+                    entry.get("proposal_extraction", False)
+                ),
             )
 
     if not types:
@@ -379,6 +383,13 @@ def is_bctc_type(type_id: str) -> bool:
 
     doc = get_type(type_id)
     return bool(doc and doc.bctc_extraction)
+
+
+def is_proposal_type(type_id: str) -> bool:
+    """True when this document type is a credit application to be extracted."""
+
+    doc = get_type(type_id)
+    return bool(doc and doc.proposal_extraction)
 
 
 def routing_signature(type_id: str) -> frozenset[str]:

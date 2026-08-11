@@ -89,8 +89,13 @@ class ClassifiedDocument:
     # stays None on failure/no LLM configured — callers must fall back to raw
     # `content` in that case.
     is_bctc: bool = False
+    # Same arrangement for the credit application form: sections B, C and D are
+    # pulled into JSON so the proposal agent reads figures rather than OCR.
+    is_proposal: bool = False
     bctc_extraction: dict[str, Any] | None = None
     bctc_extraction_error: str = ""
+    proposal_extraction: dict[str, Any] | None = None
+    proposal_extraction_error: str = ""
 
 
 class UnderwritingGraphState(TypedDict, total=False):

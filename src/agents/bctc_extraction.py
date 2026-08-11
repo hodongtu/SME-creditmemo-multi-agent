@@ -12,9 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-
+from src.agents.structured_extraction import build_extraction_chain, run_extraction
 from src.utils.common import normalize_text
 
 REQUIRED_TOP_LEVEL_KEYS = {
@@ -129,23 +127,7 @@ này — không ghi "(trang null)" hay tương tự.
 def build_bctc_extraction_chain(llm: Any):
     """Build the JSON-output extraction chain, mirroring the document classifier chain."""
 
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            ("system", BCTC_EXTRACTION_SYSTEM_PROMPT),
-            (
-                "human",
-                """
-                Tên file: {filename}
-
-                Văn bản OCR (BCTC):
-                {content}
-
-                Trích xuất theo đúng schema JSON đã mô tả.
-                """,
-            ),
-        ]
-    )
-    return prompt | llm | JsonOutputParser()
+    return build_extraction_chain(BCTC_EXTRACTION_SYSTEM_PROMPT, llm)
 
 
 # Guard on digits rather than word boundaries: \b fails between a letter and a
@@ -369,16 +351,13 @@ def extract_bctc_structured_data(
     always has a clean signal to fall back to raw OCR text for this document.
     """
 
-    if chain is None:
-        return None, "No BCTC extraction LLM configured."
-    try:
-        result = chain.invoke({"filename": filename, "content": content})
-    except Exception as exc:
-        return None, f"{type(exc).__name__}: {exc}"[:500]
-
-    if not isinstance(result, dict):
-        return None, f"Extraction returned non-dict result: {type(result).__name__}"
-    missing = REQUIRED_TOP_LEVEL_KEYS - result.keys()
-    if missing:
-        return None, f"Extraction result missing keys: {sorted(missing)}"
+    result, error = run_extraction(
+        chain,
+        filename,
+        content,
+        REQUIRED_TOP_LEVEL_KEYS,
+        "No BCTC extraction LLM configured.",
+    )
+    if result is None:
+        return None, error
     return normalize_extraction_periods(result), ""
