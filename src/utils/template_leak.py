@@ -45,6 +45,14 @@ SCAFFOLD_MARKERS = (
     "monetary unit rule",
     "language rule",
     "xoa han dong khong co du lieu",
+    # Headings of the structured blocks in the prompt. An agent required to cite
+    # a figure but given no filename will reach for the only label in front of
+    # it, and "Căn cứ: [PRE-COMPUTED FINANCIAL METRICS]" means nothing to whoever
+    # reads the memo. _strip_accents lowercases and drops accents but keeps
+    # punctuation, so these are written in that form.
+    "[pre-computed financial metrics]",
+    "[du lieu bctc da trich xuat]",
+    "[du lieu de nghi cap tin dung]",
 )
 
 

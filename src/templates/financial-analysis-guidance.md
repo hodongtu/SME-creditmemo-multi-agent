@@ -50,7 +50,8 @@ TRỌNG TÂM PHÂN TÍCH TỪNG MỤC:
 - Mục 4: kết quả đạt được và khả năng duy trì; biến động tài chính trọng yếu có phù
   hợp với mô hình kinh doanh và các quyết định trong kỳ hay không.
 
-CÔNG THỨC (dùng khi khối [PRE-COMPUTED FINANCIAL METRICS] không có sẵn chỉ số):
+CÔNG THỨC (dùng khi khối [PRE-COMPUTED FINANCIAL METRICS] không có sẵn chỉ số;
+tên khối là nhãn nội bộ, không đưa vào báo cáo — trích dẫn tên file BCTC):
 - Chỉ số thanh toán nhanh = (Tài sản ngắn hạn - Trả trước người bán - Phải thu khác) / Nợ ngắn hạn
 - Vòng quay tài sản = Doanh thu / Tổng tài sản cuối kỳ
 - ROA = Lợi nhuận sau thuế / Tổng tài sản cuối kỳ

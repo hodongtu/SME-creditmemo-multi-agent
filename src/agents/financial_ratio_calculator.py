@@ -423,7 +423,54 @@ class FinancialRatioCalculator:
         if not ratios:
             return ""
 
-        return self.format_markdown(yearly_metrics, ratios)
+        return self.format_markdown(
+            yearly_metrics,
+            ratios,
+            self.source_files_by_year(documents),
+        )
+
+    def source_files_by_year(
+        self,
+        documents: list[dict[str, Any]],
+    ) -> dict[str, list[str]]:
+        """Which uploaded file supplied each year's figures.
+
+        The block is the only place a reader meets these numbers, and every
+        figure in a credit memo has to be attributable to a document. Without
+        this the agent is required to cite a source it was never told, and the
+        only identifier in front of it is the block's own heading — which is how
+        an internal heading ends up printed in a customer-facing report.
+
+        Kept per year rather than one flat list because two statements usually
+        overlap by a year, and a merged list would attribute a column to a file
+        that never carried it.
+        """
+
+        by_year: dict[str, set[str]] = {}
+        for document in documents:
+            extraction = document.get("bctc_extraction")
+            if not isinstance(extraction, dict):
+                continue
+            filename = str(document.get("filename") or "").strip()
+            if not filename:
+                continue
+            current_year, previous_year = resolve_report_years(extraction)
+            for statement_key in self.STATEMENT_KEYS:
+                statement = extraction.get(statement_key)
+                if not isinstance(statement, dict):
+                    continue
+                for line_item in statement.get("line_items") or []:
+                    if not isinstance(line_item, dict):
+                        continue
+                    values = line_item.get("values")
+                    if not isinstance(values, dict):
+                        continue
+                    for year in values:
+                        label = normalize_period_label(
+                            year, current_year, previous_year
+                        )
+                        by_year.setdefault(label, set()).add(filename)
+        return {year: sorted(names) for year, names in sorted(by_year.items())}
 
     STATEMENT_KEYS = (BALANCE_SHEET, INCOME_STATEMENT, CASH_FLOW)
 
@@ -595,6 +642,7 @@ class FinancialRatioCalculator:
         self,
         yearly_metrics: dict[str, dict[str, float]],
         yearly_ratios: dict[str, dict[str, float]],
+        source_files: dict[str, list[str]] | None = None,
     ) -> str:
         """Format extracted metrics and computed ratios as markdown for the agent."""
         years = sorted(yearly_metrics)
@@ -606,8 +654,21 @@ class FinancialRatioCalculator:
             "Đơn vị mọi giá trị tiền tệ (line items) trong block này: **tỷ VNĐ** "
             "(đã chia 10^9, 2 chữ số thập phân). Giữ nguyên đơn vị này khi trình bày.",
             "",
-            "Important formula notes from the financial analysis template:",
         ]
+        if source_files:
+            lines.extend(
+                [
+                    "NGUỒN SỐ LIỆU — dùng tên file dưới đây khi trích dẫn. "
+                    "\"[PRE-COMPUTED FINANCIAL METRICS]\" là tên khối kỹ thuật "
+                    "trong prompt, TUYỆT ĐỐI không ghi tên khối này vào báo cáo:",
+                ]
+            )
+            lines.extend(
+                f"- {year}: {', '.join(names)}"
+                for year, names in source_files.items()
+            )
+            lines.append("")
+        lines.append("Important formula notes from the financial analysis template:")
         lines.extend(f"- {ratio.label}: {ratio.formula}" for ratio in self.RATIO_DEFINITIONS)
         lines.extend(
             [

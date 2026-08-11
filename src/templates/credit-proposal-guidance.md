@@ -23,7 +23,7 @@ TRỌNG TÂM:
   để lập luận; thiếu dữ liệu thì ghi "Chưa đủ cơ sở để đề xuất" thay vì ước lượng.
 - Nguồn trả nợ: ưu tiên dòng tiền từ hoạt động kinh doanh; chỉ ghi nguồn nào hồ sơ
   chứng minh được, kèm cơ sở xác định.
-- Khi lập luận về vòng quay vốn, LẤY SỐ TỪ khối [PRE-COMPUTED FINANCIAL METRICS]:
+- Khi lập luận về vòng quay vốn, LẤY SỐ TỪ khối [PRE-COMPUTED FINANCIAL METRICS] (đây là tên khối kỹ thuật trong prompt — không ghi tên khối này vào báo cáo, trích dẫn tên file BCTC ở mục "NGUỒN SỐ LIỆU" của khối):
   số ngày thiếu tiền (CCC), số ngày tồn kho, số ngày phải thu, số ngày phải trả,
   chỉ số thanh toán hiện hành, nợ vay/VCSH. Các chỉ số này đã được tính sẵn bằng
   công thức cố định — KHÔNG tự tính lại từ dòng chỉ tiêu thô, vì tính lại là mở

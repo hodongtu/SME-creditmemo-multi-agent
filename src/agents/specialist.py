@@ -104,6 +104,14 @@ class SpecialistAgent:
         dữ liệu lấy từ khối [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT], dùng trường "page" của
         chỉ tiêu đó trong JSON, và nếu chỉ tiêu không có "page" thì dùng "page"
         của bảng chứa nó (balance_sheet/income_statement/cash_flow_statement).
+        - Với số lấy từ khối [PRE-COMPUTED FINANCIAL METRICS]: trích dẫn TÊN FILE
+        ghi ở mục "NGUỒN SỐ LIỆU" của khối đó, theo đúng năm của con số. Ví dụ số
+        năm 2024 mà mục đó ghi "Năm 2024: BCTC_2024.pdf" thì citation là
+        [BCTC_2024.pdf].
+        - TUYỆT ĐỐI không ghi tên khối kỹ thuật vào báo cáo. Các chuỗi
+        [PRE-COMPUTED FINANCIAL METRICS], [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT],
+        [DỮ LIỆU ĐỀ NGHỊ CẤP TÍN DỤNG] chỉ là nhãn nội bộ trong prompt; người đọc
+        báo cáo không biết chúng là gì. Luôn trích dẫn tài liệu gốc.
         - Citation là BẮT BUỘC cho mọi số liệu và mọi nhận định đã in đậm. Nếu
         thực sự không xác định được trang/sheet, vẫn phải ghi [tên file].
         - Không bịa số trang hoặc tên file — chỉ trích dẫn khi thực sự xác định
