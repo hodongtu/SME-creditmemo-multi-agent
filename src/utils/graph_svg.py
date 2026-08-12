@@ -30,6 +30,9 @@ LINE_HEIGHT = 13
 FONT_SIZE = 10.5
 EDGE_FONT_SIZE = 8.5
 RANK_GAP = 74
+# Top-down charts need less room between levels: a horizontal gap has to fit an
+# edge label *beside* the connector, a vertical one only above and below it.
+VERTICAL_RANK_GAP = 46
 NODE_GAP = 14
 MARGIN = 8
 
@@ -194,46 +197,81 @@ def _order_within_ranks(
                 nodes[node_id].order = float(position)
 
 
-def _place(ranks: dict[int, list[str]], nodes: dict[str, _Node]) -> tuple[float, float]:
-    """Assign coordinates and return the drawing size."""
+def _place(
+    ranks: dict[int, list[str]],
+    nodes: dict[str, _Node],
+    vertical: bool = False,
+) -> tuple[float, float]:
+    """Assign coordinates and return the drawing size.
+
+    The two directions are the same layout with the axes swapped: levels advance
+    along one axis, the nodes of a level spread along the other, and each level
+    is centred against the largest one so the diagram reads balanced instead of
+    hanging off one edge.
+    """
 
     for node in nodes.values():
         width = max(len(line) for line in node.lines) * CHAR_WIDTH + 2 * NODE_PADDING_X
         node.width = min(NODE_MAX_WIDTH, max(NODE_MIN_WIDTH, width))
         node.height = len(node.lines) * LINE_HEIGHT + 2 * NODE_PADDING_Y
 
-    column_heights: dict[int, float] = {}
+    # Extent of each level along the cross axis.
+    spans: dict[int, float] = {}
     for key, rank_nodes in ranks.items():
-        column_heights[key] = (
-            sum(nodes[n].height for n in rank_nodes)
-            + NODE_GAP * max(0, len(rank_nodes) - 1)
-        )
-    tallest = max(column_heights.values(), default=0.0)
+        sizes = [nodes[n].width if vertical else nodes[n].height for n in rank_nodes]
+        spans[key] = sum(sizes) + NODE_GAP * max(0, len(rank_nodes) - 1)
+    widest = max(spans.values(), default=0.0)
 
-    x = MARGIN
+    gap = VERTICAL_RANK_GAP if vertical else RANK_GAP
+    along = MARGIN
     for key in sorted(ranks):
         rank_nodes = ranks[key]
-        column_width = max(nodes[n].width for n in rank_nodes)
-        # Each column is centred against the tallest one, which reads as a
-        # balanced diagram instead of everything hanging off the top edge.
-        y = MARGIN + (tallest - column_heights[key]) / 2
+        thickness = max(
+            nodes[n].height if vertical else nodes[n].width for n in rank_nodes
+        )
+        across = MARGIN + (widest - spans[key]) / 2
         for node_id in rank_nodes:
             node = nodes[node_id]
-            node.x = x + (column_width - node.width) / 2
-            node.y = y
-            y += node.height + NODE_GAP
-        x += column_width + RANK_GAP
+            if vertical:
+                node.x = across
+                node.y = along + (thickness - node.height) / 2
+                across += node.width + NODE_GAP
+            else:
+                node.x = along + (thickness - node.width) / 2
+                node.y = across
+                across += node.height + NODE_GAP
+        along += thickness + gap
 
-    width = x - RANK_GAP + MARGIN
-    height = tallest + 2 * MARGIN
-    return width, height
+    extent = along - gap + MARGIN
+    if vertical:
+        return widest + 2 * MARGIN, extent
+    return extent, widest + 2 * MARGIN
 
 
-def _edge_path(src: _Node, dst: _Node) -> str:
+def _edge_ends(
+    src: _Node,
+    dst: _Node,
+    vertical: bool,
+) -> tuple[float, float, float, float]:
+    """Where a connector leaves the source and meets the target."""
+
+    if vertical:
+        return src.cx, src.y + src.height, dst.cx, dst.y
+    return src.x + src.width, src.cy, dst.x, dst.cy
+
+
+def _edge_path(src: _Node, dst: _Node, vertical: bool = False) -> str:
     """Orthogonal connector: out of the source, across, into the target."""
 
-    x1, y1 = src.x + src.width, src.cy
-    x2, y2 = dst.x, dst.cy
+    x1, y1, x2, y2 = _edge_ends(src, dst, vertical)
+    if vertical:
+        if abs(x1 - x2) < 0.5:
+            return f"M{x1:.1f} {y1:.1f} L{x2:.1f} {y2:.1f}"
+        mid = y1 + (y2 - y1) / 2
+        return (
+            f"M{x1:.1f} {y1:.1f} L{x1:.1f} {mid:.1f} "
+            f"L{x2:.1f} {mid:.1f} L{x2:.1f} {y2:.1f}"
+        )
     if abs(y1 - y2) < 0.5:
         return f"M{x1:.1f} {y1:.1f} L{x2:.1f} {y2:.1f}"
     mid = x1 + (x2 - x1) / 2
@@ -276,7 +314,11 @@ def render_svg(chart) -> str | None:
         ranks.setdefault(nodes[node_id].rank, []).append(node_id)
 
     _order_within_ranks(ranks, edges, nodes)
-    width, height = _place(ranks, nodes)
+    # "flowchart TD" must come out top-down here too. Drawn left-to-right it
+    # would contradict the markdown view of the same report, which is the exact
+    # mismatch this renderer exists to prevent.
+    vertical = bool(getattr(chart, "vertical", False))
+    width, height = _place(ranks, nodes, vertical)
 
     out_degree: dict[str, int] = {node_id: 0 for node_id in nodes}
     in_degree: dict[str, int] = {node_id: 0 for node_id in nodes}
@@ -302,17 +344,24 @@ def render_svg(chart) -> str | None:
     for edge in edges:
         src, dst = nodes[edge.src], nodes[edge.dst]
         parts.append(
-            f'<path d="{_edge_path(src, dst)}" fill="none" stroke="{EDGE_COLOUR}" '
-            f'stroke-width="1.3" marker-end="url(#mmdarrow)"/>'
+            f'<path d="{_edge_path(src, dst, vertical)}" fill="none" '
+            f'stroke="{EDGE_COLOUR}" stroke-width="1.3" '
+            f'marker-end="url(#mmdarrow)"/>'
         )
         if edge.lines:
-            # Put the label at whichever end of the connector fans out, because
-            # that is the end where the edges are far apart. Labels bunched at
-            # the shared end land on top of each other and on the connector
-            # bundle: seven suppliers feeding one node share a bend exactly.
-            x1, y1 = src.x + src.width, src.cy
-            x2, y2 = dst.x, dst.cy
-            if in_degree[edge.dst] > 1 and out_degree[edge.src] <= 1:
+            x1, y1, x2, y2 = _edge_ends(src, dst, vertical)
+            if vertical:
+                # Beside the connector, not on it: a top-down connector is
+                # vertical, so anything centred on it lands on the line.
+                label_x = (x1 + x2) / 2 + 4
+                label_y = (y1 + y2) / 2
+                anchor = "start"
+            elif in_degree[edge.dst] > 1 and out_degree[edge.src] <= 1:
+                # Put the label at whichever end of the connector fans out,
+                # because that is the end where the edges are far apart. Labels
+                # bunched at the shared end land on top of each other and on the
+                # connector bundle: seven suppliers feeding one node share a
+                # bend exactly.
                 label_x, label_y, anchor = x1 + 5, y1 - 4, "start"
             elif out_degree[edge.src] > 1 and in_degree[edge.dst] <= 1:
                 label_x, label_y, anchor = x2 - 5, y2 - 4, "end"

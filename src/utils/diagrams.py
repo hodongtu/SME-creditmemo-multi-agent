@@ -1,12 +1,15 @@
-"""Render Mermaid flowcharts as plain HTML/CSS so they survive PDF export.
+"""Parse Mermaid flowcharts and draw them so they survive PDF export.
 
 The agents emit ```mermaid blocks because that renders natively on GitHub and in
 VS Code. WeasyPrint has no JavaScript, so a mermaid block would reach the PDF as
-a raw ``<pre><code>`` dump. This module rewrites those blocks into flex-box
-markup that ``markdown`` passes through untouched and WeasyPrint styles with
-``DIAGRAM_CSS``.
+a raw ``<pre><code>`` dump.
 
-Only simple flowcharts are supported (that is all the report templates ask for).
+Parsing lives here; drawing is ``graph_svg.render_svg``. Flex-box was tried first
+and lost on measurement: it cannot draw a hub once and connect it to several
+spokes, so every partner diagram came out with arrows pointing at blank page. The
+CSS that remains covers only the two cases with no layout to compute — a chart
+with no edges at all, and the last-resort row-per-edge fallback.
+
 Anything this parser cannot read is left as the original mermaid block rather
 than dropped, so content is never lost.
 """
@@ -124,14 +127,20 @@ def _scan_line(
     return nodes, links
 
 
-# Styled to match how mermaid itself draws a flowchart, because the same report
-# is read as markdown (where mermaid renders for real) and as PDF (where it
-# cannot, so this stands in). Colours are mermaid's default theme; boxes size to
-# their text and the chain centres, as mermaid lays them out; arrows are drawn
-# rather than typed, since a "→" glyph next to a real diagram looks like a
-# fallback. The report templates only ever emit a single linear chain, which is
-# exactly the case CSS can reproduce faithfully.
+# Colours match mermaid's default theme, because the same report is read as
+# markdown (where mermaid renders for real) and as PDF (where it cannot, so this
+# stands in). Arrows are drawn from pseudo-elements rather than typed, since a
+# "→" glyph next to a real diagram looks like a fallback.
+#
+# Only the fallback paths in _render still use these classes; everything with
+# edges is drawn by graph_svg.
 DIAGRAM_CSS = """
+/* Diagrams and charts are emitted as bare <svg> with explicit width and height.
+   Only the centring is left to CSS: a top-down flowchart is much narrower than
+   the page and otherwise sits against the left margin. Sizing stays out of CSS
+   on purpose — width:100% with height:auto makes WeasyPrint compute zero height
+   and draw nothing. */
+svg{display:block;margin:14px auto}
 .mmd{margin:14px 0}
 /* nowrap + shrinkable nodes: a wrapped row would leave the last box stretched
    across its own line, which reads worse than slightly narrower boxes. */
@@ -166,18 +175,6 @@ DIAGRAM_CSS = """
 .mmd-col .mmd-arrow-labelled::after{left:1px;margin-left:0;top:26px;bottom:auto}
 .mmd-elabel{display:block;font-size:8pt;color:#456;line-height:1.2;
   text-align:center;overflow-wrap:break-word}
-/* Hub-and-spokes: one company box beside a stacked column of its partners, the
-   shape mermaid draws for the partner diagrams in sections 4 and 5. */
-.mmd-fan{display:flex;align-items:center;justify-content:center;margin:6px 0}
-.mmd-fan-hub{flex:0 1 auto;min-width:0}
-.mmd-fan-spokes{display:flex;flex-direction:column;flex:0 1 auto;min-width:0;
-  align-items:stretch}
-.mmd-fan-row{display:flex;align-items:center;margin:3px 0;flex-wrap:nowrap}
-.mmd-fan-row .mmd-node{flex:0 1 auto}
-/* Rows stretch to the widest spoke, so pinning them to the hub side lines the
-   arrowheads up on one axis instead of leaving a ragged gap. */
-.mmd-fan-out .mmd-fan-row{justify-content:flex-start}
-.mmd-fan-in .mmd-fan-row{justify-content:flex-end}
 """
 
 
@@ -340,100 +337,6 @@ def _parse(source: str) -> Flowchart:
     )
 
 
-def _linear_chain(
-    order: list[str],
-    edges: list[tuple[str, str, str]],
-) -> list[tuple[str, str, str]] | None:
-    """Return the edges in path order when the graph is a single simple chain."""
-
-    if not edges:
-        return None
-    out: dict[str, list[tuple[str, str, str]]] = {}
-    indegree: dict[str, int] = {node: 0 for node in order}
-    for src, label, dst in edges:
-        out.setdefault(src, []).append((src, label, dst))
-        indegree[dst] = indegree.get(dst, 0) + 1
-    if any(len(items) > 1 for items in out.values()):
-        return None
-    if any(count > 1 for count in indegree.values()):
-        return None
-    starts = [node for node in order if indegree.get(node, 0) == 0]
-    if len(starts) != 1:
-        return None
-
-    chain: list[tuple[str, str, str]] = []
-    seen: set[str] = set()
-    current = starts[0]
-    while current in out:
-        if current in seen:
-            return None
-        seen.add(current)
-        edge = out[current][0]
-        chain.append(edge)
-        current = edge[2]
-    return chain if len(chain) == len(edges) else None
-
-
-def _fan(
-    order: list[str],
-    edges: list[tuple[str, str, str]],
-) -> tuple[str, str, list[tuple[str, str]]] | None:
-    """Detect a hub joined to several spokes, as ("out"|"in", hub, spokes).
-
-    The partner diagrams draw one company against its customers or suppliers,
-    each edge carrying that partner's share. Mermaid draws the hub once with the
-    edges fanning out; rendering an edge per row instead would repeat the
-    company's name on every line, which is precisely the mismatch with the
-    markdown view this module exists to avoid.
-    """
-
-    if len(edges) < 2:
-        return None
-    sources = {src for src, _, _ in edges}
-    targets = {dst for _, _, dst in edges}
-    if len(sources) == 1 and len(targets) == len(edges):
-        hub = next(iter(sources))
-        if hub in targets:
-            return None
-        spokes = [(label, dst) for _, label, dst in edges]
-        return "out", hub, spokes
-    if len(targets) == 1 and len(sources) == len(edges):
-        hub = next(iter(targets))
-        if hub in sources:
-            return None
-        spokes = [(label, src) for src, label, _ in edges]
-        return "in", hub, spokes
-    return None
-
-
-def _fan_html(
-    kind: str,
-    hub_label: str,
-    spokes: list[tuple[str, str]],
-) -> str:
-    """One hub box beside a stacked column of spokes, arrows in between."""
-
-    rows = "".join(
-        '<div class="mmd-fan-row">'
-        + (
-            _arrow_html(label, False) + _node_html(spoke_label)
-            if kind == "out"
-            else _node_html(spoke_label) + _arrow_html(label, False)
-        )
-        + "</div>"
-        for label, spoke_label in spokes
-    )
-    hub = f'<div class="mmd-fan-hub">{_node_html(hub_label)}</div>'
-    spoke_column = f'<div class="mmd-fan-spokes">{rows}</div>'
-    body = hub + spoke_column if kind == "out" else spoke_column + hub
-    # The direction is carried as a class so the CSS can push every arrow flush
-    # against the hub: spoke boxes differ in width, and without it the arrows
-    # stop at ragged positions with a gap before the hub.
-    return (
-        f'<div class="mmd"><div class="mmd-fan mmd-fan-{kind}">{body}</div></div>'
-    )
-
-
 def _node_html(label: str) -> str:
     return f'<div class="mmd-node">{label}</div>'
 
@@ -464,41 +367,26 @@ def _render(source: str) -> str | None:
     if not chart.labels:
         return None
     order, labels, edges = chart.order, chart.labels, chart.edges
-    vertical = chart.vertical
-
-    chain = _linear_chain(order, edges)
-    if chain is not None:
-        parts = [_node_html(labels[chain[0][0]])]
-        for _, label, dst in chain:
-            parts.append(_arrow_html(label, vertical))
-            parts.append(_node_html(labels[dst]))
-        container = "mmd-col" if vertical else "mmd-row"
-        return f'<div class="mmd"><div class="{container}">{"".join(parts)}</div></div>'
-
-    fan = _fan(order, edges)
-    if fan is not None:
-        kind, hub, spokes = fan
-        return _fan_html(
-            kind,
-            labels[hub],
-            [(label, labels[node]) for label, node in spokes],
-        )
-
     if not edges:
-        # Nodes only: show them as a single row of boxes.
+        # Nodes only: no layout to compute, so a single row of boxes.
         boxes = "".join(_node_html(labels[node]) for node in order)
         return f'<div class="mmd"><div class="mmd-row">{boxes}</div></div>'
 
-    # Anything wider than a chain or a single fan goes to the layered SVG
-    # drawer. Flex-box has no answer for it: the fallback below repeats a hub's
-    # name once per edge, which is the mismatch with the markdown view that this
-    # module exists to prevent.
+    # Everything with edges goes to the layered SVG drawer.
+    #
+    # There used to be flex-box special cases ahead of this — a linear chain and
+    # a hub-and-spokes fan — and the fan one was wrong: flex draws the hub once,
+    # in the row it happens to sit in, so every other spoke's arrow pointed at
+    # empty page. Measured side by side on the section 4 and 5 diagrams, the SVG
+    # drawer also beat the chain case: uniform box heights, no ragged wrapping,
+    # and a third of the vertical space.
     svg = render_svg(chart)
     if svg is not None:
         return svg
 
     # Last resort, if the layout could not run at all: one row per edge. Ugly,
-    # but it still shows every node and every connection.
+    # and it repeats a hub's name once per edge, but it still shows every node
+    # and every connection rather than dropping the diagram.
     rows = [
         '<div class="mmd-row">'
         + _node_html(labels[src])
