@@ -1,9 +1,10 @@
 """OCR helpers for PDF documents.
 
-Pipeline per page: rasterize -> image preprocessing (grayscale, denoise, deskew,
-Otsu threshold, optional upscale) -> layout-aware Tesseract OCR -> post-OCR text
-cleanup. Results are cached on disk keyed by file content hash + OCR config so
-re-runs of the notebook do not re-OCR the same document.
+Pipeline per page: rasterize -> ruled-line removal -> image preprocessing
+(grayscale, denoise, deskew, Otsu threshold, optional upscale) -> layout-aware
+Tesseract OCR -> post-OCR text cleanup. Results are cached on disk keyed by file
+content hash + OCR config so re-runs of the notebook do not re-OCR the same
+document.
 """
 
 from __future__ import annotations
@@ -46,12 +47,60 @@ def _ocr_config() -> dict[str, object]:
         "layout": os.getenv("OCR_LAYOUT", "1") != "0",
         "upscale": float(os.getenv("OCR_UPSCALE", "1.0")),
         "cache_dir": os.getenv("OCR_CACHE_DIR", ""),
+        # Ruled-table borders confuse Tesseract's line-height estimate badly
+        # enough to merge two table rows into one unreadable blob — see
+        # _remove_ruled_lines. Unlike denoise/binarize below, this is not a
+        # scan-quality tradeoff: measured on a clean 300dpi render, it took a
+        # 12-row balance table from 1 correct row to 12. On independent by
+        # design (thin straight rules vs. character strokes), so it stays on
+        # even when the rest of ``preprocess`` is off.
+        "deline": os.getenv("OCR_DELINE", "1") != "0",
     }
 
 
 # ---------------------------------------------------------------------------
 # Image preprocessing
 # ---------------------------------------------------------------------------
+def _remove_ruled_lines(gray: np.ndarray, dpi: int = 300) -> np.ndarray:
+    """Paint over long straight table rules, leaving the text between them.
+
+    Discovered on a CIC report: a 12-row balance table OCR'd as 1 correct row
+    and 11 blobs of garbage. ``image_to_data`` showed why — normal text lines
+    were ~30-45px tall, but every row touching a ruling line was boxed at
+    ~101-106px, more than the ~66px gap to the next row. Tesseract's line finder
+    was fusing the horizontal rule into the row's own text height, so each
+    "line" it fed the recognizer was really two rows of digits bled together.
+
+    The fix removes the cause rather than the symptom: find long horizontal and
+    vertical runs by morphological opening (a run of foreground pixels wider —
+    or taller — than the kernel survives; an isolated character stroke does
+    not), then whiten only those pixels. Kernel lengths scale with DPI so the
+    same table is caught whether rendered at 150 or 600.
+    """
+    factor = dpi / 300.0
+    _, binary = cv2.threshold(
+        gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+    )
+    h_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (max(15, round(60 * factor)), 1)
+    )
+    v_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT, (1, max(10, round(40 * factor)))
+    )
+    lines_mask = cv2.bitwise_or(
+        cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel),
+        cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel),
+    )
+    # Dilated by one pass so the light anti-aliased fringe around each rule
+    # (which survives the Otsu cut as faint grey, not solid black) is cleared
+    # too — left in place, that fringe is exactly what re-inflates the next
+    # line-height estimate.
+    lines_mask = cv2.dilate(lines_mask, np.ones((3, 3), np.uint8))
+    cleaned = gray.copy()
+    cleaned[lines_mask > 0] = 255
+    return cleaned
+
+
 def _deskew(gray: np.ndarray, max_angle: float = 15.0) -> np.ndarray:
     """Rotate the image to correct small scan skew, if any is detected."""
     inverted = cv2.bitwise_not(gray)
@@ -286,7 +335,7 @@ def _cache_key(pdf_path: str, settings: dict[str, object]) -> str:
         key: settings[key]
         for key in (
             "dpi", "lang", "psm", "oem", "preprocess",
-            "deskew", "denoise", "binarize", "layout", "upscale",
+            "deskew", "denoise", "binarize", "layout", "upscale", "deline",
         )
     }
     payload = f"{_file_sha256(pdf_path)}|{json.dumps(signature, sort_keys=True)}"
@@ -333,16 +382,27 @@ def ocr_pdf(pdf_path: str, timeout_seconds: float | None = None) -> str:
 
     page_texts = []
     for image in images:
+        # Ahead of the opt-in ``preprocess`` bundle and unconditional on it: this
+        # targets table rules, not scan noise, so it runs on the untouched render
+        # even when nothing else does. Applied before deskew/denoise/binarize —
+        # line detection assumes axis-aligned rules, so a page that also needs
+        # deskewing should have that run first in a later pass; these renders
+        # come straight from pdfium rather than a photographed scan, so skew is
+        # not the case this is tuned for.
+        working = image
+        if settings["deline"]:
+            gray = cv2.cvtColor(np.array(working.convert("RGB")), cv2.COLOR_RGB2GRAY)
+            working = Image.fromarray(_remove_ruled_lines(gray, int(settings["dpi"])))
         prepared = (
             preprocess_image(
-                image,
+                working,
                 deskew=bool(settings["deskew"]),
                 denoise=bool(settings["denoise"]),
                 binarize=bool(settings["binarize"]),
                 upscale=upscale,
             )
             if settings["preprocess"]
-            else image
+            else working
         )
         if settings["layout"]:
             text = image_to_layout_text(prepared, lang, tess_config, timeout)
