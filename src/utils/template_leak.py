@@ -41,6 +41,10 @@ SCAFFOLD_MARKERS = (
     "evidence rule",
     "citation rule",
     "highlight rule",
+    "nhan dinh rule",
+    # Kept after the rule it replaced was renamed: the old heading can still
+    # reach a report through a cached response or an older prompt revision, and
+    # a marker that matches nothing costs a substring scan.
     "assertion separation rule",
     "monetary unit rule",
     "language rule",
@@ -53,6 +57,7 @@ SCAFFOLD_MARKERS = (
     "[pre-computed financial metrics]",
     "[du lieu bctc da trich xuat]",
     "[du lieu de nghi cap tin dung]",
+    "[extracted cic s10a report]",
 )
 
 

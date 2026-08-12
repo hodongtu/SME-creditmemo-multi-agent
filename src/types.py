@@ -92,10 +92,17 @@ class ClassifiedDocument:
     # Same arrangement for the credit application form: sections B, C and D are
     # pulled into JSON so the proposal agent reads figures rather than OCR.
     is_proposal: bool = False
+    # And for the CIC S10A credit-relationship report, whose section 2.6 is the
+    # only monthly debt series in the whole file set. Flagged per CIC form code
+    # rather than per issuer: the collateral report (R20/R21) shares CIC's
+    # letterhead and nothing else, so it needs its own pass, not this one.
+    is_cic_s10a: bool = False
     bctc_extraction: dict[str, Any] | None = None
     bctc_extraction_error: str = ""
     proposal_extraction: dict[str, Any] | None = None
     proposal_extraction_error: str = ""
+    cic_s10a_extraction: dict[str, Any] | None = None
+    cic_s10a_extraction_error: str = ""
 
 
 class UnderwritingGraphState(TypedDict, total=False):

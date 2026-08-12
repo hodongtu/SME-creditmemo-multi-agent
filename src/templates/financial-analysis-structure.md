@@ -28,8 +28,6 @@
 | Lợi nhuận từ hoạt động kinh doanh | | | | | | |
 | Lợi nhuận sau thuế | | | | | | |
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ### 1.1. Đánh giá doanh thu
@@ -40,19 +38,13 @@
 | Tên khách hàng đầu ra | Doanh số {{Nam2}} | Tỷ trọng | Doanh số {{Nam3}} | Tỷ trọng | Chênh lệch |
 |---|---:|---:|---:|---:|---:|
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ### 1.2. Đánh giá giá vốn
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ### 1.3. Đánh giá các khoản mục có phát sinh hoặc biến động lớn trong kỳ
-
-**Căn cứ**:
 
 **Nhận định**:
 
@@ -63,8 +55,6 @@
 | Biên lợi nhuận gộp | | | |
 | Biên lợi nhuận thuần từ HĐKD | | | |
 | ROS | | | |
-
-**Căn cứ**:
 
 **Nhận định**:
 
@@ -103,15 +93,11 @@
 | Lợi nhuận sau thuế chưa phân phối | | | | | | |
 | **Tổng nguồn vốn** | | | | | | |
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ### 2.2. Các khoản mục chi tiết
 
 #### 2.2.1. Tài sản
-
-**Căn cứ**:
 
 **Nhận định**:
 
@@ -142,13 +128,9 @@
 
 #### 2.2.7. Vay nợ ngắn hạn và dài hạn
 
-**Căn cứ**:
-
 **Nhận định**:
 
 #### 2.2.8. Tài sản cố định, tài sản dở dang dài hạn
-
-**Căn cứ**:
 
 **Nhận định**:
 
@@ -177,8 +159,6 @@
 | **Nhóm khả năng trả gốc + lãi** | | | | | |
 | EBITDA/Lãi vay | | | | | |
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ## 4. Kết luận
@@ -188,7 +168,5 @@
 | Hiệu quả hoạt động kinh doanh | |
 | Biến động tài chính trọng yếu | |
 | Nhận định về tính ổn định | |
-
-**Căn cứ**:
 
 **Nhận định**:

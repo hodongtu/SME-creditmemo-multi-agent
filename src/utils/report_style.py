@@ -72,6 +72,18 @@ table.tbl-wide {{ font-size: 7.5pt; }}
 table.tbl-wide th, table.tbl-wide td {{ padding: 2px 3px; }}
 table.tbl-xwide {{ font-size: 6.8pt; }}
 table.tbl-xwide th, table.tbl-xwide td {{ padding: 2px; letter-spacing: -0.1px; }}
+
+/* Source citations. Class names are markdown's own (extensions=["footnotes"]),
+   not ours. The marker stays small and unobtrusive so a cited sentence still
+   reads as a sentence; the list at the end drops a size, as a reference
+   apparatus rather than body text. */
+sup a.footnote-ref {{ font-size: 7pt; text-decoration: none; color: #2f6f9f; }}
+.footnote {{ font-size: 8pt; color: #333; page-break-inside: auto; }}
+.footnote hr {{ border: none; border-top: 1px solid #999; margin: 10px 0 5px; }}
+.footnote ol {{ margin: 0 0 0 16px; padding: 0; }}
+.footnote li {{ margin: 1px 0; page-break-inside: avoid; }}
+.footnote li p {{ margin: 0; }}
+a.footnote-backref {{ text-decoration: none; margin-left: 4px; }}
 {DIAGRAM_CSS}
 """
 

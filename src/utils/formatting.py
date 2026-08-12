@@ -21,7 +21,7 @@ _TRAILING_CURRENCY = re.compile(r"\s*(?:VN[ĐD]|đồng|VND)\b", re.IGNORECASE)
 _ALREADY_SCALED = re.compile(r"^\s*(?:tỷ|triệu|nghìn\s+tỷ|ngàn\s+tỷ)\b", re.IGNORECASE)
 
 
-def _format_vn_number(value: float, decimals: int = 2) -> str:
+def format_vn_number(value: float, decimals: int = 2) -> str:
     """Format a number Vietnamese-style: '.' thousands, ',' decimal."""
     formatted = f"{value:,.{decimals}f}"  # US style: 3,991.12
     return formatted.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
@@ -29,7 +29,7 @@ def _format_vn_number(value: float, decimals: int = 2) -> str:
 
 def to_billion_vnd(value: float, decimals: int = 2) -> str:
     """Render a raw đồng amount as a 'tỷ VNĐ' string."""
-    return f"{_format_vn_number(value / VND_PER_BILLION, decimals)} tỷ VNĐ"
+    return f"{format_vn_number(value / VND_PER_BILLION, decimals)} tỷ VNĐ"
 
 
 def _parse_grouped_amount(token: str) -> float | None:

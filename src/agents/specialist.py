@@ -94,28 +94,58 @@ class SpecialistAgent:
         # out: its figures all come from the same structured BCTC block, so a per-number
         # file/page citation is repetitive and crowds already-dense tables.
         self.CITATION_RULE = """CITATION RULE:
-        - Ngay sau mỗi điểm đã in đậm theo HIGHLIGHT RULE, thêm citation nguồn theo
-        định dạng đơn giản: [tên file, trang X] (PDF) hoặc [tên file, Sheet Y]
-        (Excel/CSV nhiều sheet). Nếu không xác định được trang/sheet cụ thể, chỉ
-        ghi [tên file].
+        - Trích dẫn nguồn bằng CHÚ THÍCH CUỐI BÀI. Trong câu, chỉ đặt mã số dạng
+        [^1], [^2] ngay sau dữ kiện (trước dấu phẩy/dấu chấm). Nguồn đầy đủ ghi
+        ở khối định nghĩa cuối phần bạn viết. TUYỆT ĐỐI không viết tên file
+        thẳng vào câu như [tên file, trang X] — chỉ mã số.
+        - CHỈ trích dẫn những DỮ KIỆN MẤU CHỐT, không trích mọi con số. Mấu chốt
+        là các điểm bạn đã in đậm theo HIGHLIGHT RULE: số liệu bất thường, biến
+        động lớn, vi phạm ngưỡng, dấu hiệu rủi ro. Mật độ hợp lý là KHOẢNG 1-2
+        mã mỗi mục. Trích dẫn dày đặc từng mệnh đề làm báo cáo rối và danh sách
+        nguồn dài vô ích.
+        - NHƯNG chỉ gắn mã vào phần in đậm là DỮ KIỆN ĐỌC ĐƯỢC TỪ HỒ SƠ. Phần
+        in đậm là KẾT LUẬN/KHUYẾN NGHỊ của bạn thì KHÔNG gắn mã — hồ sơ không
+        ghi sẵn kết luận đó, gắn mã vào sẽ khiến người đọc tưởng ngược lại.
+        - Hai dữ kiện cùng một nguồn thì DÙNG LẠI cùng một mã, không tạo mã mới.
+        - Đánh số [^1], [^2], [^3]... tăng dần liên tục trong TOÀN BỘ phần bạn
+        viết, không quay lại [^1] ở mỗi mục.
         - Lấy "tên file" từ dòng "Document filename:" của tài liệu tương ứng trong
         evidence. Lấy số trang/tên sheet từ các mốc "--- Page N ---" hoặc
         "--- Sheet: ... ---" gần nhất với dữ liệu đó trong nội dung tài liệu; nếu
         dữ liệu lấy từ khối [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT], dùng trường "page" của
         chỉ tiêu đó trong JSON, và nếu chỉ tiêu không có "page" thì dùng "page"
         của bảng chứa nó (balance_sheet/income_statement/cash_flow_statement).
-        - Với số lấy từ khối [PRE-COMPUTED FINANCIAL METRICS]: trích dẫn TÊN FILE
-        ghi ở mục "NGUỒN SỐ LIỆU" của khối đó, theo đúng năm của con số. Ví dụ số
-        năm 2024 mà mục đó ghi "Năm 2024: BCTC_2024.pdf" thì citation là
-        [BCTC_2024.pdf].
+        - Với số lấy từ khối [PRE-COMPUTED FINANCIAL METRICS]: nguồn là TÊN FILE
+        ghi ở mục "NGUỒN SỐ LIỆU" của khối đó, theo đúng năm của con số.
         - TUYỆT ĐỐI không ghi tên khối kỹ thuật vào báo cáo. Các chuỗi
         [PRE-COMPUTED FINANCIAL METRICS], [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT],
         [DỮ LIỆU ĐỀ NGHỊ CẤP TÍN DỤNG] chỉ là nhãn nội bộ trong prompt; người đọc
         báo cáo không biết chúng là gì. Luôn trích dẫn tài liệu gốc.
-        - Citation là BẮT BUỘC cho mọi số liệu và mọi nhận định đã in đậm. Nếu
-        thực sự không xác định được trang/sheet, vẫn phải ghi [tên file].
-        - Không bịa số trang hoặc tên file — chỉ trích dẫn khi thực sự xác định
-        được từ nguồn được cung cấp.
+        - Không bịa số trang, tên file hay mã số — chỉ trích dẫn khi thực sự xác
+        định được từ nguồn được cung cấp. Mọi mã [^N] dùng trong bài BẮT BUỘC
+        phải có dòng định nghĩa tương ứng.
+        - Kết thúc phần bạn viết bằng ĐÚNG MỘT khối định nghĩa nguồn, đặt sau
+        cùng, cách nội dung phía trên bằng một dòng trống, một dòng "---", rồi
+        một dòng trống nữa. Mỗi mã một dòng, theo thứ tự số tăng dần:
+
+          ---
+
+          [^1]: <tên file>, trang X
+          [^2]: <tên file>, Sheet Y
+          [^3]: <tên file>
+
+        Nếu không xác định được trang/sheet thì chỉ ghi tên file. Không lặp lại
+        khối này ở giữa bài.
+
+        Ví dụ mật độ ĐÚNG (một mã cho dữ kiện chính, không rải khắp câu):
+
+          **Nhận định**: Dư nợ đạt đỉnh **56,07 tỷ VNĐ tại 07/2025**[^1] rồi
+          giảm liên tục xuống 35,94 tỷ VNĐ tại 02/2026, cho thấy khách hàng
+          đang thu hẹp quy mô vay — **cần theo dõi nguyên nhân** trước khi cấp
+          hạn mức mới.
+
+        (Cụm "cho thấy..." và câu khuyến nghị in đậm cuối là SUY LUẬN của bạn
+        nên không mang mã.)
         """
         self.system_prompt = f"""
         {self.intro}
@@ -123,9 +153,8 @@ class SpecialistAgent:
         LANGUAGE RULE:
         - Always write the whole report in Vietnamese, regardless of the language
         of the user's request. The report template, the required wordings
-        ("Không có dữ liệu trong hồ sơ", "**Căn cứ**", "**Nhận định**") and the
-        downstream checks are all Vietnamese, so an English answer would break
-        them.
+        ("Không có dữ liệu trong hồ sơ", "**Nhận định**") and the downstream
+        checks are all Vietnamese, so an English answer would break them.
         - If the user writes in another language, still answer in Vietnamese; you
         may restate their question in Vietnamese first.
         - Keep official names, system codes (T24, CIC, AASC), account names and
@@ -153,28 +182,27 @@ class SpecialistAgent:
         tài liệu được cung cấp.
         - Thà báo thiếu dữ liệu còn hơn đưa ra một nhận định không có căn cứ.
 
-        ASSERTION SEPARATION RULE (bắt buộc, áp dụng cho MỌI mục "Nhận xét",
-        "Kết luận", "Đánh giá"):
-        - Luôn tách thành ĐÚNG hai dòng có nhãn, theo thứ tự này:
+        NHẬN ĐỊNH RULE (bắt buộc, áp dụng cho MỌI mục "Nhận xét", "Kết luận",
+        "Đánh giá"):
+        - Mỗi mục chỉ có DUY NHẤT một dòng có nhãn:
 
-          **Căn cứ**: <chỉ những gì ĐỌC ĐƯỢC trực tiếp từ hồ sơ — số liệu, khoản
-          mục, kỳ báo cáo, trích dẫn nguyên văn. Không diễn giải, không quy kết
-          nguyên nhân, không đánh giá tốt/xấu.>
+          **Nhận định**: <một đoạn liền mạch, gồm cả dữ kiện đọc được từ hồ sơ
+          lẫn phần suy luận/đánh giá của bạn, viết nối tiếp nhau trong cùng một
+          đoạn.>
 
-          **Nhận định**: <phần suy luận, diễn giải, đánh giá xu hướng, cảnh báo
-          rủi ro, khuyến nghị của bạn. Nêu rõ đây là suy luận và ghi cần thêm
-          dữ liệu gì để khẳng định chắc chắn.>
-
-        - Các cụm "cho thấy", "chứng tỏ", "phản ánh", "điều này", "có thể",
-        "dự kiến", "nhiều khả năng", "cần theo dõi" là dấu hiệu của SUY LUẬN —
-        chúng chỉ được xuất hiện ở dòng **Nhận định**, TUYỆT ĐỐI không nằm trong
-        dòng **Căn cứ**.
-        - Không gắn citation vào dòng **Nhận định**: citation dùng để chỉ nguồn
-        của dữ kiện, gắn vào suy luận sẽ khiến người đọc tưởng suy luận đó cũng
-        được ghi trong hồ sơ.
-        - Nếu một mục chỉ có dữ kiện mà chưa đủ cơ sở để suy luận, vẫn ghi dòng
-        **Nhận định** và nêu rõ "Chưa đủ cơ sở để đánh giá".
-        - Nếu không có dữ kiện nào, ghi **Căn cứ**: Không có dữ liệu trong hồ sơ.
+        - Dù viết chung một đoạn, người đọc vẫn phải phân biệt được đâu là dữ
+        kiện đâu là suy luận, bằng CÁCH DÙNG TỪ: dữ kiện nêu thẳng số liệu/thông
+        tin đọc được; suy luận dùng các cụm "cho thấy", "chứng tỏ", "phản ánh",
+        "điều này", "có thể", "dự kiến", "nhiều khả năng", "cần theo dõi" để báo
+        cho người đọc biết đây là ý kiến của bạn, không phải nguyên văn hồ sơ.
+        - TUYỆT ĐỐI không gắn mã chú thích [^N] vào phần suy luận của chính bạn —
+        mã chỉ đi kèm dữ kiện đọc trực tiếp từ hồ sơ. Gắn vào suy luận sẽ khiến
+        người đọc tưởng suy luận đó cũng được ghi sẵn trong hồ sơ nguồn.
+        - Không quy kết nguyên nhân hay đánh giá tốt/xấu như thể đó là dữ kiện.
+        Nếu chưa đủ cơ sở để suy luận, vẫn ghi dòng **Nhận định** với phần dữ
+        kiện đọc được và nêu rõ "Chưa đủ cơ sở để đánh giá".
+        - Nếu không có dữ kiện nào cho mục này, ghi
+        **Nhận định**: Không có dữ liệu trong hồ sơ.
 
         HIGHLIGHT RULE:
         - Trong mỗi mục "Nhận xét"/"Kết luận" và bất kỳ đoạn phân tích nào, in đậm
@@ -510,14 +538,20 @@ class CreditMemoComposerAgent:
                       (số liệu bất thường, vi phạm ngưỡng, dấu hiệu rủi ro, kết
                       luận chính) từ các sub-agent — không xóa bỏ định dạng nhấn
                       mạnh này khi biên tập lại heading/đánh số.
-                    - Giữ nguyên các citation nguồn dạng [tên file, trang X] hoặc
-                      [tên file, Sheet Y] đi kèm các điểm in đậm — không xóa bỏ
-                      hoặc chỉnh sửa citation khi biên tập lại nội dung.
-                    - Giữ nguyên cặp dòng **Căn cứ** / **Nhận định** của các
-                      sub-agent. Không gộp hai dòng lại, không chuyển nội dung
-                      từ Nhận định sang Căn cứ, không thêm citation vào dòng
-                      Nhận định — ranh giới giữa dữ kiện và suy luận phải giữ
-                      nguyên như sub-agent đã phân định.
+                    - Giữ NGUYÊN VĂN mọi mã chú thích dạng [^nhãn] trong bài,
+                      kể cả khi nhãn trông lạ như [^ba1], [^cr3]: đó là quy ước
+                      nội bộ để tránh trùng số giữa các agent khi ghép báo cáo.
+                      TUYỆT ĐỐI không "làm gọn" chúng thành [^1], [^2], không tự
+                      đánh số lại, không xóa.
+                    - Giữ nguyên các dòng định nghĩa nguồn ("[^nhãn]: nội dung")
+                      của từng sub-agent, đặt ngay dưới phần của sub-agent đó.
+                      KHÔNG cần tự gộp thành một danh sách chung — hệ thống sẽ
+                      tự gom sau khi bạn biên tập xong. Không bịa thêm và không
+                      xóa bớt dòng định nghĩa nào.
+                    - Giữ nguyên đoạn **Nhận định** của sub-agent như một đoạn
+                      liền mạch — không tách lại thành hai dòng, không thêm dòng
+                      "Căn cứ" mới, không chuyển câu suy luận thành câu dữ kiện
+                      hay ngược lại.
                     - Giữ nguyên mọi ghi chú thiếu dữ liệu từ sub-agent, đúng
                       nguyên văn "Không có dữ liệu trong hồ sơ".
                       Không được thay bằng số ước lượng, số 0, dấu "-", hay câu

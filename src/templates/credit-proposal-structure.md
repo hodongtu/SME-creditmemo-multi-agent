@@ -17,8 +17,6 @@
 | Thời hạn đề nghị | |
 | Phương án sử dụng vốn | |
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ## 2. Đề xuất cấp tín dụng
@@ -32,16 +30,12 @@
 | Phương thức giải ngân | |
 | Phương thức trả nợ | |
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ## 3. Nguồn trả nợ
 
 | Nguồn trả nợ | Giá trị dự kiến | Cơ sở xác định |
 |---|---:|---|
-
-**Căn cứ**:
 
 **Nhận định**:
 
@@ -50,18 +44,12 @@
 | Loại tài sản | Mô tả | Giá trị định giá | Tỷ lệ cho vay/giá trị TSBĐ |
 |---|---|---:|---:|
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ## 5. Điều kiện cấp tín dụng
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ## 6. Kết luận
-
-**Căn cứ**:
 
 **Nhận định**:

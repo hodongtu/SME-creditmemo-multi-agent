@@ -16,16 +16,12 @@
 | Khả năng trả nợ | |
 | Quy mô khoản vay so với năng lực tài chính | |
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ## 2. Dấu hiệu cảnh báo rủi ro
 
 | # | Dấu hiệu | Bằng chứng trong hồ sơ | Mức độ |
 |---|---|---|---|
-
-**Căn cứ**:
 
 **Nhận định**:
 
@@ -34,18 +30,12 @@
 | # | Rủi ro | Ảnh hưởng | Biện pháp giảm thiểu đề xuất |
 |---|---|---|---|
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ## 4. Nguồn trả nợ và tài sản bảo đảm
 
-**Căn cứ**:
-
 **Nhận định**:
 
 ## 5. Kết luận
-
-**Căn cứ**:
 
 **Nhận định**:

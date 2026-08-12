@@ -22,12 +22,16 @@ from langgraph.graph import END, StateGraph
 from src.agents.financial_ratio_calculator import (
     FinancialRatioCalculator,
 )
+from src.utils.common import normalize_text
 from src.utils.extractors import extract_document_text
 from src.utils.formatting import convert_amounts_in_text
 from src.utils.template_leak import check_template_leakage
-from src.utils.assertion_check import (
-    check_assertion_labelling,
-    check_assertion_separation,
+from src.utils.citations import (
+    AGENT_LABEL_PREFIXES,
+    FootnoteAudit,
+    consolidate_footnotes,
+    format_footnote_findings,
+    namespace_footnotes,
 )
 
 from src.config import Config, shared_rate_limiter
@@ -52,6 +56,7 @@ from src.agents.document_matrix import (
     agent_relevance_for_type,
     get_type,
     is_bctc_type,
+    is_cic_s10a_type,
     is_proposal_type,
     primary_agent_for_type,
 )
@@ -63,6 +68,16 @@ from src.agents.proposal_extraction import (
     build_proposal_extraction_chain,
     extract_proposal_structured_data,
 )
+from src.agents.cic_s10a_extraction import (
+    build_cic_s10a_extraction_chain,
+    extract_cic_s10a_structured_data,
+    merge_debt_series,
+)
+from src.agents.vat_series_stub import (
+    STUB_NOTICE as VAT_STUB_NOTICE,
+    vat_series_for_months,
+)
+from src.utils.charts import build_linechart_block, pick_unit
 from src.agents.specialist import (
     BusinessActivityAnalysis,
     CreditMemoComposerAgent,
@@ -256,6 +271,28 @@ class Supervisor:
     # it for.
     PROPOSAL_JSON_AGENTS = ("CREDIT_PROPOSAL_AGENT", "RISK_ASSESSMENT_AGENT")
 
+    # And for the CIC S10A report. Credit relationship is the obvious consumer —
+    # the report *is* its subject matter. Risk assessment is here because the
+    # rating, the bad-debt history and the off-balance-sheet commitments in the
+    # same document are its evidence, and the matrix already routes the file to
+    # it. Same inseparable pair of consequences as the two tables above: these
+    # agents get the block AND lose the raw OCR.
+    CIC_S10A_JSON_AGENTS = ("CREDIT_RELATIONSHIP_AGENT", "RISK_ASSESSMENT_AGENT")
+
+    # Heading of the CIC block. A named constant because two things have to
+    # agree on the exact string: the block itself, and the pointer that replaces
+    # the document's raw OCR.
+    CIC_S10A_BLOCK_HEADING = "[EXTRACTED CIC S10A REPORT]"
+
+    # The debt/revenue chart inserted into the credit-relationship section.
+    DEBT_CHART_TITLE = "Diễn biến dư nợ và doanh thu VAT 12 tháng gần nhất"
+    DEBT_CHART_COLUMNS = ("Tổng dư nợ (CIC)", "Doanh thu VAT")
+    # Where to anchor it, most specific first. The composer renumbers headings
+    # when it merges the five specialist reports, so matching on an exact
+    # "## 2. ..." string would work in a single-agent run and quietly fail in a
+    # full memo. Matched on accent-stripped substrings of the heading text.
+    DEBT_CHART_ANCHORS = ("dien bien du no", "quan he tin dung")
+
     # Numeric form of the matrix's R/O relevance levels, so ranking and budget
     # code can compare relevance without carrying the R/O vocabulary around.
     RELEVANCE_SCORE = {"R": 2.0, "O": 1.0}
@@ -308,6 +345,11 @@ class Supervisor:
         self.proposal_extraction_chain = (
             build_proposal_extraction_chain(config.proposal_extraction_llm)
             if config.proposal_extraction_llm
+            else None
+        )
+        self.cic_s10a_extraction_chain = (
+            build_cic_s10a_extraction_chain(config.cic_s10a_extraction_llm)
+            if config.cic_s10a_extraction_llm
             else None
         )
         self.workflow_graph = self._build_workflow_graph()
@@ -476,6 +518,7 @@ class Supervisor:
         )
         self._extract_bctc_documents(documents, steps)
         self._extract_proposal_documents(documents, steps)
+        self._extract_cic_s10a_documents(documents, steps)
         document_routes: set[str] = set()
         for doc in documents:
             if doc.agent == "GENERAL_CONTEXT":
@@ -852,6 +895,7 @@ class Supervisor:
             agent = primary_agent_for_type(document_type) or "GENERAL_CONTEXT"
             is_bctc = is_bctc_type(document_type)
             is_proposal = is_proposal_type(document_type)
+            is_cic_s10a = is_cic_s10a_type(document_type)
             steps.append(
                 f"Classified document: {filename} -> "
                 + (f"{document_type} " if document_type else "(no type matched) ")
@@ -886,6 +930,7 @@ class Supervisor:
                     relevant_agents=relevant_agents,
                     is_bctc=is_bctc,
                     is_proposal=is_proposal,
+                    is_cic_s10a=is_cic_s10a,
                 )
             )
         return documents
@@ -976,6 +1021,23 @@ class Supervisor:
             error_attr="proposal_extraction_error",
             label="Proposal",
             missing_llm_message="No proposal_extraction_llm configured.",
+        )
+
+    def _extract_cic_s10a_documents(
+        self,
+        documents: list[ClassifiedDocument],
+        steps: list[str],
+    ) -> None:
+        self._run_structured_extraction(
+            documents,
+            steps,
+            flag_attr="is_cic_s10a",
+            chain=self.cic_s10a_extraction_chain,
+            extract=extract_cic_s10a_structured_data,
+            result_attr="cic_s10a_extraction",
+            error_attr="cic_s10a_extraction_error",
+            label="CIC S10A",
+            missing_llm_message="No cic_s10a_extraction_llm configured.",
         )
 
     @staticmethod
@@ -1537,7 +1599,13 @@ class Supervisor:
             agent = CreditProposalAnalysis(self.config.analysis_llm)
         else:
             agent = BusinessActivityAnalysis(self.config.analysis_llm)
-        response = extract_text_from_agent_output(agent.analyze(user_input))
+        # Namespaced even though a single-agent run has nobody to collide with:
+        # the labels a reviewer reads in the .md should mean the same thing here
+        # as in a full memo, and this is the one path all five modes share.
+        response = namespace_footnotes(
+            extract_text_from_agent_output(agent.analyze(user_input)),
+            AGENT_LABEL_PREFIXES.get(agent_name, ""),
+        )
 
         return self._finalize(
             input_text,
@@ -1574,6 +1642,9 @@ class Supervisor:
             f"(max_concurrency={self.config.max_concurrency})"
         )
 
+        # Each specialist numbers its own footnotes from 1, so their labels are
+        # namespaced the moment the text exists — before the composer merges
+        # them and a shared "[^1]" would silently resolve to one agent's source.
         def _run_business() -> str:
             business_input = self._build_user_input(
                 input_text,
@@ -1583,10 +1654,13 @@ class Supervisor:
                 web_context,
                 gap_analysis,
             )
-            return extract_text_from_agent_output(
-                BusinessActivityAnalysis(self.config.analysis_llm).analyze(
-                    business_input
-                )
+            return namespace_footnotes(
+                extract_text_from_agent_output(
+                    BusinessActivityAnalysis(self.config.analysis_llm).analyze(
+                        business_input
+                    )
+                ),
+                AGENT_LABEL_PREFIXES["BUSINESS_ACTIVITY_AGENT"],
             )
 
         def _run_credit_relationship() -> str:
@@ -1605,10 +1679,13 @@ class Supervisor:
               available.
             - If tool data is unavailable, clearly state the limitation.
             """
-            return extract_text_from_agent_output(
-                CreditRelationshipAnalysis(
-                    self.config.analysis_llm
-                ).analyze(credit_relationship_input)
+            return namespace_footnotes(
+                extract_text_from_agent_output(
+                    CreditRelationshipAnalysis(
+                        self.config.analysis_llm
+                    ).analyze(credit_relationship_input)
+                ),
+                AGENT_LABEL_PREFIXES["CREDIT_RELATIONSHIP_AGENT"],
             )
 
         def _run_financial() -> str:
@@ -1620,10 +1697,16 @@ class Supervisor:
                 web_context,
                 gap_analysis,
             )
-            return extract_text_from_agent_output(
-                FinancialAnalysis(self.config.analysis_llm).analyze(
-                    financial_input
-                )
+            # Financial analysis runs with require_citations = False, so this is
+            # a no-op today. Kept so the one agent that opts out is not also the
+            # one place the pipeline silently differs.
+            return namespace_footnotes(
+                extract_text_from_agent_output(
+                    FinancialAnalysis(self.config.analysis_llm).analyze(
+                        financial_input
+                    )
+                ),
+                AGENT_LABEL_PREFIXES["FINANCIAL_ANALYSIS_AGENT"],
             )
 
         def _run_proposal() -> str:
@@ -1635,10 +1718,13 @@ class Supervisor:
                 web_context,
                 gap_analysis,
             )
-            return extract_text_from_agent_output(
-                CreditProposalAnalysis(self.config.analysis_llm).analyze(
-                    proposal_input
-                )
+            return namespace_footnotes(
+                extract_text_from_agent_output(
+                    CreditProposalAnalysis(self.config.analysis_llm).analyze(
+                        proposal_input
+                    )
+                ),
+                AGENT_LABEL_PREFIXES["CREDIT_PROPOSAL_AGENT"],
             )
 
         max_workers = max(1, min(4, self.config.max_concurrency))
@@ -1676,8 +1762,11 @@ class Supervisor:
         Credit proposal from CREDIT_PROPOSAL_AGENT:
         {credit_proposal_text}
         """
-        risk_text = extract_text_from_agent_output(
-            RiskAssessment(self.config.analysis_llm).analyze(risk_input)
+        risk_text = namespace_footnotes(
+            extract_text_from_agent_output(
+                RiskAssessment(self.config.analysis_llm).analyze(risk_input)
+            ),
+            AGENT_LABEL_PREFIXES["RISK_ASSESSMENT_AGENT"],
         )
 
         steps.append("Running CREDIT_MEMO_COMPOSER_AGENT")
@@ -1735,6 +1824,14 @@ class Supervisor:
         gap_analysis: dict[str, Any],
         steps: list[str],
     ) -> dict[str, Any]:
+        # First, so everything below reads a report whose citations already sit
+        # in one list at the end: the hallucination judge should not be scoring
+        # "[^cr1]: CIC.pdf, trang 2" as if it were a claim about the customer.
+        # Returns the audit too — gathering the definitions collapses repeated
+        # labels, so a checker running afterwards could no longer see that two
+        # agents had claimed the same one.
+        response, footnote_audit = consolidate_footnotes(response)
+
         if self.guardrails:
             allowed, checked_response = self.guardrails.check_output(
                 response,
@@ -1764,10 +1861,31 @@ class Supervisor:
         # "checked and passed" apart from "never checked".
         response += self._format_confidence_warnings(hallucination)
         response += self._format_check_unavailable(hallucination)
-        # Prompt rules are not enforcement: re-read the finished report and
-        # flag places where inference is presented as evidence.
-        response += self._format_assertion_findings(response)
+        # Prompt rules are not enforcement: report the citations that did not
+        # resolve, rather than quietly dropping or inventing them.
+        response += self._format_footnote_findings(footnote_audit)
         response += self._format_template_findings(response)
+        # Last, and deliberately so: everything above this line reads or edits
+        # what the *model* wrote, and this block is written by the pipeline from
+        # extracted JSON. It is not the checkers' business, and the text rewriter
+        # has no business in it either.
+        #
+        # Measured rather than assumed — with today's formatting the block
+        # survives all three untouched: convert_amounts_in_text only matches
+        # thousands-grouped integers and every value here carries two decimals,
+        # and both assertion checks stay silent on it. So this ordering is a
+        # guard against a future change to either side, not a fix for a live bug.
+        chart_block = self._build_debt_chart_block(documents)
+        if chart_block:
+            response, anchor = self._insert_debt_chart(response, chart_block)
+            steps.append(
+                "Inserted debt/revenue chart "
+                + (
+                    "at the end (no credit-relationship heading found)"
+                    if anchor == "appended"
+                    else f'under the heading matching "{anchor}"'
+                )
+            )
         # detect_loan_program is a pure string match over the same two strings
         # the classify node used (input guardrails pass `query` through
         # untouched), so recomputing here is exact and avoids threading the
@@ -1947,16 +2065,20 @@ class Supervisor:
         return "\n".join(lines) + "\n"
 
     @staticmethod
-    def _format_assertion_findings(response: str) -> str:
-        """Append findings where evidence and inference were not kept apart."""
+    def _format_footnote_findings(audit: FootnoteAudit) -> str:
+        """Append the citations that did not resolve against their definitions.
 
-        findings = check_assertion_labelling(response)
-        findings += check_assertion_separation(response)
+        Takes the audit rather than the text: it was produced by the same pass
+        that gathered the definitions, which is the only point where a label
+        claimed by two agents is still visible.
+        """
+
+        findings = format_footnote_findings(audit)
         if not findings:
             return ""
         lines = [
             "",
-            "**Ranh giới dữ kiện / suy luận:**",
+            "**Chú thích nguồn:**",
             "",
         ]
         lines += [f"- {finding}" for finding in findings]
@@ -2176,11 +2298,17 @@ class Supervisor:
             if reads_proposal_json
             else ""
         )
+        reads_cic_json = target_agent in self.CIC_S10A_JSON_AGENTS
+        cic_block = (
+            self._build_cic_s10a_structured_block(usable) if reads_cic_json else ""
+        )
         # The units only clash once two of these blocks are present, so the
         # warning appears exactly then — a prompt carrying one block needs no
         # reconciling and should not gain a line telling it otherwise.
         money_blocks = sum(
-            1 for block in (metrics_block, bctc_block, proposal_block) if block
+            1
+            for block in (metrics_block, bctc_block, proposal_block, cic_block)
+            if block
         )
         unit_warning = (
             f"{self.MIXED_UNIT_WARNING}\n\n" if money_blocks > 1 else ""
@@ -2202,6 +2330,7 @@ class Supervisor:
             - len(bctc_block)
             - len(self.DOC_SECTION_HEADER)
             - len(proposal_block)
+            - len(cic_block)
             - len(unit_warning)
             - block_overhead,
         )
@@ -2243,6 +2372,11 @@ class Supervisor:
                     "Extracted document content: đã trích xuất có cấu trúc "
                     "— xem [DỮ LIỆU ĐỀ NGHỊ CẤP TÍN DỤNG] bên dưới."
                 )
+            elif reads_cic_json and doc.is_cic_s10a and doc.cic_s10a_extraction:
+                content_section = (
+                    "Extracted document content: đã trích xuất có cấu trúc "
+                    f"— xem {self.CIC_S10A_BLOCK_HEADING} bên dưới."
+                )
             else:
                 content_section = "\n".join(
                     [
@@ -2258,6 +2392,7 @@ class Supervisor:
         # blank lines to every prompt that has no credit application, churning
         # them for nothing.
         proposal_section = f"{proposal_block}\n\n" if proposal_block else ""
+        cic_section = f"{cic_block}\n\n" if cic_block else ""
         return truncate_text(
             (
                 f"{base}\n\n"
@@ -2265,6 +2400,7 @@ class Supervisor:
                 f"{metrics_block}\n\n"
                 f"{bctc_block}\n\n"
                 f"{proposal_section}"
+                f"{cic_section}"
                 f"{self.DOC_SECTION_HEADER}"
                 f"{docs_text}"
             ),
@@ -2409,6 +2545,120 @@ class Supervisor:
             )
         return "\n\n".join(parts)
 
+    @classmethod
+    def _build_debt_chart_block(
+        cls,
+        documents: list[ClassifiedDocument],
+    ) -> str:
+        """Build the ```linechart block from extracted CIC data, "" when there is none.
+
+        Written here rather than by the agent on purpose: these are 24 figures
+        traced to section 2.6 of a named file, and a model asked to retype them
+        into a chart is a model given 24 chances to invent one.
+
+        Revenue is still the placeholder series — see vat_series_stub — so the
+        caption naming it as invented is attached at the same time as the data,
+        never separately.
+        """
+
+        series = merge_debt_series(
+            (doc.filename, doc.cic_s10a_extraction)
+            for doc in documents
+            if doc.is_cic_s10a and doc.cic_s10a_extraction
+        )
+        # One point is a dot, not a trend. Below two the chart says nothing the
+        # balance table does not already say better.
+        if len(series) < 2:
+            return ""
+
+        months = [row["thang"] for row in series]
+        debt = [row["du_no"] for row in series]
+        revenue = vat_series_for_months(months)
+        divisor, unit = pick_unit(
+            [value for value in debt + revenue if value is not None]
+        )
+        return build_linechart_block(
+            title=cls.DEBT_CHART_TITLE,
+            unit=unit,
+            columns=list(cls.DEBT_CHART_COLUMNS),
+            labels=months,
+            series=[
+                [value / divisor for value in debt],
+                [None if value is None else value / divisor for value in revenue],
+            ],
+            note=VAT_STUB_NOTICE,
+        )
+
+    @classmethod
+    def _insert_debt_chart(cls, response: str, block: str) -> tuple[str, str]:
+        """Place the chart under the credit-relationship heading.
+
+        Returns ``(text, where)``; ``where`` names the anchor that matched so the
+        step log can say whether the chart landed in its section or was appended
+        as a fallback.
+
+        Appending is the last resort rather than the failure case: a chart at the
+        end of the memo is worse than one in its section, but far better than a
+        chart that silently disappears because the composer reworded a heading.
+        """
+
+        if not block:
+            return response, ""
+        lines = (response or "").splitlines()
+        for anchor in cls.DEBT_CHART_ANCHORS:
+            for index, line in enumerate(lines):
+                if not line.lstrip().startswith("#"):
+                    continue
+                if anchor in normalize_text(line):
+                    return (
+                        "\n".join(
+                            lines[: index + 1] + ["", block] + lines[index + 1:]
+                        ),
+                        anchor,
+                    )
+        return (
+            f"{response}\n\n## {cls.DEBT_CHART_TITLE}\n\n{block}\n",
+            "appended",
+        )
+
+    @classmethod
+    def _build_cic_s10a_structured_block(
+        cls,
+        selected: list[ClassifiedDocument],
+    ) -> str:
+        """Render the extracted CIC S10A records for the prompt.
+
+        Units are spelled out because the source report uses two at once and the
+        extraction only rescales one of them: VND figures were printed in triệu
+        đồng and are now in đồng, while foreign-currency figures were printed in
+        their own unit and are unchanged. An agent told only "amounts are in
+        đồng" would read a USD commitment as a đồng one.
+        """
+
+        cic_docs = [
+            doc for doc in selected if doc.is_cic_s10a and doc.cic_s10a_extraction
+        ]
+        if not cic_docs:
+            return ""
+        parts = [
+            cls.CIC_S10A_BLOCK_HEADING,
+            "Trích xuất từ Báo cáo chi tiết quan hệ tín dụng CIC (mã phiếu S10A): "
+            "dư nợ hiện tại theo từng TCTD, diễn biến dư nợ 12 tháng gần nhất, "
+            "cam kết ngoại bảng, xếp hạng tín dụng và lịch sử cảnh báo.",
+            "ĐƠN VỊ: các trường VNĐ (\"vnd\", \"du_no_vay\", \"du_no_the\", "
+            "\"tong_du_no\") đã quy về ĐỒNG. Các trường ngoại tệ (\"ngoai_te\") "
+            "giữ NGUYÊN TỆ theo bản gốc — không quy đổi, không cộng với cột VNĐ.",
+            "Dư nợ trong \"du_no_12_thang\" ĐÃ bao gồm dư nợ ngoại tệ quy đổi; "
+            "không cộng thêm số ngoại tệ ở khối khác vào, sẽ thành tính hai lần.",
+            "Giá trị null nghĩa là kỳ đó thiếu số liệu báo cáo — KHÔNG phải bằng 0.",
+        ]
+        for doc in cic_docs:
+            parts.append(
+                f"--- {doc.filename} ---\n"
+                + json.dumps(doc.cic_s10a_extraction, ensure_ascii=False, indent=2)
+            )
+        return "\n\n".join(parts)
+
     @staticmethod
     def _build_bctc_structured_block(
         selected: list[ClassifiedDocument],
@@ -2523,6 +2773,12 @@ class Supervisor:
             "proposal_extraction",
             "proposal_extraction_error",
             "ĐỀ NGHỊ",
+        ),
+        (
+            "is_cic_s10a",
+            "cic_s10a_extraction",
+            "cic_s10a_extraction_error",
+            "CIC S10A",
         ),
     )
 

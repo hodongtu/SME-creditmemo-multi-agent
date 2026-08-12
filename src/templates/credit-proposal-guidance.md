@@ -28,7 +28,7 @@ TRỌNG TÂM:
   chỉ số thanh toán hiện hành, nợ vay/VCSH. Các chỉ số này đã được tính sẵn bằng
   công thức cố định — KHÔNG tự tính lại từ dòng chỉ tiêu thô, vì tính lại là mở
   đường cho sai số.
-- Nêu rõ con số đã dùng ngay trong phần **Căn cứ** (ví dụ "CCC 128 ngày"), đừng chỉ
+- Nêu rõ con số đã dùng ngay trong phần **Nhận định** (ví dụ "CCC 128 ngày"), đừng chỉ
   nói chung chung là "vòng quay vốn chậm". Chỉ số nào không có trong khối thì ghi
   là chưa tính được, không ước lượng.
 - Tài sản bảo đảm: chỉ liệt kê tài sản có trong hồ sơ, kèm giá trị định giá nếu có.

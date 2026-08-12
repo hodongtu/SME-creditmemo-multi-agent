@@ -137,6 +137,7 @@ class Config:
     hallucination_llm: Any = None
     bctc_extraction_llm: Any = None
     proposal_extraction_llm: Any = None
+    cic_s10a_extraction_llm: Any = None
     max_files: int = 50
     max_chars_per_document: int = 120_000
     max_concurrency: int = field(

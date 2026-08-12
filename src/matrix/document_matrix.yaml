@@ -25,6 +25,13 @@
 #               giữ lại để sau này dựng checklist hồ sơ còn thiếu.
 #   bctc_extraction : true = kích hoạt bước trích xuất BCTC ra JSON có cấu trúc
 #               (src/agents/bctc_extraction.py).
+#   proposal_extraction : true = trích Giấy đề nghị cấp tín dụng (mục B, C, D)
+#               (src/agents/proposal_extraction.py).
+#   cic_s10a_extraction : true = trích Báo cáo chi tiết quan hệ tín dụng CIC mã
+#               S10A (src/agents/cic_s10a_extraction.py). Đặt tên theo mã phiếu
+#               vì CIC phát hành nhiều loại báo cáo khác hẳn nhau về cấu trúc:
+#               S10A là quan hệ tín dụng, R20/R21 là bảo đảm tiền vay.
+#               MỖI cờ tốn thêm 1 lượt gọi LLM cho mỗi tài liệu khớp.
 #
 # --- Chọn agent chính --------------------------------------------------------
 # `primary_agent` khai ở cấp nhóm, áp cho mọi loại trong nhóm. Nếu agent đó
@@ -460,6 +467,7 @@ groups:
         requirement:
           cap_moi: "Bắt buộc"
           tai_cap: "Bắt buộc"
+        cic_s10a_extraction: true
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
