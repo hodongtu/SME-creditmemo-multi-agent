@@ -58,6 +58,7 @@ SCAFFOLD_MARKERS = (
     "[du lieu bctc da trich xuat]",
     "[du lieu de nghi cap tin dung]",
     "[extracted cic s10a report]",
+    "[extracted cic r21 report]",
 )
 
 

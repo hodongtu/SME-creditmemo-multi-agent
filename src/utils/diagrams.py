@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import html
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from src.utils.graph_svg import render_svg
 
@@ -337,6 +337,59 @@ def _parse(source: str) -> Flowchart:
     )
 
 
+# business-activity-guidance.md's own threshold for "lý do nghiệp vụ" to
+# highlight a partner box — matches the 42% worked example in
+# logs/ba_diagram_preview/preview.md.
+_CONCENTRATION_THRESHOLD = 40.0
+_PERCENT_LABEL = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
+_AUTO_WARN_STYLE = {"fill": "#FFC000", "stroke": "#333"}
+
+
+def _auto_color_concentration(chart: Flowchart) -> Flowchart:
+    """Highlight a partner node the model forgot to color despite a high-% edge.
+
+    Measured against a real specialist run: guidance.md and the report
+    skeleton both ask for a `:::warn`/`:::hi` highlight on any partner at
+    ~40%+ concentration, but the model coloured one of two equally-qualifying
+    nodes in the same report and missed the other (non-determinism, not a
+    one-off). Same gap the citation and list fixups close elsewhere — a prompt
+    rule the model sometimes skips gets a code-level fallback so the reader
+    sees it every time, not on a coin flip.
+
+    Only fills a GAP: a node the model already styled (via classDef/class/:::
+    or a bare `style` line) keeps that styling untouched. The "hub" side of a
+    fan (out-degree/in-degree > 1) is never coloured by this — only the
+    single-degree partner at the other end of the qualifying edge, which is
+    the shape mục 4/5's fan diagrams always have.
+    """
+
+    degree: dict[str, int] = {}
+    for src, _label, dst in chart.edges:
+        degree[src] = degree.get(src, 0) + 1
+        degree[dst] = degree.get(dst, 0) + 1
+
+    node_style = dict(chart.node_style)
+    changed = False
+    for src, label, dst in chart.edges:
+        match = _PERCENT_LABEL.search(label)
+        if not match:
+            continue
+        value = float(match.group(1).replace(",", "."))
+        if value < _CONCENTRATION_THRESHOLD:
+            continue
+        if degree.get(src, 0) > 1 and degree.get(dst, 0) <= 1:
+            partner = dst
+        elif degree.get(dst, 0) > 1 and degree.get(src, 0) <= 1:
+            partner = src
+        else:
+            continue
+        if partner not in node_style:
+            node_style[partner] = dict(_AUTO_WARN_STYLE)
+            changed = True
+
+    return replace(chart, node_style=node_style) if changed else chart
+
+
 def _node_html(label: str) -> str:
     return f'<div class="mmd-node">{label}</div>'
 
@@ -366,6 +419,7 @@ def _render(source: str) -> str | None:
     chart = _parse(source)
     if not chart.labels:
         return None
+    chart = _auto_color_concentration(chart)
     order, labels, edges = chart.order, chart.labels, chart.edges
     if not edges:
         # Nodes only: no layout to compute, so a single row of boxes.

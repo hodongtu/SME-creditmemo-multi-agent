@@ -33,6 +33,7 @@ from src.utils.citations import (
     format_footnote_findings,
     namespace_footnotes,
 )
+from src.utils.markdown_fixups import ensure_blank_line_before_lists
 
 from src.config import Config, shared_rate_limiter
 from src.types import (
@@ -56,6 +57,7 @@ from src.agents.document_matrix import (
     agent_relevance_for_type,
     get_type,
     is_bctc_type,
+    is_cic_r21_type,
     is_cic_s10a_type,
     is_proposal_type,
     primary_agent_for_type,
@@ -73,9 +75,18 @@ from src.agents.cic_s10a_extraction import (
     extract_cic_s10a_structured_data,
     merge_debt_series,
 )
+from src.agents.cic_r21_extraction import (
+    build_cic_r21_extraction_chain,
+    extract_cic_r21_structured_data,
+)
 from src.agents.vat_series_stub import (
     STUB_NOTICE as VAT_STUB_NOTICE,
     vat_series_for_months,
+)
+from src.agents.industry_knowledge import (
+    load_industry_manifest,
+    load_industry_reference_text,
+    select_industry,
 )
 from src.utils.charts import build_linechart_block, pick_unit
 from src.agents.specialist import (
@@ -279,10 +290,19 @@ class Supervisor:
     # agents get the block AND lose the raw OCR.
     CIC_S10A_JSON_AGENTS = ("CREDIT_RELATIONSHIP_AGENT", "RISK_ASSESSMENT_AGENT")
 
-    # Heading of the CIC block. A named constant because two things have to
+    # And for the CIC R20/R21 collateral report — same two agents, because
+    # that is who the matrix routes cic_tai_san_bao_dam to today. Worth
+    # flagging rather than silently matching: the collateral TABLE in the
+    # credit-proposal template is the more natural reader for this block, but
+    # CREDIT_PROPOSAL_AGENT has no R/O entry for this type in the matrix, so
+    # giving it the JSON here would contradict routing everywhere else follows.
+    CIC_R21_JSON_AGENTS = ("CREDIT_RELATIONSHIP_AGENT", "RISK_ASSESSMENT_AGENT")
+
+    # Heading of the CIC blocks. Named constants because two things have to
     # agree on the exact string: the block itself, and the pointer that replaces
     # the document's raw OCR.
     CIC_S10A_BLOCK_HEADING = "[EXTRACTED CIC S10A REPORT]"
+    CIC_R21_BLOCK_HEADING = "[EXTRACTED CIC R21 REPORT]"
 
     # The debt/revenue chart inserted into the credit-relationship section.
     DEBT_CHART_TITLE = "Diễn biến dư nợ và doanh thu VAT 12 tháng gần nhất"
@@ -309,6 +329,20 @@ class Supervisor:
     # the budget arithmetic in _build_user_input measures exactly what it emits.
     DOC_SECTION_HEADER = "Uploaded document extracted content:\n\n"
     DOC_BLOCK_SEPARATOR = "\n\n---\n\n"
+
+    # Which agents get an industry reference block (see
+    # _build_industry_knowledge_block). A set, not a matrix entry, because
+    # this is not per-case document routing — it is one static reference deck
+    # selected from src/knowledge/, same file for every case in that industry.
+    INDUSTRY_KNOWLEDGE_AGENTS = {"BUSINESS_ACTIVITY_AGENT"}
+    # Own fixed budget, not part of the weighted per-document pool: this is
+    # reference material, not case evidence, so it should not compete with —
+    # or be crowded out by — the documents the matrix actually routed here.
+    INDUSTRY_KNOWLEDGE_CHAR_BUDGET = 8_000
+    # How much of the case's own evidence the industry-selection LLM call
+    # gets to read. Small on purpose: picking 1-of-30 from a short catalogue
+    # needs a signal of what business the customer is in, not the full case.
+    INDUSTRY_EVIDENCE_EXCERPT_CHARS = 4_000
 
     def __init__(self, config: Config):
         self.config = config
@@ -350,6 +384,11 @@ class Supervisor:
         self.cic_s10a_extraction_chain = (
             build_cic_s10a_extraction_chain(config.cic_s10a_extraction_llm)
             if config.cic_s10a_extraction_llm
+            else None
+        )
+        self.cic_r21_extraction_chain = (
+            build_cic_r21_extraction_chain(config.cic_r21_extraction_llm)
+            if config.cic_r21_extraction_llm
             else None
         )
         self.workflow_graph = self._build_workflow_graph()
@@ -519,6 +558,7 @@ class Supervisor:
         self._extract_bctc_documents(documents, steps)
         self._extract_proposal_documents(documents, steps)
         self._extract_cic_s10a_documents(documents, steps)
+        self._extract_cic_r21_documents(documents, steps)
         document_routes: set[str] = set()
         for doc in documents:
             if doc.agent == "GENERAL_CONTEXT":
@@ -896,6 +936,7 @@ class Supervisor:
             is_bctc = is_bctc_type(document_type)
             is_proposal = is_proposal_type(document_type)
             is_cic_s10a = is_cic_s10a_type(document_type)
+            is_cic_r21 = is_cic_r21_type(document_type)
             steps.append(
                 f"Classified document: {filename} -> "
                 + (f"{document_type} " if document_type else "(no type matched) ")
@@ -931,6 +972,7 @@ class Supervisor:
                     is_bctc=is_bctc,
                     is_proposal=is_proposal,
                     is_cic_s10a=is_cic_s10a,
+                    is_cic_r21=is_cic_r21,
                 )
             )
         return documents
@@ -1038,6 +1080,23 @@ class Supervisor:
             error_attr="cic_s10a_extraction_error",
             label="CIC S10A",
             missing_llm_message="No cic_s10a_extraction_llm configured.",
+        )
+
+    def _extract_cic_r21_documents(
+        self,
+        documents: list[ClassifiedDocument],
+        steps: list[str],
+    ) -> None:
+        self._run_structured_extraction(
+            documents,
+            steps,
+            flag_attr="is_cic_r21",
+            chain=self.cic_r21_extraction_chain,
+            extract=extract_cic_r21_structured_data,
+            result_attr="cic_r21_extraction",
+            error_attr="cic_r21_extraction_error",
+            label="CIC R21",
+            missing_llm_message="No cic_r21_extraction_llm configured.",
         )
 
     @staticmethod
@@ -1831,6 +1890,12 @@ class Supervisor:
         # labels, so a checker running afterwards could no longer see that two
         # agents had claimed the same one.
         response, footnote_audit = consolidate_footnotes(response)
+        # Same reasoning as above, for a different renderer quirk: a bullet
+        # list glued to the line above it with no blank line renders as a
+        # bare "-" instead of a <ul>. Fixing it here means every "Nhận định"
+        # bullet is correct on the page even if a specialist forgot the blank
+        # line the prompt asks for.
+        response = ensure_blank_line_before_lists(response)
 
         if self.guardrails:
             allowed, checked_response = self.guardrails.check_output(
@@ -2298,16 +2363,35 @@ class Supervisor:
             if reads_proposal_json
             else ""
         )
-        reads_cic_json = target_agent in self.CIC_S10A_JSON_AGENTS
-        cic_block = (
-            self._build_cic_s10a_structured_block(usable) if reads_cic_json else ""
+        reads_cic_s10a_json = target_agent in self.CIC_S10A_JSON_AGENTS
+        cic_s10a_block = (
+            self._build_cic_s10a_structured_block(usable)
+            if reads_cic_s10a_json
+            else ""
+        )
+        reads_cic_r21_json = target_agent in self.CIC_R21_JSON_AGENTS
+        cic_r21_block = (
+            self._build_cic_r21_structured_block(usable)
+            if reads_cic_r21_json
+            else ""
+        )
+        industry_block = (
+            self._build_industry_knowledge_block(usable, input_text, target_agent)
+            if target_agent in self.INDUSTRY_KNOWLEDGE_AGENTS
+            else ""
         )
         # The units only clash once two of these blocks are present, so the
         # warning appears exactly then — a prompt carrying one block needs no
         # reconciling and should not gain a line telling it otherwise.
         money_blocks = sum(
             1
-            for block in (metrics_block, bctc_block, proposal_block, cic_block)
+            for block in (
+                metrics_block,
+                bctc_block,
+                proposal_block,
+                cic_s10a_block,
+                cic_r21_block,
+            )
             if block
         )
         unit_warning = (
@@ -2330,7 +2414,9 @@ class Supervisor:
             - len(bctc_block)
             - len(self.DOC_SECTION_HEADER)
             - len(proposal_block)
-            - len(cic_block)
+            - len(cic_s10a_block)
+            - len(cic_r21_block)
+            - len(industry_block)
             - len(unit_warning)
             - block_overhead,
         )
@@ -2372,10 +2458,15 @@ class Supervisor:
                     "Extracted document content: đã trích xuất có cấu trúc "
                     "— xem [DỮ LIỆU ĐỀ NGHỊ CẤP TÍN DỤNG] bên dưới."
                 )
-            elif reads_cic_json and doc.is_cic_s10a and doc.cic_s10a_extraction:
+            elif reads_cic_s10a_json and doc.is_cic_s10a and doc.cic_s10a_extraction:
                 content_section = (
                     "Extracted document content: đã trích xuất có cấu trúc "
                     f"— xem {self.CIC_S10A_BLOCK_HEADING} bên dưới."
+                )
+            elif reads_cic_r21_json and doc.is_cic_r21 and doc.cic_r21_extraction:
+                content_section = (
+                    "Extracted document content: đã trích xuất có cấu trúc "
+                    f"— xem {self.CIC_R21_BLOCK_HEADING} bên dưới."
                 )
             else:
                 content_section = "\n".join(
@@ -2392,7 +2483,9 @@ class Supervisor:
         # blank lines to every prompt that has no credit application, churning
         # them for nothing.
         proposal_section = f"{proposal_block}\n\n" if proposal_block else ""
-        cic_section = f"{cic_block}\n\n" if cic_block else ""
+        cic_s10a_section = f"{cic_s10a_block}\n\n" if cic_s10a_block else ""
+        cic_r21_section = f"{cic_r21_block}\n\n" if cic_r21_block else ""
+        industry_section = f"{industry_block}\n\n" if industry_block else ""
         return truncate_text(
             (
                 f"{base}\n\n"
@@ -2400,7 +2493,9 @@ class Supervisor:
                 f"{metrics_block}\n\n"
                 f"{bctc_block}\n\n"
                 f"{proposal_section}"
-                f"{cic_section}"
+                f"{cic_s10a_section}"
+                f"{cic_r21_section}"
+                f"{industry_section}"
                 f"{self.DOC_SECTION_HEADER}"
                 f"{docs_text}"
             ),
@@ -2545,6 +2640,56 @@ class Supervisor:
             )
         return "\n\n".join(parts)
 
+    def _build_industry_knowledge_block(
+        self,
+        usable: list[ClassifiedDocument],
+        input_text: str,
+        target_agent: str,
+    ) -> str:
+        """This case's evidence -> one matching industry reference deck, or "".
+
+        The deck itself was converted once, offline, by
+        scripts/ingest_industry_knowledge.py; this only picks which one (see
+        industry_knowledge.select_industry — one small LLM call choosing an id
+        from the fixed catalogue, same shape as the document-type classifier's
+        LLM fallback) and loads its cached text. No manifest yet, no LLM match,
+        or no cached text for the matched id all fall through to "" — a case
+        that doesn't clearly fit one of the ~30 industries simply gets no
+        reference block, same "no data, drop the section" rule the report
+        template follows everywhere else.
+        """
+
+        manifest = load_industry_manifest()
+        if not manifest:
+            return ""
+
+        excerpt_parts = [input_text]
+        for doc in usable:
+            if doc.agent_relevance.get(target_agent) == "R":
+                excerpt_parts.append(doc.content)
+        excerpt = truncate_text(
+            "\n\n".join(part for part in excerpt_parts if part),
+            self.INDUSTRY_EVIDENCE_EXCERPT_CHARS,
+        )
+
+        industry_id = select_industry(self.config.document_llm, excerpt, manifest)
+        if not industry_id:
+            return ""
+
+        text = load_industry_reference_text(industry_id)
+        if not text:
+            return ""
+
+        display_name = next(
+            (item["display_name"] for item in manifest if item["id"] == industry_id),
+            industry_id,
+        )
+        return (
+            f"--- Reference Document filename: {display_name}.pptx (tài liệu "
+            "tham khảo ngành, không phải hồ sơ khách hàng) ---\n"
+            + truncate_text(text, self.INDUSTRY_KNOWLEDGE_CHAR_BUDGET)
+        )
+
     @classmethod
     def _build_debt_chart_block(
         cls,
@@ -2656,6 +2801,41 @@ class Supervisor:
             parts.append(
                 f"--- {doc.filename} ---\n"
                 + json.dumps(doc.cic_s10a_extraction, ensure_ascii=False, indent=2)
+            )
+        return "\n\n".join(parts)
+
+    @classmethod
+    def _build_cic_r21_structured_block(
+        cls,
+        selected: list[ClassifiedDocument],
+    ) -> str:
+        """Render the extracted CIC R20/R21 collateral records for the prompt."""
+
+        cic_docs = [
+            doc for doc in selected if doc.is_cic_r21 and doc.cic_r21_extraction
+        ]
+        if not cic_docs:
+            return ""
+        parts = [
+            cls.CIC_R21_BLOCK_HEADING,
+            "Trích xuất từ Báo cáo thông tin bảo đảm tiền vay CIC (mã phiếu "
+            "R20/R21): danh sách tổ chức tín dụng đang nhận bảo đảm và chi "
+            "tiết từng tài sản bảo đảm theo tổ chức tín dụng đó.",
+            "ĐƠN VỊ: trường \"gia_tri_trieu_vnd\" đã quy về ĐỒNG dù tên trường "
+            "vẫn giữ nguyên (đơn vị gốc trên giấy là triệu đồng).",
+            "\"loai_tai_san\" là MÃ SỐ hai chữ số của CIC (vd \"08\"), không "
+            "phải nhãn mô tả — báo cáo không kèm bảng chú giải mã, không tự "
+            "suy diễn ý nghĩa mã này.",
+            "\"ngay_giai_chap\" là null nghĩa là tài sản CHƯA giải chấp (vẫn "
+            "đang thế chấp), không phải thiếu dữ liệu.",
+            "Một khối có \"mo_ta_tai_san\": \"Không có bảo đảm tiền vay bằng "
+            "tài sản\" nghĩa là tổ chức tín dụng đó xác nhận KHÔNG nhận tài "
+            "sản bảo đảm nào — đây là thông tin có thật, không phải lỗi.",
+        ]
+        for doc in cic_docs:
+            parts.append(
+                f"--- {doc.filename} ---\n"
+                + json.dumps(doc.cic_r21_extraction, ensure_ascii=False, indent=2)
             )
         return "\n\n".join(parts)
 
@@ -2779,6 +2959,12 @@ class Supervisor:
             "cic_s10a_extraction",
             "cic_s10a_extraction_error",
             "CIC S10A",
+        ),
+        (
+            "is_cic_r21",
+            "cic_r21_extraction",
+            "cic_r21_extraction_error",
+            "CIC R21",
         ),
     )
 

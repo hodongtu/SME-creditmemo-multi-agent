@@ -2,7 +2,8 @@
 
 ### Nguồn thông tin
 
-- **Nguồn dữ liệu**: {{NguonDuLieu}}
+- **Nguồn dữ liệu**:
+    - {{TenNguon}}
 - **Kỳ/Ngày dữ liệu**: {{Ky}}
 - **Mức độ tin cậy**: {{MucDoTinCay}}
 

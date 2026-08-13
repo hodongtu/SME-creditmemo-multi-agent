@@ -22,6 +22,7 @@ pillow==12.2.0
 pandas==2.3.3
 openpyxl==3.1.5          # xlsx reading (direct, format-faithful)
 xlrd==2.0.2              # legacy .xls reading via pandas
+python-pptx==1.0.2       # pptx reading (industry knowledge decks, src/knowledge/)
 markdown==3.10.3         # Markdown -> HTML for PDF export
 weasyprint==69.0         # HTML -> PDF (needs Pango/Cairo/GLib, see above)
 

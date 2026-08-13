@@ -20,6 +20,15 @@ assumed, and each is reported instead of being silently repaired:
 - a marker with no definition renders as literal ``[^7]`` text in the PDF;
 - a definition nobody references still appears in the source list.
 
+A fourth was measured the same way but IS silently repaired, because it is a
+pure formatting slip rather than a question about the evidence: an edit that
+runs two definitions together on one source line (``[^ba1]: x [^ba2]: y``)
+produces exactly the second failure mode above for ``[^ba2]`` — no line
+anchors it as its own definition, so it is swallowed into ``[^ba1]``'s source
+text. ``_split_squeezed_definitions`` un-squeezes these before either function
+below ever sees them, so the audit below never has to tell a genuinely missing
+source from one that just needed a line break.
+
 Numbering is the library's job, ours is the order: it numbers definitions in the
 order they are *defined*, so a list assembled in any other order makes the reader
 meet footnote 3 before footnote 1. ``consolidate_footnotes`` therefore sorts by
@@ -55,6 +64,11 @@ _DEFINITION = re.compile(r"^\[\^([^\]\s]+)\]:[ \t]?(.*)$")
 # markdown itself tells the two apart, so the same text splits the same way here.
 _REFERENCE = re.compile(r"\[\^([^\]\s]+)\](?!:)")
 _FENCE = re.compile(r"^\s*(```|~~~)")
+# Where a definition starts, found anywhere in a line rather than anchored —
+# used only to detect two definitions squeezed onto one source line (see
+# _split_squeezed_definitions). _DEFINITION above stays anchored because that
+# is the correct, narrower rule for what a lone definition line looks like.
+_DEFINITION_START = re.compile(r"\[\^[^\]\s]+\]:")
 
 
 @dataclass(frozen=True)
@@ -100,6 +114,43 @@ def _mask_code_fences(text: str) -> list[bool]:
     return flags
 
 
+def _split_squeezed_definitions(text: str) -> str:
+    """Break a line carrying 2+ footnote definitions into one per line.
+
+    Measured failure mode: an LLM edit occasionally runs definitions together
+    on one source line — "[^ba1]: nguồn 1 [^ba2]: nguồn 2" — while writing a
+    single definition per line the rest of the time. ``_DEFINITION`` is
+    anchored at line start, so on a squeezed line it captures the whole
+    remainder as the first definition's source text; the second definition is
+    never recognised. Its reference then has nothing to resolve to and prints
+    as literal "[^ba2]" instead of a superscript, and the source list ends up
+    with the two definitions run together on one line instead of two.
+
+    A no-op on every line with 0 or 1 definition marker, which covers all
+    text this has ever been measured against.
+    """
+
+    if not text:
+        return text
+
+    flags = _mask_code_fences(text)
+    out: list[str] = []
+    for line, in_code in zip(text.splitlines(), flags):
+        if in_code:
+            out.append(line)
+            continue
+        starts = [m.start() for m in _DEFINITION_START.finditer(line)]
+        if len(starts) < 2:
+            out.append(line)
+            continue
+        bounds = starts + [len(line)]
+        if starts[0] > 0:
+            out.append(line[: starts[0]].strip())
+        for start, end in zip(bounds, bounds[1:]):
+            out.append(line[start:end].strip())
+    return "\n".join(out)
+
+
 def namespace_footnotes(text: str, prefix: str) -> str:
     """Prefix every footnote label so one agent's markers cannot collide.
 
@@ -113,6 +164,7 @@ def namespace_footnotes(text: str, prefix: str) -> str:
     if not prefix or not text:
         return text
 
+    text = _split_squeezed_definitions(text)
     flags = _mask_code_fences(text)
     out: list[str] = []
     for line, in_code in zip(text.splitlines(), flags):
@@ -144,6 +196,7 @@ def consolidate_footnotes(text: str) -> tuple[str, FootnoteAudit]:
     if not text:
         return text, FootnoteAudit([], [], [])
 
+    text = _split_squeezed_definitions(text)
     flags = _mask_code_fences(text)
     lines = text.splitlines()
 

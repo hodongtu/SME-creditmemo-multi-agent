@@ -68,9 +68,14 @@ class DocumentType:
     bctc_extraction: bool = False
     proposal_extraction: bool = False
     # Named after the CIC form code, not "cic": CIC issues several unrelated
-    # reports against one customer and they share only a letterhead, so a future
-    # R21 (collateral) pass gets its own flag rather than widening this one.
+    # reports against one customer and they share only a letterhead, so the
+    # collateral report gets its own flag rather than widening this one.
     cic_s10a_extraction: bool = False
+    # The collateral report. Printed form code is actually "R20"; kept the
+    # "r21" name the module was already registered under rather than rename
+    # mid-project — the flag name is internal, only the matrix YAML key and the
+    # Python module need to agree with each other.
+    cic_r21_extraction: bool = False
 
     @property
     def routing_signature(self) -> frozenset[str]:
@@ -309,6 +314,9 @@ def _load(path: Path) -> DocumentMatrix:
                 cic_s10a_extraction=bool(
                     entry.get("cic_s10a_extraction", False)
                 ),
+                cic_r21_extraction=bool(
+                    entry.get("cic_r21_extraction", False)
+                ),
             )
 
     if not types:
@@ -404,6 +412,13 @@ def is_cic_s10a_type(type_id: str) -> bool:
 
     doc = get_type(type_id)
     return bool(doc and doc.cic_s10a_extraction)
+
+
+def is_cic_r21_type(type_id: str) -> bool:
+    """True when this document type is a CIC R20/R21 collateral report."""
+
+    doc = get_type(type_id)
+    return bool(doc and doc.cic_r21_extraction)
 
 
 def routing_signature(type_id: str) -> frozenset[str]:

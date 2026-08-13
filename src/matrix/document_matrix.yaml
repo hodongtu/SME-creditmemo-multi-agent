@@ -31,6 +31,11 @@
 #               S10A (src/agents/cic_s10a_extraction.py). Đặt tên theo mã phiếu
 #               vì CIC phát hành nhiều loại báo cáo khác hẳn nhau về cấu trúc:
 #               S10A là quan hệ tín dụng, R20/R21 là bảo đảm tiền vay.
+#   cic_r21_extraction : true = trích Báo cáo thông tin bảo đảm tiền vay CIC
+#               (src/agents/cic_r21_extraction.py). Trên giấy mã phiếu in là
+#               "R20"; tên cờ giữ "r21" vì đó là tên đã đăng ký cho module —
+#               chỉ file YAML này và module Python cần khớp tên nhau, không
+#               liên quan gì đến chữ in trên báo cáo.
 #               MỖI cờ tốn thêm 1 lượt gọi LLM cho mỗi tài liệu khớp.
 #
 # --- Chọn agent chính --------------------------------------------------------
@@ -492,6 +497,7 @@ groups:
 
       - id: cic_tai_san_bao_dam
         label: "Thông tin CIC Tài sản bảo đảm của Khách hàng vay"
+        cic_r21_extraction: true
         requirement:
           cap_moi: "Không bắt buộc"
           tai_cap: "Không bắt buộc"
@@ -502,6 +508,21 @@ groups:
           - "thong tin cic tai san bao dam"
           - "cic tai san bao dam"
           - "cic tsbd"
+          # Cụm đặc hiệu đọc từ báo cáo CIC mã phiếu R20/R21 thật (đo trên OCR
+          # thật, không phải chữ dựng tay): tiêu đề in đậm "BÁO CÁO THÔNG TIN
+          # BẢO ĐẢM TIỀN VAY" chính nó lại hay bị OCR đọc sai vì cỡ chữ lớn/in
+          # đậm, nên hai cụm dưới bám vào mục 2 — "THÔNG TIN ĐẢM BẢO TIỀN VAY
+          # CỦA KHÁCH HÀNG TẠI CÁC TỔ CHỨC TÍN DỤNG" và nhãn lặp lại ở mỗi
+          # khối tài sản "Danh sách Tài sản bảo đảm:" — cả hai đều đủ dài để
+          # không trùng ngẫu nhiên với S10A hay ho_so_tsbd (giấy tờ sở hữu gốc,
+          # không phải báo cáo CIC).
+          - "dam bao tien vay cua khach hang"
+          - "danh sach tai san bao dam"
+          - "chi tiet ve bao dam tien vay"
+          - "ma so tai san"
+          - "ngay bao cao tai san gan nhat"
+          - "ngay the chap"
+          - "ngay giai chap"
 
       - id: cic_dai_dien_phap_luat_co_dong
         label: >-

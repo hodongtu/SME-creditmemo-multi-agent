@@ -2,7 +2,8 @@
 
 ### Nguồn thông tin
 
-- **Hồ sơ**: {{DanhSachHoSo}}
+- **Hồ sơ**:
+    - {{TenFile}}
 - **Kỳ/Năm phân tích**: {{CacKyBaoCao}}
 - **Mức độ tin cậy**: {{MucDoTinCay}}
 

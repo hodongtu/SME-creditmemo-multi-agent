@@ -97,12 +97,17 @@ class ClassifiedDocument:
     # rather than per issuer: the collateral report (R20/R21) shares CIC's
     # letterhead and nothing else, so it needs its own pass, not this one.
     is_cic_s10a: bool = False
+    # The other CIC form sharing that letterhead — R20/R21, the collateral
+    # report. Same reasoning as is_cic_s10a: different structure, own pass.
+    is_cic_r21: bool = False
     bctc_extraction: dict[str, Any] | None = None
     bctc_extraction_error: str = ""
     proposal_extraction: dict[str, Any] | None = None
     proposal_extraction_error: str = ""
     cic_s10a_extraction: dict[str, Any] | None = None
     cic_s10a_extraction_error: str = ""
+    cic_r21_extraction: dict[str, Any] | None = None
+    cic_r21_extraction_error: str = ""
 
 
 class UnderwritingGraphState(TypedDict, total=False):

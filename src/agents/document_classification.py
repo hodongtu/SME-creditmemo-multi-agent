@@ -39,7 +39,7 @@ __all__ = [
     "rule_classify_document",
 ]
 
-SUPPORTED_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".csv", ".txt", ".md"}
+SUPPORTED_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".csv", ".txt", ".md", ".pptx"}
 
 
 def compute_file_hash(path: str) -> str:

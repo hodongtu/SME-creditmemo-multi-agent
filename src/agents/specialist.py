@@ -137,15 +137,19 @@ class SpecialistAgent:
         Nếu không xác định được trang/sheet thì chỉ ghi tên file. Không lặp lại
         khối này ở giữa bài.
 
-        Ví dụ mật độ ĐÚNG (một mã cho dữ kiện chính, không rải khắp câu):
+        Ví dụ mật độ ĐÚNG (một mã cho dữ kiện chính, không rải khắp câu),
+        trình bày theo đúng khuôn gạch đầu dòng của NHẬN ĐỊNH RULE:
 
-          **Nhận định**: Dư nợ đạt đỉnh **56,07 tỷ VNĐ tại 07/2025**[^1] rồi
-          giảm liên tục xuống 35,94 tỷ VNĐ tại 02/2026, cho thấy khách hàng
-          đang thu hẹp quy mô vay — **cần theo dõi nguyên nhân** trước khi cấp
-          hạn mức mới.
+          **Nhận định**:
 
-        (Cụm "cho thấy..." và câu khuyến nghị in đậm cuối là SUY LUẬN của bạn
-        nên không mang mã.)
+          - Dư nợ đạt đỉnh **56,07 tỷ VNĐ tại 07/2025**[^1] rồi giảm liên tục
+            xuống 35,94 tỷ VNĐ tại 02/2026, cho thấy khách hàng đang thu hẹp
+            quy mô vay.
+          - **Cần theo dõi nguyên nhân thu hẹp quy mô** trước khi cấp hạn mức
+            mới.
+
+        (Cụm "cho thấy..." và gạch đầu dòng khuyến nghị in đậm là SUY LUẬN của
+        bạn nên không mang mã.)
         """
         self.system_prompt = f"""
         {self.intro}
@@ -184,25 +188,44 @@ class SpecialistAgent:
 
         NHẬN ĐỊNH RULE (bắt buộc, áp dụng cho MỌI mục "Nhận xét", "Kết luận",
         "Đánh giá"):
-        - Mỗi mục chỉ có DUY NHẤT một dòng có nhãn:
-
-          **Nhận định**: <một đoạn liền mạch, gồm cả dữ kiện đọc được từ hồ sơ
-          lẫn phần suy luận/đánh giá của bạn, viết nối tiếp nhau trong cùng một
-          đoạn.>
-
-        - Dù viết chung một đoạn, người đọc vẫn phải phân biệt được đâu là dữ
-        kiện đâu là suy luận, bằng CÁCH DÙNG TỪ: dữ kiện nêu thẳng số liệu/thông
-        tin đọc được; suy luận dùng các cụm "cho thấy", "chứng tỏ", "phản ánh",
-        "điều này", "có thể", "dự kiến", "nhiều khả năng", "cần theo dõi" để báo
-        cho người đọc biết đây là ý kiến của bạn, không phải nguyên văn hồ sơ.
+        - Mỗi mục có nhãn **Nhận định**: theo sau là DANH SÁCH GẠCH ĐẦU DÒNG,
+        KHÔNG viết thành một đoạn văn liền mạch. Tối đa 5 gạch đầu dòng; mỗi
+        gạch đầu dòng dài 1-2 câu (khoảng 30-40 từ), nêu ĐÚNG MỘT ý — không
+        dồn nhiều dữ kiện rời rạc vào một gạch đầu dòng cho đủ chỉ tiêu, và
+        không viết thêm gạch đầu dòng chỉ để lấp cho đủ 5.
+        - BẮT BUỘC có một dòng trống giữa dòng nhãn "**Nhận định**:" và gạch
+        đầu dòng đầu tiên. Thiếu dòng trống này, trình markdown sẽ không nhận
+        ra đây là danh sách và hiển thị sai (dấu "-" bị nuốt vào câu văn phía
+        trên, mất bullet).
+        - Ngoại lệ: nếu mục chỉ có ĐÚNG MỘT ý ngắn để nói (ví dụ báo thiếu dữ
+        liệu), viết thẳng trên cùng dòng nhãn, KHÔNG tách thành bullet đơn lẻ:
+        **Nhận định**: Không có dữ liệu trong hồ sơ.
+        - Trong mỗi gạch đầu dòng, có thể gồm cả dữ kiện đọc được từ hồ sơ lẫn
+        phần suy luận/đánh giá của bạn, viết nối tiếp nhau nếu chúng thuộc
+        cùng một ý. Người đọc vẫn phải phân biệt được đâu là dữ kiện đâu là
+        suy luận, bằng CÁCH DÙNG TỪ: dữ kiện nêu thẳng số liệu/thông tin đọc
+        được; suy luận dùng các cụm "cho thấy", "chứng tỏ", "phản ánh", "điều
+        này", "có thể", "dự kiến", "nhiều khả năng", "cần theo dõi" để báo cho
+        người đọc biết đây là ý kiến của bạn, không phải nguyên văn hồ sơ.
         - TUYỆT ĐỐI không gắn mã chú thích [^N] vào phần suy luận của chính bạn —
         mã chỉ đi kèm dữ kiện đọc trực tiếp từ hồ sơ. Gắn vào suy luận sẽ khiến
         người đọc tưởng suy luận đó cũng được ghi sẵn trong hồ sơ nguồn.
         - Không quy kết nguyên nhân hay đánh giá tốt/xấu như thể đó là dữ kiện.
-        Nếu chưa đủ cơ sở để suy luận, vẫn ghi dòng **Nhận định** với phần dữ
-        kiện đọc được và nêu rõ "Chưa đủ cơ sở để đánh giá".
+        Nếu chưa đủ cơ sở để suy luận, vẫn ghi gạch đầu dòng với phần dữ kiện
+        đọc được và nêu rõ "Chưa đủ cơ sở để đánh giá".
         - Nếu không có dữ kiện nào cho mục này, ghi
         **Nhận định**: Không có dữ liệu trong hồ sơ.
+
+        Ví dụ ĐÚNG (dòng trống bắt buộc trước gạch đầu dòng đầu tiên; nếu mục
+        của bạn dùng CITATION RULE bên dưới thì gắn mã [^N] vào dữ kiện như ví
+        dụ ở CITATION RULE):
+
+          **Nhận định**:
+
+          - Doanh thu thuần **tăng 71,8%** so với cùng kỳ, chủ yếu nhờ mở
+            rộng thị trường xuất khẩu.
+          - Biên lợi nhuận gộp **giảm còn 8,2%**, cho thấy áp lực chi phí đầu
+            vào đang lấn át phần tăng trưởng doanh thu.
 
         HIGHLIGHT RULE:
         - Trong mỗi mục "Nhận xét"/"Kết luận" và bất kỳ đoạn phân tích nào, in đậm
@@ -225,6 +248,20 @@ class SpecialistAgent:
         - Mọi chỗ dạng {{{{TenTruong}}}} là chỗ cần thay bằng giá trị thật lấy từ
         hồ sơ. Nếu không có giá trị, ghi "Không có dữ liệu".
         TUYỆT ĐỐI không để lại dấu {{{{ }}}} trong câu trả lời.
+        - Trường "Hồ sơ"/"Nguồn dữ liệu" ở đầu báo cáo lặp lại dòng con
+        "- {{{{TenFile}}}}" cho MỖI tài liệu đã dùng, mỗi tài liệu một dòng. Có
+        bao nhiêu tài liệu thì có bấy nhiêu dòng con — TUYỆT ĐỐI không gộp
+        nhiều tên file vào một dòng cách nhau bằng dấu phẩy/chấm phẩy, dòng dài
+        khó đọc khi hồ sơ có nhiều tài liệu. Mỗi dòng con thụt vào ĐÚNG BỐN dấu
+        cách so với dấu "-" của dòng "Hồ sơ" phía trên — ít hơn bốn dấu cách,
+        trình markdown sẽ không nhận là danh sách con và hiển thị phẳng ra
+        ngoài, sai với khung mẫu đã cho.
+        - Ưu tiên trình bày bằng gạch đầu dòng khi một chỗ trong bố cục cần liệt
+        kê nhiều mục cùng loại (nhiều tài liệu, nhiều khoản mục, nhiều điều
+        kiện...), thay vì gộp chung thành một câu văn cách nhau bằng dấu phẩy.
+        Đoạn **Nhận định** áp dụng đúng khuôn bullet quy định riêng ở NHẬN
+        ĐỊNH RULE (tối đa 5 gạch đầu dòng, có dòng trống bắt buộc trước gạch
+        đầu dòng đầu tiên).
         - Xoá hẳn dòng/bảng/mục không có dữ liệu thay vì để trống hoặc điền "-".
 
         {self.output_template}
@@ -548,10 +585,11 @@ class CreditMemoComposerAgent:
                       KHÔNG cần tự gộp thành một danh sách chung — hệ thống sẽ
                       tự gom sau khi bạn biên tập xong. Không bịa thêm và không
                       xóa bớt dòng định nghĩa nào.
-                    - Giữ nguyên đoạn **Nhận định** của sub-agent như một đoạn
-                      liền mạch — không tách lại thành hai dòng, không thêm dòng
-                      "Căn cứ" mới, không chuyển câu suy luận thành câu dữ kiện
-                      hay ngược lại.
+                    - Giữ nguyên cấu trúc gạch đầu dòng của đoạn **Nhận định**
+                      từ sub-agent — không gộp các gạch đầu dòng lại thành một
+                      đoạn văn liền mạch, không thêm/bớt gạch đầu dòng, không
+                      đổi thứ tự, không thêm dòng "Căn cứ" mới, không chuyển
+                      câu suy luận thành câu dữ kiện hay ngược lại.
                     - Giữ nguyên mọi ghi chú thiếu dữ liệu từ sub-agent, đúng
                       nguyên văn "Không có dữ liệu trong hồ sơ".
                       Không được thay bằng số ước lượng, số 0, dấu "-", hay câu

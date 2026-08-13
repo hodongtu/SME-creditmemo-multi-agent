@@ -7,6 +7,7 @@ from pathlib import Path
 import openpyxl
 import pandas as pd
 from openpyxl.utils import get_column_letter
+from pptx import Presentation
 
 from src.utils.ocr import ocr_pdf
 
@@ -245,6 +246,61 @@ def _join_sheet_blocks(blocks: list[str], max_chars: int) -> str:
     )
 
 
+def _slide_text(slide) -> list[str]:
+    """Collect text from every non-title shape on a slide, tables included.
+
+    The title shape is skipped here — it already leads the slide's block
+    header (see ``extract_pptx_text``), and repeating it as the first body
+    line would just echo the same text twice.
+    """
+    title_shape = slide.shapes.title
+    title_id = title_shape.shape_id if title_shape is not None else None
+    parts: list[str] = []
+    for shape in slide.shapes:
+        if title_id is not None and shape.shape_id == title_id:
+            continue
+        if shape.has_text_frame:
+            text = shape.text_frame.text.strip()
+            if text:
+                parts.append(text)
+        elif shape.has_table:
+            for row in shape.table.rows:
+                cells = [cell.text.strip() for cell in row.cells]
+                if any(cells):
+                    parts.append("\t".join(cells))
+    return parts
+
+
+def _slide_title(slide) -> str:
+    """The slide's title placeholder text, if it has one."""
+    title_shape = slide.shapes.title
+    if title_shape is not None and title_shape.has_text_frame:
+        return title_shape.text_frame.text.strip()
+    return ""
+
+
+def extract_pptx_text(pptx_path: str, max_chars: int = 100000) -> str:
+    """Extract PowerPoint slide text (and tables) as LLM-readable text.
+
+    Every shape with a text frame contributes its text, in shape order; a
+    table's rows are rendered tab-separated, the same convention
+    ``extract_excel_text`` uses for its sheet grids. One block per slide, led
+    by the slide's title if it has one — mirrors the "--- Page N ---" /
+    "--- Sheet: ... ---" markers used elsewhere so a citation can point at a
+    specific slide.
+    """
+    presentation = Presentation(pptx_path)
+    blocks = []
+    for index, slide in enumerate(presentation.slides, start=1):
+        title = _slide_title(slide)
+        header = f"--- Slide {index}: {title} ---" if title else f"--- Slide {index} ---"
+        lines = _slide_text(slide)
+        body = "\n".join(lines) if lines else "(trống)"
+        blocks.append(f"{header}\n{body}")
+
+    return _join_sheet_blocks(blocks, max_chars)
+
+
 def extract_document_text(
     file_path: str,
     ocr_timeout_seconds: float | None = None,
@@ -259,4 +315,6 @@ def extract_document_text(
         return extract_csv_text(file_path)
     if extension in spreadsheet_extensions - {".csv"}:
         return extract_excel_text(file_path)
+    if extension == ".pptx":
+        return extract_pptx_text(file_path)
     raise ValueError(f"Unsupported file extension: {extension}")

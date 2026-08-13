@@ -2,7 +2,8 @@
 
 ### Nguồn thông tin
 
-- **Hồ sơ**: {{DanhSachHoSo}}
+- **Hồ sơ**:
+    - {{TenFile}}
 - **Loại hồ sơ tài chính**: {{LoaiHoSo}}
 - **Kỳ/Năm phân tích**: {{CacKyBaoCao}}
 - **Đơn vị kiểm toán**: {{DonViKiemToan}}
