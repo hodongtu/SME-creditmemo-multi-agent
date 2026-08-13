@@ -55,6 +55,13 @@ def _ocr_config() -> dict[str, object]:
         # design (thin straight rules vs. character strokes), so it stays on
         # even when the rest of ``preprocess`` is off.
         "deline": os.getenv("OCR_DELINE", "1") != "0",
+        # A page rotated a full 90/180/270° reads as near-random characters,
+        # not merely lower-quality OCR — Tesseract is decoding along the wrong
+        # axis entirely. On by default like deline, and for the same reason:
+        # measured to have no false positives on an already-correct page (the
+        # detector returns 0 and nothing happens), so there is no scan-quality
+        # tradeoff to opt into.
+        "auto_rotate": os.getenv("OCR_AUTO_ROTATE", "1") != "0",
     }
 
 
@@ -84,8 +91,15 @@ def _remove_ruled_lines(gray: np.ndarray, dpi: int = 300) -> np.ndarray:
     h_kernel = cv2.getStructuringElement(
         cv2.MORPH_RECT, (max(15, round(60 * factor)), 1)
     )
+    # 40px (the original tuning, against an A4-sized CIC report) cut into tall
+    # letter strokes on a CIC report printed on a larger page (~11x14in): the
+    # same absolute DPI renders larger glyphs on a larger sheet, so "Ngân hàng"
+    # came back "Ngân àng" — the vertical kernel was reading a letter's stem as
+    # a rule. Measured across both documents at several sizes: the balance
+    # table this constant was tuned on stays 12/12 correct rows from 40px all
+    # the way to 100px, so raising it here traded nothing away.
     v_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (1, max(10, round(40 * factor)))
+        cv2.MORPH_RECT, (1, max(10, round(60 * factor)))
     )
     lines_mask = cv2.bitwise_or(
         cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel),
@@ -99,6 +113,41 @@ def _remove_ruled_lines(gray: np.ndarray, dpi: int = 300) -> np.ndarray:
     cleaned = gray.copy()
     cleaned[lines_mask > 0] = 255
     return cleaned
+
+
+def _detect_rotation_angle(image: Image.Image) -> int:
+    """0/90/180/270 — degrees to rotate the page clockwise to correct it.
+
+    Separate from _deskew on purpose: that one straightens a few degrees of
+    scan tilt, this one catches a page rotated a full quarter-turn or upside
+    down, which minAreaRect cannot see as "tilt" — the whole block of text has
+    rotated with the page, so there is no skew angle left to measure.
+
+    Never raises. Measured directly rather than assumed: on a page with too
+    little text to judge (a blank or near-blank crop), Tesseract's OSD raises
+    rather than guessing — "too few characters, skipping this page" — so that
+    failure is read as "leave the page alone", not routed to a fallback guess.
+    orientation_conf is deliberately not used as a threshold: measured across a
+    clean document and a noisy one, the noisy one scored *lower* confidence
+    while still getting all four rotations right, so filtering on confidence
+    would have discarded the exact cases most worth correcting.
+    """
+    try:
+        osd = pytesseract.image_to_osd(image, output_type=pytesseract.Output.DICT)
+        return int(osd["rotate"]) % 360
+    except Exception:
+        return 0
+
+
+def _apply_rotation(image: Image.Image, angle: int) -> Image.Image:
+    """Rotate a page clockwise by the angle OSD reported is needed to fix it.
+
+    PIL's own ``rotate()`` turns counter-clockwise for a positive angle, while
+    OSD's "rotate" is the clockwise correction needed — hence the sign flip.
+    """
+    if angle % 360 == 0:
+        return image
+    return image.rotate(-angle, expand=True)
 
 
 def _deskew(gray: np.ndarray, max_angle: float = 15.0) -> np.ndarray:
@@ -336,6 +385,7 @@ def _cache_key(pdf_path: str, settings: dict[str, object]) -> str:
         for key in (
             "dpi", "lang", "psm", "oem", "preprocess",
             "deskew", "denoise", "binarize", "layout", "upscale", "deline",
+            "auto_rotate",
         )
     }
     payload = f"{_file_sha256(pdf_path)}|{json.dumps(signature, sort_keys=True)}"
@@ -381,7 +431,21 @@ def ocr_pdf(pdf_path: str, timeout_seconds: float | None = None) -> str:
     images = _render_pdf_pages(pdf_path, int(settings["dpi"]))
 
     page_texts = []
-    for image in images:
+    for page_number, image in enumerate(images, start=1):
+        working = image
+        # First of all the fixes, because every step after this assumes the
+        # page's horizontal/vertical axes match the reading direction: a
+        # ruled-line kernel or a small-skew estimate is meaningless applied to
+        # a page still rotated a quarter turn.
+        if settings["auto_rotate"]:
+            angle = _detect_rotation_angle(working)
+            if angle:
+                working = _apply_rotation(working, angle)
+                print(
+                    f"[ocr_pdf] WARNING: trang {page_number} bị xoay {angle}°, "
+                    "đã tự động chỉnh — kiểm tra file gốc nếu kết quả OCR vẫn "
+                    "bất thường."
+                )
         # Ahead of the opt-in ``preprocess`` bundle and unconditional on it: this
         # targets table rules, not scan noise, so it runs on the untouched render
         # even when nothing else does. Applied before deskew/denoise/binarize —
@@ -389,7 +453,6 @@ def ocr_pdf(pdf_path: str, timeout_seconds: float | None = None) -> str:
         # deskewing should have that run first in a later pass; these renders
         # come straight from pdfium rather than a photographed scan, so skew is
         # not the case this is tuned for.
-        working = image
         if settings["deline"]:
             gray = cv2.cvtColor(np.array(working.convert("RGB")), cv2.COLOR_RGB2GRAY)
             working = Image.fromarray(_remove_ruled_lines(gray, int(settings["dpi"])))
