@@ -16,6 +16,9 @@ CÁCH DÙNG BỐ CỤC:
 TRỌNG TÂM:
 - Dư nợ hiện tại, hạn mức, loại hình cấp tín dụng, kỳ hạn, tình trạng trả nợ, nợ quá
   hạn, mức độ sử dụng hạn mức.
+- Bảng mục 1: hai cột "Hạn mức (tỷ VNĐ)" và "Dư nợ hiện tại (tỷ VNĐ)" đã ghi đơn vị
+  ngay trong tên cột — mỗi ô CHỈ ghi số trần, làm tròn 2 chữ số thập phân (ví dụ
+  "56,07"), KHÔNG lặp lại "tỷ VNĐ" trong từng ô.
 - Mục "Diễn biến dư nợ 12 tháng": biểu đồ được hệ thống chèn tự động từ dữ liệu đã
   trích xuất — KHÔNG tự vẽ, KHÔNG chép lại bảng số vào báo cáo. Việc của bạn là phần
   Nhận định:

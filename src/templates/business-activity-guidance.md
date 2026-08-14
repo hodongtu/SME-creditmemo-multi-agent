@@ -14,62 +14,56 @@ CÁCH DÙNG BỐ CỤC:
 - Không tự dựng danh sách "Top 3/Top 5" nếu hồ sơ không nêu — liệt kê đúng số lượng có thật.
 - Mục nào hồ sơ không đề cập thì ghi "Không có dữ liệu trong hồ sơ" và bỏ bảng/sơ đồ.
 
-SƠ ĐỒ (mục 1, 3, 4, 5):
+SƠ ĐỒ (mục 1, 3):
 - Bắt buộc dùng Mermaid, KHÔNG vẽ bằng ký tự ASCII.
-- Tối đa 5 khối; nhãn ngắn, dùng <br/> để xuống dòng trong khối.
-- Ưu tiên `flowchart LR` cho mô hình kinh doanh; `flowchart TD` cho quy trình tuần tự.
+- Mục 3: tối đa 5 khối; nhãn ngắn, dùng <br/> để xuống dòng trong khối.
+- Luôn dùng `flowchart LR` cho mọi sơ đồ trong Business Activity — KHÔNG dùng
+  `flowchart TD`, kể cả cho quy trình tuần tự ở mục 3.
 - Chỉ đưa vào sơ đồ những khâu có căn cứ; kèm số liệu thật khi có (công suất, giá trị
   tồn kho, số ngày phải thu/phải trả). Không đủ thông tin thì bỏ sơ đồ.
+- Mục 4 và mục 5 KHÔNG vẽ sơ đồ nữa — chỉ còn bảng + Nhận định.
 
-SỐ LIỆU TRÊN DÂY NỐI:
-- Đặt số liệu lên chính dây nối bằng cú pháp ống: `A[Kho] -->|45 ngày| B[Đầu ra]`.
-  Chỉ dùng dạng ống này, không dùng dạng `A -- 45 ngày --> B`.
-- Nhãn dây nối cũng xuống dòng được bằng <br/>: `-->|32%<br/>12,4 tỷ|`.
-- Mục 1: đặt số ngày vòng quay lên dây nối khi tính được — số ngày tồn kho giữa Sản
-  xuất và Tồn kho, số ngày phải thu giữa Đầu ra và Thu tiền.
-- Mục 4 và 5: vẽ doanh nghiệp ở giữa, mỗi đối tác lớn là một khối, tỷ trọng doanh số
-  đặt trên dây nối. Đầu ra thì mũi tên đi từ doanh nghiệp ra đối tác; đầu vào thì đi
-  từ đối tác vào doanh nghiệp.
-- Số trên dây nối PHẢI khớp cột "Tỷ trọng" của bảng ngay bên trên. Hai chỗ lệch nhau
-  là mâu thuẫn nội bộ trong cùng một trang báo cáo.
-- Không có số thật thì bỏ hẳn sơ đồ, tuyệt đối không vẽ sơ đồ với tỷ trọng ước lượng.
+MỤC 1 — CHUỖI SẢN PHẨM/ĐỐI TÁC:
+- Khung mẫu mục 1 có sẵn 9 khối theo đúng thứ tự cố định — ĐỌC KỸ chiều của từng
+  khối, đây là lỗi hay bị nhầm nhất (mô hình hay tự đảo ngược 2 vai trò dưới đây):
 
-TÔ MÀU BOX THEO MỨC TẬP TRUNG (áp dụng cho MỌI sơ đồ có đối tác — mục 4, mục 5, và
-sơ đồ nhiều tầng nếu có, KHÔNG riêng gì sơ đồ nhiều tầng):
-- BẮT BUỘC xét tô màu mỗi khi có một đối tác chiếm từ ~40% tỷ trọng doanh số/giá trị
-  nhập trở lên ở mục 4 hoặc mục 5 — đây LÀ lý do nghiệp vụ, không cần tìm thêm căn cứ
-  nào khác. Đây là lỗi hay bị bỏ sót nhất: sơ đồ mục 4/5 vẫn hay bị vẽ toàn khối một
-  màu mặc định dù bảng ngay bên trên đã có một đối tác vượt xa các đối tác còn lại.
-- Khung mẫu mục 4 và mục 5 đã có sẵn 2 dòng `classDef warn ...` / `classDef hi ...`
-  ở đầu khối mermaid — GIỮ NGUYÊN 2 dòng đó dù không dùng đến lần nào (không gán vào
-  node nào thì không hiện ra, hoàn toàn vô hại). Khi có đối tác đạt ngưỡng ~40%+, chỉ
-  cần thêm hậu tố `:::warn` hoặc `:::hi` ngay sau ngoặc vuông của đúng node đó, ví dụ
-  `R1[{{DoiTacDauRa1}}]` → `R1[{{DoiTacDauRa1}}]:::warn`.
-- Tô màu nhóm bằng classDef. Dùng đúng bộ màu này:
-  `classDef hub fill:#BDD7EE,stroke:#333` cho khối doanh nghiệp/đầu mối,
-  `classDef org fill:#D9D9D9,stroke:#333` cho khối thông tin pháp nhân,
-  `classDef hi fill:#C6E0B4,stroke:#333` cho đối tác trọng yếu cần nhấn mạnh,
-  `classDef warn fill:#FFC000,stroke:#333` cho đối tác tập trung rủi ro cao (~40%+).
-  Gán bằng `A[Tên]:::hub` hoặc `class A,B hub`.
-- Ví dụ ĐÚNG, một đối tác đầu ra chiếm 55%:
+    `{{SanPhamDauVao}} -> {{KhachHangDauVao}} -> Đầu vào -> Sản xuất -> Tồn kho ->
+    Đầu ra -> Thu tiền -> {{KhachHangDauRa}} -> {{SanPhamDauRa}}`
+
+  - `{{KhachHangDauVao}}` LÀ NHÀ CUNG CẤP (bên BÁN nguyên liệu CHO công ty) — lấy
+    đúng tên ở bảng mục 5 "Đầu vào chính", đối tác đứng đầu cột Tỷ trọng.
+    `{{SanPhamDauVao}}` lấy từ cột "Mặt hàng" cùng dòng đó.
+  - `{{KhachHangDauRa}}` LÀ KHÁCH MUA (bên MUA hàng TỪ công ty) — lấy đúng tên ở
+    bảng mục 4 "Đầu ra chính", đối tác đứng đầu cột Tỷ trọng. `{{SanPhamDauRa}}`
+    lấy từ cột "Mặt hàng" cùng dòng đó.
+  - TUYỆT ĐỐI không đảo ngược hai vai trò này: nhà cung cấp (mục 5) luôn đứng ở
+    nửa ĐẦU chuỗi, trước "Đầu vào"; khách mua (mục 4) luôn đứng ở nửa CUỐI chuỗi,
+    sau "Thu tiền". Đối chiếu lại với đúng dòng đầu bảng mục 4/5 trước khi chốt.
+- 5 khối ở giữa (Đầu vào...Thu tiền) là nhãn quy trình cố định, GIỮ NGUYÊN nguyên
+  văn, không đổi, không xoá.
+- Không có căn cứ cho một bên (ví dụ hồ sơ không nêu tên nhà cung cấp) thì bỏ ĐÚNG 2
+  khối của bên đó (sản phẩm + khách hàng), nối thẳng vào/ra "Đầu vào"/"Thu tiền" —
+  không bịa tên, không để trống ngoặc vuông.
+- Số ngày vòng quay vẫn đặt trên dây nối như trước khi tính được — số ngày tồn kho
+  giữa Sản xuất và Tồn kho, số ngày phải thu giữa Đầu ra và Thu tiền. Cú pháp ống:
+  `A[Kho] -->|45 ngày| B[Đầu ra]`, không dùng dạng `A -- 45 ngày --> B`. Nhãn dây nối
+  xuống dòng được bằng <br/>.
+
+Ví dụ ĐÚNG (khớp đúng chiều với dòng đầu bảng mục 4/5 tương ứng):
+  Bảng mục 5 (Đầu vào chính): "Công ty TNHH Gỗ An Cường | Gỗ MDF phủ Melamine | 100%"
+  Bảng mục 4 (Đầu ra chính): "Chuỗi siêu thị nội thất Nhà Xinh | Bàn ghế, tủ kệ | 58%"
   ```mermaid
   flowchart LR
-    classDef warn fill:#FFC000,stroke:#333
-    KH[Công ty ABC] -->|55%| R1[Đối tác X]:::warn
-    KH -->|25%| R2[Đối tác Y]
-    KH -->|20%| R3[Đối tác Z]
+    P1[Gỗ MDF phủ Melamine] --> KV[Công ty TNHH Gỗ An Cường] --> A[Đầu vào] --> B[Sản xuất] --> C[Tồn kho] --> D[Đầu ra] --> E[Thu tiền] --> KR[Chuỗi siêu thị nội thất Nhà Xinh] --> P2[Bàn ghế, tủ kệ]
   ```
-- Không tô màu để trang trí những khối không có lý do nghiệp vụ (đối tác tỷ trọng
-  thấp, khối trung gian trong quy trình mục 1/3). Nêu rõ lý do tô màu ở phần
-  **Nhận định** ngay dưới sơ đồ.
+  (Nhà cung cấp Gỗ An Cường ở ĐẦU chuỗi vì họ bán nguyên liệu vào; khách mua Nhà
+  Xinh ở CUỐI chuỗi vì họ mua thành phẩm ra — không đảo ngược.)
 
-SƠ ĐỒ NHIỀU TẦNG (chuỗi cung ứng):
+SƠ ĐỒ NHIỀU TẦNG (chuỗi cung ứng, mở rộng của mục 1 khi hồ sơ đủ chi tiết):
 - Vẽ được dạng nhiều tầng: nhà cung cấp -> doanh nghiệp -> kênh phân phối -> đối tác cuối.
 - TỐI ĐA 5 TẦNG và 20 khối. Vượt mức này thì bản PDF phải thu nhỏ tới mức chữ
   không đọc nổi trên khổ A4 — hãy tách thành 2 sơ đồ (một cho đầu vào, một cho
   đầu ra) thay vì cố nhồi vào một hình.
-- Áp dụng đúng quy tắc tô màu ở mục "TÔ MÀU BOX THEO MỨC TẬP TRUNG" phía trên cho
-  từng tầng.
 
 TÀI LIỆU THAM KHẢO NGÀNH (nếu evidence có khối "Reference Document filename:
 ...pptx (tài liệu tham khảo ngành, không phải hồ sơ khách hàng)"):

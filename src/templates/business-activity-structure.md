@@ -19,7 +19,7 @@
 
 ```mermaid
 flowchart LR
-  A[Đầu vào] --> B[Sản xuất] --> C[Tồn kho] --> D[Đầu ra] --> E[Thu tiền]
+  P1[{{SanPhamDauVao}}] --> KV[{{KhachHangDauVao}}] --> A[Đầu vào] --> B[Sản xuất] --> C[Tồn kho] --> D[Đầu ra] --> E[Thu tiền] --> KR[{{KhachHangDauRa}}] --> P2[{{SanPhamDauRa}}]
 ```
 
 **Nhận định**:
@@ -34,7 +34,7 @@ flowchart LR
 ## 3. Quy trình vận hành
 
 ```mermaid
-flowchart TD
+flowchart LR
   A[Nhận đơn hàng] --> B[Ký hợp đồng] --> C[Sản xuất] --> D[Giao hàng & thanh toán]
 ```
 
@@ -45,28 +45,12 @@ flowchart TD
 | Đầu ra chính | Mặt hàng | Doanh số {{Nam}} | Tỷ trọng | Phương thức ký HĐ | Phương thức giao hàng | Phương thức thanh toán |
 |---|---|---:|---:|---|---|---|
 
-```mermaid
-flowchart LR
-  classDef warn fill:#FFC000,stroke:#333
-  classDef hi fill:#C6E0B4,stroke:#333
-  KH[{{TenKhachHang}}] -->|{{TyTrongDauRa1}}| R1[{{DoiTacDauRa1}}]
-  KH -->|{{TyTrongDauRa2}}| R2[{{DoiTacDauRa2}}]
-```
-
 **Nhận định**:
 
 ## 5. Đầu vào
 
 | Đầu vào chính | Mặt hàng | Doanh số {{Nam}} | Tỷ trọng | Phương thức ký HĐ | Phương thức giao hàng | Phương thức thanh toán |
 |---|---|---:|---:|---|---|---|
-
-```mermaid
-flowchart LR
-  classDef warn fill:#FFC000,stroke:#333
-  classDef hi fill:#C6E0B4,stroke:#333
-  V1[{{DoiTacDauVao1}}] -->|{{TyTrongDauVao1}}| KH[{{TenKhachHang}}]
-  V2[{{DoiTacDauVao2}}] -->|{{TyTrongDauVao2}}| KH
-```
 
 **Nhận định**:
 

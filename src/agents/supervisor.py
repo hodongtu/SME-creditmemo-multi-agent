@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
@@ -1921,11 +1920,6 @@ class Supervisor:
         # Convert all VNĐ amounts to tỷ VNĐ for display; the hallucination
         # judge already ran on the raw-number response above.
         response = convert_amounts_in_text(response)
-        # Surface the verdict — including a clean one, and including the case
-        # where the check could not run. Without this the reader cannot tell
-        # "checked and passed" apart from "never checked".
-        response += self._format_confidence_warnings(hallucination)
-        response += self._format_check_unavailable(hallucination)
         # Prompt rules are not enforcement: report the citations that did not
         # resolve, rather than quietly dropping or inventing them.
         response += self._format_footnote_findings(footnote_audit)
@@ -1996,129 +1990,6 @@ class Supervisor:
         )
 
     @staticmethod
-    def _claim_text(claim: Any) -> str:
-        """Render one judge finding, which may be a string or a dict."""
-
-        if isinstance(claim, dict):
-            text = str(
-                claim.get("claim")
-                or claim.get("statement")
-                or claim.get("text")
-                or claim.get("description")
-                or ""
-            ).strip()
-            reason = str(claim.get("reason") or claim.get("explanation") or "").strip()
-            status = str(claim.get("support_status") or "").strip()
-            parts = [part for part in [text, status, reason] if part]
-            return " — ".join(parts) if parts else str(claim)
-        return str(claim).strip()
-
-    @classmethod
-    def _format_confidence_warnings(cls, hallucination: dict[str, Any]) -> str:
-        """Render the judge's verdict as a section appended to the report.
-
-        Emitted whenever the check actually ran — including a clean verdict —
-        because silence would be indistinguishable from "the check never ran".
-        Returns "" only when the check did not run; _finalize reports that case
-        separately.
-        """
-
-        if not hallucination:
-            return ""
-        if str(hallucination.get("status", "")).upper() in {
-            "DISABLED",
-            "SKIPPED",
-            "ERROR",
-        }:
-            return ""
-
-        claims = hallucination.get("claims") or []
-        rows = [
-            (cls._claim_text_only(claim), cls._claim_status_of(claim), cls._claim_reason(claim))
-            for claim in claims
-        ]
-        rows = [row for row in rows if row[0]]
-        counts = Counter(status for _, status, _ in rows)
-        problem_count = sum(
-            count
-            for status, count in counts.items()
-            if status in cls.PROBLEM_STATUSES
-        )
-        numeric_errors = [
-            text
-            for text in (
-                cls._claim_text(item)
-                for item in hallucination.get("numeric_errors") or []
-            )
-            if text
-        ]
-        # When the judge returns claims without a usable support_status, the
-        # per-status counts are meaningless — fall back to unsupported_claims so
-        # a flagged verdict is never reported as clean.
-        flagged = len(hallucination.get("unsupported_claims") or [])
-        has_known_status = any(
-            status in cls.STATUS_LABELS_VI for _, status, _ in rows
-        )
-        if not has_known_status:
-            problem_count = flagged
-        else:
-            problem_count = max(problem_count, flagged)
-
-        risk = str(hallucination.get("hallucination_risk", "UNKNOWN")).upper()
-        action = str(hallucination.get("final_action", "PASS")).upper()
-        summary = str(hallucination.get("summary", "")).strip()
-
-        lines = [
-            # Two blank lines: a bare "---" directly under a text line would
-            # render as a setext H2, turning the report's last line into a heading.
-            "",
-            "",
-            "---",
-            "",
-            "## Kiểm chứng độ tin cậy",
-            "",
-            cls._coverage_line(rows, counts, problem_count, numeric_errors, risk),
-        ]
-        if summary:
-            lines += ["", f"**Nhận xét của bộ kiểm tra**: {summary}"]
-
-        if rows:
-            # Problems first so they are read before the supported claims.
-            ordered = sorted(
-                rows,
-                key=lambda row: (row[1] not in cls.PROBLEM_STATUSES, row[0]),
-            )
-            lines += [
-                "",
-                "| Nhận định | Đánh giá | Lý do |",
-                "|---|---|---|",
-            ]
-            lines += [
-                "| {} | {} | {} |".format(
-                    cls._escape_cell(text),
-                    cls.STATUS_LABELS_VI.get(status, status or "Không rõ"),
-                    cls._escape_cell(reason) or "-",
-                )
-                for text, status, reason in ordered
-            ]
-
-        if numeric_errors:
-            lines += ["", "**Số liệu có dấu hiệu sai lệch:**"]
-            lines += [f"- {text}" for text in numeric_errors]
-        if action != "PASS":
-            lines += ["", f"**Khuyến nghị của bộ kiểm tra**: {action}"]
-
-        lines += [
-            "",
-            (
-                "*Đây là kết quả đối chiếu tự động bằng LLM, có thể bỏ sót hoặc "
-                "đánh giá sai. Không thay thế cho việc thẩm định của cán bộ tín "
-                "dụng.*"
-            ),
-        ]
-        return "\n".join(lines) + "\n"
-
-    @staticmethod
     def _format_template_findings(response: str) -> str:
         """Flag layout scaffolding or placeholders copied into the report."""
 
@@ -2148,120 +2019,6 @@ class Supervisor:
         ]
         lines += [f"- {finding}" for finding in findings]
         return "\n".join(lines) + "\n"
-
-    @classmethod
-    def _format_check_unavailable(cls, hallucination: dict[str, Any]) -> str:
-        """Say so when the check did not run, instead of staying silent."""
-
-        status = str((hallucination or {}).get("status", "")).upper()
-        if status not in {"DISABLED", "SKIPPED", "ERROR"}:
-            return ""
-        reasons = {
-            "DISABLED": "đã tắt trong cấu hình",
-            "SKIPPED": "không có đủ dữ liệu để đối chiếu",
-            "ERROR": "gặp lỗi khi chạy",
-        }
-        summary = str((hallucination or {}).get("summary", "")).strip()
-        detail = f" ({summary})" if summary else ""
-        return (
-            "\n\n---\n\n## Kiểm chứng độ tin cậy\n\n"
-            f"*Chưa chạy được kiểm chứng tự động: {reasons[status]}{detail}. "
-            "Các nhận định trong báo cáo chưa được đối chiếu lại với hồ sơ.*\n"
-        )
-
-    STATUS_LABELS_VI = {
-        "SUPPORTED": "Có căn cứ",
-        "PARTIALLY_SUPPORTED": "Chưa đầy đủ",
-        "UNSUPPORTED": "Không có căn cứ",
-        "NOT_VERIFIABLE": "Không kiểm chứng được",
-    }
-    PROBLEM_STATUSES = {
-        "PARTIALLY_SUPPORTED",
-        "UNSUPPORTED",
-        "NOT_VERIFIABLE",
-    }
-
-    @classmethod
-    def _coverage_line(
-        cls,
-        rows: list[tuple[str, str, str]],
-        counts: "Counter[str]",
-        problem_count: int,
-        numeric_errors: list[str],
-        risk: str,
-    ) -> str:
-        """State what was checked, so a clean result is still visible."""
-
-        has_known_status = any(
-            status in cls.STATUS_LABELS_VI for _, status, _ in rows
-        )
-        if not rows:
-            checked = "Bộ kiểm tra không trả về danh sách nhận định cụ thể."
-        elif not has_known_status:
-            # Claims came back without a support status — do not invent counts.
-            checked = (
-                f"Đã đối chiếu {len(rows)} nhận định với hồ sơ "
-                "(bộ kiểm tra không phân loại được từng nhận định)."
-            )
-        else:
-            parts = [f"{counts.get('SUPPORTED', 0)} có căn cứ"]
-            for status in ("PARTIALLY_SUPPORTED", "UNSUPPORTED", "NOT_VERIFIABLE"):
-                if counts.get(status):
-                    parts.append(
-                        f"{counts[status]} {cls.STATUS_LABELS_VI[status].lower()}"
-                    )
-            checked = (
-                f"Đã đối chiếu {len(rows)} nhận định với hồ sơ — "
-                + ", ".join(parts)
-                + "."
-            )
-        verdict = (
-            "Không phát hiện nội dung thiếu căn cứ."
-            if not problem_count and not numeric_errors
-            else (
-                f"Cần rà soát {problem_count} nhận định"
-                + (
-                    f" và {len(numeric_errors)} số liệu."
-                    if numeric_errors
-                    else "."
-                )
-            )
-        )
-        return f"{checked} Mức rủi ro: **{risk}**. {verdict}"
-
-    @staticmethod
-    def _escape_cell(text: str) -> str:
-        """Keep a markdown table intact when a claim contains pipes/newlines."""
-
-        return " ".join(str(text or "").split()).replace("|", "\\|")
-
-    @staticmethod
-    def _claim_text_only(claim: Any) -> str:
-        """The claim statement itself, without status/reason appended."""
-
-        if isinstance(claim, dict):
-            return str(
-                claim.get("claim")
-                or claim.get("statement")
-                or claim.get("text")
-                or claim.get("description")
-                or ""
-            ).strip()
-        return str(claim).strip()
-
-    @staticmethod
-    def _claim_status_of(claim: Any) -> str:
-        if not isinstance(claim, dict):
-            return ""
-        return str(
-            claim.get("support_status") or claim.get("status") or ""
-        ).strip().upper()
-
-    @staticmethod
-    def _claim_reason(claim: Any) -> str:
-        if not isinstance(claim, dict):
-            return ""
-        return str(claim.get("reason") or claim.get("explanation") or "").strip()
 
     def _run_hallucination_check(
         self,

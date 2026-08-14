@@ -11,7 +11,7 @@
 
 ## 1. Dư nợ và hạn mức hiện tại
 
-| Tổ chức tín dụng | Loại hình cấp tín dụng | Hạn mức | Dư nợ hiện tại | Tỷ lệ sử dụng | Kỳ hạn |
+| Tổ chức tín dụng | Loại hình cấp tín dụng | Hạn mức (tỷ VNĐ) | Dư nợ hiện tại (tỷ VNĐ) | Tỷ lệ sử dụng | Kỳ hạn |
 |---|---|---:|---:|---:|---|
 
 **Nhận định**:
