@@ -25,7 +25,7 @@ from src.types import SPECIALIST_DOCUMENT_AGENTS
 from src.utils.common import normalize_text
 
 
-MATRIX_PATH = Path(__file__).resolve().parents[1] / "matrix" / "document_matrix.yaml"
+MATRIX_PATH = Path(__file__).resolve().parent / "document_matrix.yaml"
 
 RELEVANCE_LEVELS = ("R", "O")
 

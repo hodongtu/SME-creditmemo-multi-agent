@@ -48,13 +48,14 @@ all agent logic lives in the importable package [src/](src/).
 |---|---|
 | [src/agents/supervisor.py](src/agents/supervisor.py) | **Orchestrator** — builds and runs the LangGraph, decides route + workflow mode |
 | [src/agents/document_classification.py](src/agents/document_classification.py) | Document discovery & classification (rule-based + LLM fallback) |
+| [src/matrix/document_matrix.py](src/matrix/document_matrix.py) | Loads `document_matrix.yaml` — which agents consume which document type |
 | [src/agents/specialist.py](src/agents/specialist.py) | The specialist agents + Credit Memo composer |
 | [src/agents/financial_ratio_calculator.py](src/agents/financial_ratio_calculator.py) | Deterministic financial-ratio computation |
 | [src/agents/guardrails.py](src/agents/guardrails.py) | Input guardrail, web search, hallucination judge |
 | [src/config.py](src/config.py) | LLM client factory + runtime `Config` |
-| [src/tools.py](src/tools.py) | Database tools (T24, CIC/bureau…) attached to specialist agents |
+| [src/agents/tools.py](src/agents/tools.py) | Database tools (T24, CIC/bureau…) attached to specialist agents |
 | [src/types.py](src/types.py) | Shared types (`AgentName`, `WorkflowMode`, `ClassifiedDocument`…) |
-| [src/tracing.py](src/tracing.py) | Wraps the workflow in a single LangSmith run (optional) |
+| [src/agents/tracing.py](src/agents/tracing.py) | Wraps the workflow in a single LangSmith run (optional) |
 | [src/utils/](src/utils/) | OCR, document extraction, money formatting (đồng → tỷ VNĐ), notebook helpers |
 | [src/templates/](src/templates/) | Markdown output templates for each specialist agent |
 
@@ -206,7 +207,7 @@ Applied to **every** branch before returning the result:
 Each specialist is a subclass of `SpecialistAgent`
 ([specialist.py](src/agents/specialist.py)), built with `create_agent` (LangChain) and attached to:
 - Its own **output template** (Markdown in [src/templates/](src/templates/)).
-- Its own **database tools** by group ([tools.py](src/tools.py)):
+- Its own **database tools** by group ([tools.py](src/agents/tools.py)):
   `FINANCIAL_DATABASE_TOOLS`, `BUSINESS_ACTIVITY_DATABASE_TOOLS`,
   `CREDIT_RELATIONSHIP_DATABASE_TOOLS` (T24, CIC/bureau), `RISK_ASSESSMENT_DATABASE_TOOLS`.
 
@@ -227,15 +228,18 @@ Each specialist is a subclass of `SpecialistAgent`
 ├── local_underwriting_agents.ipynb   # Entry point — driver notebook
 ├── src/
 │   ├── config.py                     # LLM factory + Config
-│   ├── tools.py                      # Database tools
 │   ├── types.py                      # Shared types
-│   ├── tracing.py                    # LangSmith tracing
 │   ├── agents/
 │   │   ├── supervisor.py             # LangGraph orchestrator
 │   │   ├── document_classification.py
 │   │   ├── specialist.py
 │   │   ├── financial_ratio_calculator.py
-│   │   └── guardrails.py
+│   │   ├── guardrails.py
+│   │   ├── tools.py                  # Database tools
+│   │   └── tracing.py                # LangSmith tracing
+│   ├── matrix/
+│   │   ├── document_matrix.py        # Loads document_matrix.yaml
+│   │   └── document_matrix.yaml      # Document type -> consuming agents
 │   ├── utils/
 │   │   ├── ocr.py                    # PDF → text (pypdfium2 + Tesseract)
 │   │   ├── extractors.py             # PDF/CSV/XLSX

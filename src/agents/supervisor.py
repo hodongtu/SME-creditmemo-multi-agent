@@ -52,7 +52,7 @@ from src.agents.document_classification import (
     discover_documents,
     rule_classify_document,
 )
-from src.agents.document_matrix import (
+from src.matrix.document_matrix import (
     agent_relevance_for_type,
     get_type,
     is_bctc_type,

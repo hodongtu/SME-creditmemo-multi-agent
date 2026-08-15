@@ -2,7 +2,7 @@
 
 Classification answers one question: *what kind of document is this* — a matrix
 row id, not an agent. Turning that into "which agents consume it" is the
-matrix's job (src/agents/document_matrix.py), so routing is a declared business
+matrix's job (src/matrix/document_matrix.py), so routing is a declared business
 rule rather than a by-product of keyword thresholds.
 """
 
@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from src.agents.document_matrix import (
+from src.matrix.document_matrix import (
     describe_types_for_prompt,
     document_type_keywords,
     load_matrix,
