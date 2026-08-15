@@ -239,6 +239,10 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           RISK_ASSESSMENT_AGENT: R
+          # Credit relationship reads this too, to fill the debt/revenue chart's
+          # VAT line — it emits a ```vat-doanh-thu block for supervisor.py to
+          # parse, see credit-relationship-guidance.md.
+          CREDIT_RELATIONSHIP_AGENT: R
         keywords:
           - "to khai thue gtgt"
           - "to khai gia tri gia tang"

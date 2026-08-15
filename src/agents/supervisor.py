@@ -78,10 +78,7 @@ from src.agents.cic_r21_extraction import (
     build_cic_r21_extraction_chain,
     extract_cic_r21_structured_data,
 )
-from src.agents.vat_series_stub import (
-    STUB_NOTICE as VAT_STUB_NOTICE,
-    vat_series_for_months,
-)
+from src.agents.vat_revenue import parse_vat_revenue_block, strip_vat_revenue_block
 from src.agents.industry_knowledge import (
     load_industry_manifest,
     load_industry_reference_text,
@@ -306,6 +303,9 @@ class Supervisor:
     # The debt/revenue chart inserted into the credit-relationship section.
     DEBT_CHART_TITLE = "Diễn biến dư nợ và doanh thu VAT 12 tháng gần nhất"
     DEBT_CHART_COLUMNS = ("Tổng dư nợ (CIC)", "Doanh thu VAT")
+    VAT_ESTIMATE_NOTE = (
+        "Một số tháng là số ước lượng, chia đều từ doanh thu khai theo quý."
+    )
     # Where to anchor it, most specific first. The composer renumbers headings
     # when it merges the five specialist reports, so matching on an exact
     # "## 2. ..." string would work in a single-agent run and quietly fail in a
@@ -1895,6 +1895,13 @@ class Supervisor:
         # bullet is correct on the page even if a specialist forgot the blank
         # line the prompt asks for.
         response = ensure_blank_line_before_lists(response)
+        # Credit relationship's own analysis call transcribes VAT revenue into
+        # a ```vat-doanh-thu block for _build_debt_chart_block to read further
+        # down (see vat_revenue.py) — an internal data channel, never meant
+        # for the reader. Parsed from sub_agent_outputs below, so stripping it
+        # here only guards against the composer having copied it verbatim
+        # into a merged multi-agent response.
+        response = strip_vat_revenue_block(response)
 
         if self.guardrails:
             allowed, checked_response = self.guardrails.check_output(
@@ -1934,7 +1941,7 @@ class Supervisor:
         # thousands-grouped integers and every value here carries two decimals,
         # and both assertion checks stay silent on it. So this ordering is a
         # guard against a future change to either side, not a fix for a live bug.
-        chart_block = self._build_debt_chart_block(documents)
+        chart_block = self._build_debt_chart_block(documents, sub_agent_outputs)
         if chart_block:
             response, anchor = self._insert_debt_chart(response, chart_block)
             steps.append(
@@ -2451,16 +2458,17 @@ class Supervisor:
     def _build_debt_chart_block(
         cls,
         documents: list[ClassifiedDocument],
+        sub_agent_outputs: dict[str, str],
     ) -> str:
         """Build the ```linechart block from extracted CIC data, "" when there is none.
 
-        Written here rather than by the agent on purpose: these are 24 figures
-        traced to section 2.6 of a named file, and a model asked to retype them
-        into a chart is a model given 24 chances to invent one.
-
-        Revenue is still the placeholder series — see vat_series_stub — so the
-        caption naming it as invented is attached at the same time as the data,
-        never separately.
+        The debt series is written here rather than by the agent on purpose:
+        these are 24 figures traced to section 2.6 of a named file, and a
+        model asked to retype them into a chart is a model given 24 chances to
+        invent one. Revenue keeps that same guarantee by a different route —
+        it comes from Credit Relationship's own ```vat-doanh-thu block (see
+        vat_revenue.py), so the number that reaches the chart is still a
+        straight transcription, not something re-typed into a table cell.
         """
 
         series = merge_debt_series(
@@ -2475,20 +2483,34 @@ class Supervisor:
 
         months = [row["thang"] for row in series]
         debt = [row["du_no"] for row in series]
-        revenue = vat_series_for_months(months)
-        divisor, unit = pick_unit(
-            [value for value in debt + revenue if value is not None]
+
+        vat_series = parse_vat_revenue_block(
+            sub_agent_outputs.get("CREDIT_RELATIONSHIP_AGENT", "")
         )
+        revenue = [vat_series.get(month, (None, False))[0] for month in months]
+        estimated = any(vat_series.get(month, (None, False))[1] for month in months)
+
+        has_revenue = any(value is not None for value in revenue)
+        values_for_unit = list(debt)
+        if has_revenue:
+            values_for_unit += [value for value in revenue if value is not None]
+        divisor, unit = pick_unit(values_for_unit)
+
+        columns = [cls.DEBT_CHART_COLUMNS[0]]
+        series_values = [[value / divisor for value in debt]]
+        if has_revenue:
+            columns.append(cls.DEBT_CHART_COLUMNS[1])
+            series_values.append(
+                [None if value is None else value / divisor for value in revenue]
+            )
+
         return build_linechart_block(
             title=cls.DEBT_CHART_TITLE,
             unit=unit,
-            columns=list(cls.DEBT_CHART_COLUMNS),
+            columns=columns,
             labels=months,
-            series=[
-                [value / divisor for value in debt],
-                [None if value is None else value / divisor for value in revenue],
-            ],
-            note=VAT_STUB_NOTICE,
+            series=series_values,
+            note=cls.VAT_ESTIMATE_NOTE if estimated else "",
         )
 
     @classmethod

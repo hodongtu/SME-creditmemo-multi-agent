@@ -29,8 +29,33 @@ TRỌNG TÂM:
   - Tháng nào thiếu số liệu báo cáo thì nói rõ là thiếu, KHÔNG coi là dư nợ bằng 0 và
     KHÔNG suy diễn giá trị cho tháng đó.
   - Chỉ nhận xét trong phạm vi các tháng có trong dữ liệu, không mở rộng ra ngoài.
-  - Số liệu doanh thu VAT hiện là SỐ GIẢ LẬP để minh hoạ, chưa trích từ hồ sơ. Khi nhận
-    xét về doanh thu phải ghi rõ điều này; TUYỆT ĐỐI không dùng nó làm căn cứ kết luận.
+  - Doanh thu VAT trên biểu đồ nay lấy từ tờ khai thuế GTGT thật trong hồ sơ (xem
+    khối ```vat-doanh-thu``` bên dưới) — dùng được làm căn cứ đối chiếu dư nợ/doanh
+    thu như bình thường. Hồ sơ không có tờ khai GTGT thì biểu đồ chỉ còn dư nợ,
+    không suy diễn doanh thu. Tháng lấy từ tờ khai QUÝ (chia đều cho 3 tháng) là số
+    ƯỚC LƯỢNG — khi nhận xét về tháng đó phải nói rõ.
+
+KHỐI DỮ LIỆU VAT (```vat-doanh-thu```):
+- Hồ sơ có tài liệu tờ khai thuế GTGT (`to_khai_thue_gtgt`) thì NGAY SAU phần Nhận
+  định của mục "Diễn biến dư nợ 12 tháng", xuất thêm một khối:
+  ```vat-doanh-thu
+  01/2025: 31400000000
+  02/2025: 28750000000
+  Q1/2026: 85000000000 (quy)
+  ```
+  Mỗi dòng một kỳ khai: `MM/YYYY: <số đồng>` cho tờ khai THÁNG, hoặc
+  `QN/YYYY: <số đồng> (quy)` cho tờ khai QUÝ — đọc đúng loại kỳ ghi trên tờ khai,
+  KHÔNG tự quy đổi tháng thành quý hay ngược lại. Nhiều tờ khai trong hồ sơ thì
+  liệt kê hết các kỳ đọc được trong cùng một khối.
+- Lấy đúng dòng TỔNG DOANH THU hàng hoá, dịch vụ bán ra chịu thuế GTGT trên tờ khai
+  — KHÔNG lấy số thuế GTGT phải nộp, KHÔNG lấy doanh thu không chịu thuế. Dấu ","
+  trong số là phân cách hàng nghìn, không phải thập phân.
+- Đây là khối DỮ LIỆU NỘI BỘ để hệ thống đọc lại và vẽ biểu đồ — không phải nội
+  dung trình bày cho người đọc, không cần in đậm, không cần gắn mã [^N] lên chính
+  khối này (số liệu vẫn nên được nhắc lại bằng văn xuôi có [^N] trong Nhận định
+  như citation bình thường).
+- Không có tài liệu tờ khai GTGT nào trong hồ sơ thì KHÔNG xuất khối này — không
+  bịa số, không để khối rỗng.
 - Đối chiếu thông tin nội bộ (T24) với thông tin từ CIC/bureau; nêu rõ mọi chênh lệch.
 - Dấu hiệu cảnh báo: nợ quá hạn, đòn bẩy cao trên nhiều ngân hàng, nhiều khoản vay
   song song, cơ cấu lại nợ, hoặc bản ghi bureau không nhất quán.
