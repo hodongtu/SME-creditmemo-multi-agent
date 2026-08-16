@@ -3,8 +3,7 @@
 A **multi-agent** system for SME (small & medium enterprise) credit underwriting, built on
 **LangGraph**. It ingests customer files (financial statements, detailed ledgers, VAT
 declarations, bank statements…), then automatically runs OCR → document classification →
-specialist agents → and synthesizes a complete **Credit Memo**, with a hallucination check and
-guardrails along the way.
+specialist agents → and synthesizes a complete **Credit Memo**, with guardrails along the way.
 
 The entry point is the notebook [local_underwriting_agents.ipynb](local_underwriting_agents.ipynb);
 all agent logic lives in the importable package [src/](src/).
@@ -34,10 +33,9 @@ all agent logic lives in the importable package [src/](src/).
 - **5 specialist agents** + **1 composer** that assembles the credit memo.
 - **Deterministic financial-ratio computation** (`FinancialRatioCalculator`) — figures are
   computed in code, not "made up" by the LLM.
-- **Multi-layer guardrails**: input check, evidence-gap check, and a hallucination judge on the
-  final output.
+- **Multi-layer guardrails**: input check and evidence-gap check.
 - **Web search enrichment** (optional, via Tavily) and **LangSmith tracing** (optional).
-- **Per-role models**: each task type (decision, analysis, memo composition, hallucination…) is
+- **Per-role models**: each task type (decision, analysis, memo composition, extraction…) is
   bound to its own model, configured via environment variables.
 
 ---
@@ -51,7 +49,7 @@ all agent logic lives in the importable package [src/](src/).
 | [src/matrix/document_matrix.py](src/matrix/document_matrix.py) | Loads `document_matrix.yaml` — which agents consume which document type |
 | [src/agents/specialist.py](src/agents/specialist.py) | The specialist agents + Credit Memo composer |
 | [src/agents/financial_ratio_calculator.py](src/agents/financial_ratio_calculator.py) | Deterministic financial-ratio computation |
-| [src/agents/guardrails.py](src/agents/guardrails.py) | Input guardrail, web search, hallucination judge |
+| [src/agents/guardrails.py](src/agents/guardrails.py) | Input/output safety guardrail, web search |
 | [src/config.py](src/config.py) | LLM client factory + runtime `Config` |
 | [src/agents/tools.py](src/agents/tools.py) | Database tools (T24, CIC/bureau…) attached to specialist agents |
 | [src/types.py](src/types.py) | Shared types (`AgentName`, `WorkflowMode`, `ClassifiedDocument`…) |
@@ -87,7 +85,7 @@ flowchart TD
     R --> W5[single_risk_assessment]
     R --> W6[single_credit_proposal]
     R --> W7[full_credit_memo]
-    W1 & W2 & W3 & W4 & W5 & W6 & W7 --> FIN[_finalize<br/>hallucination check + format tỷ VNĐ]
+    W1 & W2 & W3 & W4 & W5 & W6 & W7 --> FIN[_finalize<br/>format tỷ VNĐ]
     FIN --> ENDN([END])
 ```
 
@@ -178,7 +176,7 @@ This is the highest-value branch. Execution order in
                                              ▼
                     CREDIT_MEMO_COMPOSER  (synthesizes everything into the memo)
                                              ▼
-                              _finalize → hallucination check → format tỷ VNĐ
+                              _finalize → format tỷ VNĐ
 ```
 
 1. **Four analysis agents run in parallel** — Business Activity, Credit Relationship, Financial
@@ -194,13 +192,10 @@ This is the highest-value branch. Execution order in
 
 Applied to **every** branch before returning the result:
 
-- **Hallucination check** — when enabled (`RUN_HALLUCINATION_CHECK=true`),
-  `HallucinationGuardrail` (LLM `MODEL_HALLUCINATION`, temperature 0) cross-checks the output
-  against the document evidence and scores `hallucination_risk` and `final_action` (PASS / …).
 - **Money formatting** — all VNĐ figures are converted to **billions of VNĐ (tỷ VNĐ)** for
   readability (display only).
 - Returns the full state: `response`, `agent_name`, `steps`, `document_classifications`,
-  `agent_outputs`, `hallucination_check`…
+  `agent_outputs`…
 
 ### The specialist agents
 
@@ -312,7 +307,7 @@ MODEL_DECISION=gpt-4o-mini        # route/workflow decision
 MODEL_DOCUMENT=gpt-4o-mini        # document classification (LLM fallback)
 MODEL_ANALYZER=gpt-4o-mini        # specialist agents
 MODEL_CREDIT_MEMO=gpt-4o-mini     # memo composition
-MODEL_HALLUCINATION=gpt-4o-mini   # hallucination judge / input guardrail
+MODEL_GUARDRAIL=gpt-4o-mini       # input/output safety guardrail
 MODEL_ECONOMY=gpt-4o-mini         # conversation
 ```
 
@@ -327,7 +322,6 @@ OPENAI_API_BASE=https://api.openai.com/v1   # change to use a compatible endpoin
 
 ```env
 RUN_SAFETY_GUARDRAILS=false   # input guardrail
-RUN_HALLUCINATION_CHECK=false # hallucination judge on output
 RUN_WEB_SEARCH=false          # Tavily enrichment (needs TAVILY_API_KEY)
 ```
 
@@ -348,16 +342,16 @@ OCR_LANG=vie+eng  OCR_DPI=...  OCR_PSM=...  OCR_CACHE_DIR=...
 disabled (`max_bucket_size=1`), which is what makes exceeding the quota impossible instead of merely
 unlikely: the four parallel specialists queue on the limiter rather than firing at once.
 
-Set the value **below** your provider's real quota. One full credit memo run costs about **10 LLM
-calls** — four parallel specialists, risk assessment, the memo composer, the hallucination judge, one
-BCTC extraction per financial statement, and one per document the keyword pass was unsure about. At
-9/minute that means a full run cannot finish in under a minute; that is the price of never seeing a
-429. Every run reports its own numbers under `result["rate_limit"]` and in the step log, so a
-throttled run can be told apart from a stuck one.
+Set the value **below** your provider's real quota. One full credit memo run costs about **9 LLM
+calls** — four parallel specialists, risk assessment, the memo composer, one BCTC extraction per
+financial statement, and one per document the keyword pass was unsure about. At 9/minute that means
+a full run cannot finish in under a minute; that is the price of never seeing a 429. Every run
+reports its own numbers under `result["rate_limit"]` and in the step log, so a throttled run can be
+told apart from a stuck one.
 
-To go faster: raise the limit if your quota allows, set `RUN_HALLUCINATION_CHECK=false` (one call
-less), name documents clearly so they resolve on the keyword pass instead of costing a
-classification call, or run a single agent (about 3 calls) instead of the full memo.
+To go faster: raise the limit if your quota allows, name documents clearly so they resolve on the
+keyword pass instead of costing a classification call, or run a single agent (about 3 calls) instead
+of the full memo.
 
 **Tracing (optional):** `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`.
 
@@ -392,4 +386,3 @@ Each run creates a `logs/<testcase>_<timestamp>/` directory containing:
 | `result.json` | Full state (response, route, steps…) |
 | `agent_outputs.json` | Raw output of each agent |
 | `document_classifications.json` | Classification result per document |
-| `hallucination_check.json` | Hallucination-check result |

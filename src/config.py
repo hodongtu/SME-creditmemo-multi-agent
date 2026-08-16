@@ -134,7 +134,8 @@ class Config:
     conversation_llm: Any = None
     analysis_llm: Any = None
     credit_memo_llm: Any = None
-    hallucination_llm: Any = None
+    # Powers LocalGuardrails' input/output safety checks (see guardrails.py).
+    guardrail_llm: Any = None
     bctc_extraction_llm: Any = None
     proposal_extraction_llm: Any = None
     cic_s10a_extraction_llm: Any = None
@@ -147,9 +148,6 @@ class Config:
     document_classifier_rule_confidence_threshold: float = 0.65
     enable_plan_and_execute: bool = True
     enable_self_ask_gap_analysis: bool = True
-    enable_hallucination_guardrail: bool = field(
-        default_factory=lambda: env_flag("RUN_HALLUCINATION_CHECK", "true")
-    )
     enable_safety_guardrails: bool = field(
         default_factory=lambda: env_flag("RUN_SAFETY_GUARDRAILS")
     )

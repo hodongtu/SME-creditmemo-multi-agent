@@ -1,7 +1,7 @@
 """Supervisor orchestration (extracted from the notebook cell 20).
 
 Canonical AI-agent workflow: routing, document prep/classification, gap analysis,
-memo workflow, finalize + hallucination + tỷ-VNĐ formatting. See docs/ARCHITECTURE.md.
+memo workflow, finalize + tỷ-VNĐ formatting. See docs/ARCHITECTURE.md.
 """
 
 from __future__ import annotations
@@ -94,7 +94,6 @@ from src.agents.specialist import (
     RiskAssessment,
 )
 from src.agents.guardrails import (
-    HallucinationGuardrail,
     LocalGuardrails,
     WebSearchProcessorAgent,
 )
@@ -346,13 +345,8 @@ class Supervisor:
     def __init__(self, config: Config):
         self.config = config
         self.guardrails = (
-            LocalGuardrails(config.hallucination_llm)
+            LocalGuardrails(config.guardrail_llm)
             if config.enable_safety_guardrails
-            else None
-        )
-        self.hallucination_guardrail = (
-            HallucinationGuardrail(config.hallucination_llm)
-            if config.enable_hallucination_guardrail
             else None
         )
         self.web_search_agent = (
@@ -651,10 +645,6 @@ class Supervisor:
                 decision,
                 documents,
                 {},
-                {
-                    "status": "SKIPPED",
-                    "summary": "Required evidence is missing.",
-                },
                 execution_plan,
                 gap_analysis,
                 "",
@@ -1882,12 +1872,12 @@ class Supervisor:
         gap_analysis: dict[str, Any],
         steps: list[str],
     ) -> dict[str, Any]:
-        # First, so everything below reads a report whose citations already sit
-        # in one list at the end: the hallucination judge should not be scoring
-        # "[^cr1]: CIC.pdf, trang 2" as if it were a claim about the customer.
-        # Returns the audit too — gathering the definitions collapses repeated
-        # labels, so a checker running afterwards could no longer see that two
-        # agents had claimed the same one.
+        # First, so everything below (chart insertion, footnote/template-leak
+        # findings) reads a report whose citations already sit in one list at
+        # the end, not scattered mid-section. Returns the audit too — gathering
+        # the definitions collapses repeated labels, so a checker running
+        # afterwards could no longer see that two agents had claimed the same
+        # one.
         response, footnote_audit = consolidate_footnotes(response)
         # Same reasoning as above, for a different renderer quirk: a bullet
         # list glued to the line above it with no blank line renders as a
@@ -1912,20 +1902,8 @@ class Supervisor:
                 agent_name = "OUTPUT_GUARDRAILS"
             response = checked_response
 
-        hallucination = self._run_hallucination_check(
-            input_text,
-            response,
-            decision,
-            documents,
-            web_context,
-            history_context,
-            sub_agent_outputs,
-        )
-        risk = hallucination.get("hallucination_risk", "UNKNOWN")
-        action = hallucination.get("final_action", "PASS")
-        steps.append(f"Hallucination check: {risk}/{action}")
-        # Convert all VNĐ amounts to tỷ VNĐ for display; the hallucination
-        # judge already ran on the raw-number response above.
+        # Convert all VNĐ amounts to tỷ VNĐ for display, after the output
+        # safety check above has already seen the raw-number response.
         response = convert_amounts_in_text(response)
         # Prompt rules are not enforcement: report the citations that did not
         # resolve, rather than quietly dropping or inventing them.
@@ -1977,7 +1955,6 @@ class Supervisor:
             decision,
             documents,
             sub_agent_outputs,
-            hallucination,
             execution_plan,
             gap_analysis,
             web_context,
@@ -2026,34 +2003,6 @@ class Supervisor:
         ]
         lines += [f"- {finding}" for finding in findings]
         return "\n".join(lines) + "\n"
-
-    def _run_hallucination_check(
-        self,
-        input_text: str,
-        response: str,
-        decision: dict[str, Any],
-        documents: list[ClassifiedDocument],
-        web_context: str,
-        history_context: str,
-        sub_agent_outputs: dict[str, str],
-    ) -> dict[str, Any]:
-        if not self.config.enable_hallucination_guardrail:
-            return {"status": "DISABLED"}
-        return self.hallucination_guardrail.check(
-            input_text,
-            response,
-            decision["route"],
-            evidence_documents=[asdict(doc) for doc in documents],
-            web_context=web_context,
-            history_context=history_context,
-            sub_agent_outputs=sub_agent_outputs,
-            # The agent saw these deterministic figures; the judge must too,
-            # otherwise correctly-derived ratios look unsupported.
-            metrics_block=self._build_financial_metrics_block(
-                documents,
-                "FINANCIAL_ANALYSIS_AGENT",
-            ),
-        )
 
     def _build_user_input(
         self,
@@ -2854,7 +2803,6 @@ class Supervisor:
         decision: dict[str, Any] | None = None,
         documents: list[ClassifiedDocument] | None = None,
         sub_agent_outputs: dict[str, str] | None = None,
-        hallucination_check: dict[str, Any] | None = None,
         execution_plan: dict[str, Any] | None = None,
         gap_analysis: dict[str, Any] | None = None,
         web_context: str = "",
@@ -2890,7 +2838,6 @@ class Supervisor:
             # block) so a finished run can be audited afterwards.
             "financial_metrics": financial_metrics or {},
             "sub_agent_outputs": sub_agent_outputs or {},
-            "hallucination_check": hallucination_check or {},
             "execution_plan": execution_plan or {},
             "gap_analysis": gap_analysis or {},
             "web_context": web_context,

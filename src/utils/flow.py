@@ -81,7 +81,6 @@ def get_flow_mermaid() -> str:
         risk_assessment["Run RISK_ASSESSMENT_AGENT<br/>with financial + business outputs"]
 
         output_guardrails["Output guardrails<br/>sanitize / validate response"]
-        hallucination_judge["Evidence-grounded hallucination judge<br/>extract claims + verify against docs, web context, history"]
         reflection_policy["Reflection policy<br/>PASS / WARN / REQUIRE_VALIDATION / BLOCK"]
         reflection_action{"Requires validation or block?"}
         human_validation_flag["Set needs_human_validation<br/>for high-risk output"]
@@ -157,7 +156,7 @@ def get_flow_mermaid() -> str:
         business --> output_guardrails
         risk_assessment --> output_guardrails
 
-        output_guardrails --> hallucination_judge --> reflection_policy --> reflection_action
+        output_guardrails --> reflection_policy --> reflection_action
         reflection_action -->|Yes| human_validation_flag --> save_response_cache
         reflection_action -->|No| save_response_cache
         save_response_cache --> sqlite_response_cache

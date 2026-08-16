@@ -7,7 +7,7 @@ edit the right one.
 
 `notebooks/local_underwriting_agents.ipynb` is the **single source of truth** for the AI-agent
 underwriting workflow. All new work happens here. It orchestrates the full pipeline (OCR →
-document classification → specialist agents → credit memo → hallucination judge) inline.
+document classification → specialist agents → credit memo) inline.
 
 It depends on a small set of **shared, importable modules** — edit these, not their legacy twins:
 
