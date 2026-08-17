@@ -14,6 +14,7 @@ import json
 import os
 import re
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
@@ -55,13 +56,36 @@ def _ocr_config() -> dict[str, object]:
         # design (thin straight rules vs. character strokes), so it stays on
         # even when the rest of ``preprocess`` is off.
         "deline": os.getenv("OCR_DELINE", "1") != "0",
-        # A page rotated a full 90/180/270° reads as near-random characters,
-        # not merely lower-quality OCR — Tesseract is decoding along the wrong
-        # axis entirely. On by default like deline, and for the same reason:
-        # measured to have no false positives on an already-correct page (the
-        # detector returns 0 and nothing happens), so there is no scan-quality
-        # tradeoff to opt into.
-        "auto_rotate": os.getenv("OCR_AUTO_ROTATE", "1") != "0",
+        # OFF by default, and the reason is a measured split rather than a
+        # verdict on the detector as a whole. Measured on testing/samples:
+        #
+        #   180° verdicts: 4 of 4 wrong. On BCTC_VVS_2025_short.pdf the detector
+        #     asked to flip 4 of 11 upright pages, turning "Công ty cổ phần Đầu
+        #     tư Phát triển May Việt Nam" into "é fy BA uaẩn8h) { FTN LAAN)".
+        #   90° verdicts: 4 of 4 right. On BCTC_VVS_2024.pdf pages 29-31 and 33
+        #     are genuinely sideways — 0 Vietnamese keywords upright, 10-25 once
+        #     rotated.
+        #
+        # So leaving this off is a real trade: it stops the 180° damage and
+        # costs the 90° repair. Those four pages of BCTC_VVS_2024.pdf reach the
+        # agents as noise while it is off. Enable it for a scan set where pages
+        # are genuinely sideways and the 180° risk is worth accepting.
+        #
+        # The earlier claim here — "measured to have no false positives on an
+        # already-correct page" — is the one thing now known to be false; it is
+        # what kept this on while it was corrupting a third of a statement.
+        #
+        # Speed is NOT the argument either way: once pages OCR concurrently the
+        # extra Tesseract pass costs ~2.2s on a 43-page file (24.0s vs 21.8s).
+        "auto_rotate": os.getenv("OCR_AUTO_ROTATE", "0") != "0",
+        # OCR is the pipeline's slowest step and Tesseract runs out-of-process,
+        # so threads scale it nearly linearly. Bounded rather than unbounded:
+        # each worker holds a 300dpi page (~25 MB) plus its own tesseract
+        # process.
+        "max_workers": max(
+            1,
+            int(os.getenv("OCR_MAX_WORKERS", "0")) or min(8, os.cpu_count() or 1),
+        ),
     }
 
 
@@ -395,19 +419,99 @@ def _cache_key(pdf_path: str, settings: dict[str, object]) -> str:
 # ---------------------------------------------------------------------------
 # PDF rasterization (pypdfium2 — no system poppler dependency)
 # ---------------------------------------------------------------------------
-def _render_pdf_pages(pdf_path: str, dpi: int) -> list[Image.Image]:
-    """Render each PDF page to a PIL image using the bundled pdfium engine."""
+def _render_pdf_pages(
+    pdf_path: str,
+    dpi: int,
+    start: int = 0,
+    count: int | None = None,
+) -> list[Image.Image]:
+    """Render a slice of PDF pages to PIL images using the bundled pdfium engine.
+
+    Rendering a *slice* rather than the whole document is what keeps memory
+    bounded: a 300dpi page is ~25 MB, so the 87-page statement in
+    testing/samples would need ~2.1 GB if every page were held at once. Callers
+    render one batch, OCR it, and drop it before asking for the next.
+    """
+
     scale = dpi / PDF_POINTS_PER_INCH
     document = pdfium.PdfDocument(pdf_path)
     try:
+        stop = len(document) if count is None else min(start + count, len(document))
         images = []
-        for index in range(len(document)):
+        for index in range(start, stop):
             page = document[index]
             bitmap = page.render(scale=scale)
             images.append(bitmap.to_pil().convert("RGB"))
         return images
     finally:
         document.close()
+
+
+def _pdf_page_count(pdf_path: str) -> int:
+    document = pdfium.PdfDocument(pdf_path)
+    try:
+        return len(document)
+    finally:
+        document.close()
+
+
+def _ocr_page(
+    image: Image.Image,
+    settings: dict[str, object],
+    lang: str,
+    tess_config: str,
+    timeout: int | None,
+    page_number: int,
+) -> str:
+    """Everything one page needs, from raw render to cleaned text.
+
+    Split out of ocr_pdf so the pages can run concurrently: Tesseract does its
+    work in a subprocess, so threads here really do run in parallel rather than
+    taking turns on the GIL.
+    """
+
+    working = image
+    # First of all the fixes, because every step after this assumes the page's
+    # horizontal/vertical axes match the reading direction: a ruled-line kernel
+    # or a small-skew estimate is meaningless applied to a page still rotated a
+    # quarter turn. Off by default — see the auto_rotate note in _ocr_config.
+    if settings["auto_rotate"]:
+        angle = _detect_rotation_angle(working)
+        if angle:
+            working = _apply_rotation(working, angle)
+            print(
+                f"[ocr_pdf] WARNING: trang {page_number} bị xoay {angle}°, "
+                "đã tự động chỉnh — kiểm tra file gốc nếu kết quả OCR vẫn "
+                "bất thường."
+            )
+    # Ahead of the opt-in ``preprocess`` bundle and unconditional on it: this
+    # targets table rules, not scan noise, so it runs on the untouched render
+    # even when nothing else does. Applied before deskew/denoise/binarize —
+    # line detection assumes axis-aligned rules, so a page that also needs
+    # deskewing should have that run first in a later pass; these renders come
+    # straight from pdfium rather than a photographed scan, so skew is not the
+    # case this is tuned for.
+    if settings["deline"]:
+        gray = cv2.cvtColor(np.array(working.convert("RGB")), cv2.COLOR_RGB2GRAY)
+        working = Image.fromarray(_remove_ruled_lines(gray, int(settings["dpi"])))
+    prepared = (
+        preprocess_image(
+            working,
+            deskew=bool(settings["deskew"]),
+            denoise=bool(settings["denoise"]),
+            binarize=bool(settings["binarize"]),
+            upscale=float(settings["upscale"]),
+        )
+        if settings["preprocess"]
+        else working
+    )
+    if settings["layout"]:
+        text = image_to_layout_text(prepared, lang, tess_config, timeout)
+    else:
+        text = pytesseract.image_to_string(
+            prepared, lang=lang, config=tess_config, timeout=timeout
+        )
+    return clean_ocr_text(text)
 
 
 # ---------------------------------------------------------------------------
@@ -426,54 +530,41 @@ def ocr_pdf(pdf_path: str, timeout_seconds: float | None = None) -> str:
 
     tess_config = f"--oem {settings['oem']} --psm {settings['psm']}"
     lang = str(settings["lang"])
-    upscale = float(settings["upscale"])
+    workers = int(settings["max_workers"])
+    page_count = _pdf_page_count(pdf_path)
 
-    images = _render_pdf_pages(pdf_path, int(settings["dpi"]))
-
-    page_texts = []
-    for page_number, image in enumerate(images, start=1):
-        working = image
-        # First of all the fixes, because every step after this assumes the
-        # page's horizontal/vertical axes match the reading direction: a
-        # ruled-line kernel or a small-skew estimate is meaningless applied to
-        # a page still rotated a quarter turn.
-        if settings["auto_rotate"]:
-            angle = _detect_rotation_angle(working)
-            if angle:
-                working = _apply_rotation(working, angle)
-                print(
-                    f"[ocr_pdf] WARNING: trang {page_number} bị xoay {angle}°, "
-                    "đã tự động chỉnh — kiểm tra file gốc nếu kết quả OCR vẫn "
-                    "bất thường."
+    # One batch of pages in flight at a time: render it, OCR the batch across
+    # threads, then let the images go before rendering the next. Batching is
+    # what makes the concurrency affordable — the whole document rendered up
+    # front was ~2.1 GB on the largest statement in testing/samples, while a
+    # batch is workers x ~25 MB.
+    #
+    # executor.map preserves input order, which is load-bearing twice over:
+    # _strip_repeated_headers_footers compares page against page, and the
+    # "--- Page N ---" markers are what citations resolve a page number from.
+    page_texts: list[str] = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        for start in range(0, page_count, workers):
+            images = _render_pdf_pages(
+                pdf_path,
+                int(settings["dpi"]),
+                start=start,
+                count=workers,
+            )
+            page_texts.extend(
+                executor.map(
+                    lambda item: _ocr_page(
+                        item[1],
+                        settings,
+                        lang,
+                        tess_config,
+                        timeout,
+                        item[0],
+                    ),
+                    enumerate(images, start=start + 1),
                 )
-        # Ahead of the opt-in ``preprocess`` bundle and unconditional on it: this
-        # targets table rules, not scan noise, so it runs on the untouched render
-        # even when nothing else does. Applied before deskew/denoise/binarize —
-        # line detection assumes axis-aligned rules, so a page that also needs
-        # deskewing should have that run first in a later pass; these renders
-        # come straight from pdfium rather than a photographed scan, so skew is
-        # not the case this is tuned for.
-        if settings["deline"]:
-            gray = cv2.cvtColor(np.array(working.convert("RGB")), cv2.COLOR_RGB2GRAY)
-            working = Image.fromarray(_remove_ruled_lines(gray, int(settings["dpi"])))
-        prepared = (
-            preprocess_image(
-                working,
-                deskew=bool(settings["deskew"]),
-                denoise=bool(settings["denoise"]),
-                binarize=bool(settings["binarize"]),
-                upscale=upscale,
             )
-            if settings["preprocess"]
-            else working
-        )
-        if settings["layout"]:
-            text = image_to_layout_text(prepared, lang, tess_config, timeout)
-        else:
-            text = pytesseract.image_to_string(
-                prepared, lang=lang, config=tess_config, timeout=timeout
-            )
-        page_texts.append(clean_ocr_text(text))
+            del images
 
     page_texts = _strip_repeated_headers_footers(page_texts)
     full_text = "".join(

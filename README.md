@@ -374,7 +374,20 @@ LLM_MAX_CONCURRENCY=3          # specialists run in parallel in full_credit_memo
 LLM_TIMEOUT_SECONDS=60
 LLM_ANALYZE_TIMEOUT_SECONDS=...
 OCR_LANG=vie+eng  OCR_DPI=...  OCR_PSM=...  OCR_CACHE_DIR=...
+OCR_MAX_WORKERS=              # pages OCR'd at once; empty = min(8, CPU count)
+OCR_AUTO_ROTATE=0             # fix sideways scans; off by default, see below
 ```
+
+**OCR is the slowest step in a run**, and pages are OCR'd concurrently because Tesseract works
+out-of-process — a 43-page statement in `testing/samples` goes from **96s to 22s** at 8 workers.
+Pages are rendered in batches of `OCR_MAX_WORKERS` rather than all at once, which also keeps
+memory flat: a 300dpi page is ~25 MB, so an 87-page file would otherwise hold ~2.1 GB.
+
+`OCR_AUTO_ROTATE` is off because the detector's accuracy splits by angle, measured on the
+sample set: every **90°** verdict was correct (4/4 — genuinely sideways pages), every **180°**
+verdict was wrong (4/4 — upright pages flipped into unreadable noise). Off trades away the 90°
+repair to stop the 180° damage. Turn it on for a document set that really is sideways; it costs
+about 2.2s per 43 pages now that pages run in parallel.
 
 **Staying under a provider rate limit.** All seven LLM clients share **one**
 `InMemoryRateLimiter` (`shared_rate_limiter()` in [src/config.py](src/config.py)), so
