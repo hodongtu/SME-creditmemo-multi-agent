@@ -301,6 +301,10 @@ class Supervisor:
 
     # The debt/revenue chart inserted into the credit-relationship section.
     DEBT_CHART_TITLE = "Diễn biến dư nợ và doanh thu VAT 12 tháng gần nhất"
+    # Used when the credit-relationship agent produced no VAT revenue block, so
+    # the chart carries the debt column alone. A title naming a series the chart
+    # does not draw reads as missing data rather than data that was never claimed.
+    DEBT_CHART_TITLE_DEBT_ONLY = "Diễn biến dư nợ 12 tháng gần nhất"
     DEBT_CHART_COLUMNS = ("Tổng dư nợ (CIC)", "Doanh thu VAT")
     VAT_ESTIMATE_NOTE = (
         "Một số tháng là số ước lượng, chia đều từ doanh thu khai theo quý."
@@ -1919,9 +1923,16 @@ class Supervisor:
         # thousands-grouped integers and every value here carries two decimals,
         # and both assertion checks stay silent on it. So this ordering is a
         # guard against a future change to either side, not a fix for a live bug.
-        chart_block = self._build_debt_chart_block(documents, sub_agent_outputs)
+        chart_block, chart_title = self._build_debt_chart_block(
+            documents,
+            sub_agent_outputs,
+        )
         if chart_block:
-            response, anchor = self._insert_debt_chart(response, chart_block)
+            response, anchor = self._insert_debt_chart(
+                response,
+                chart_block,
+                chart_title,
+            )
             steps.append(
                 "Inserted debt/revenue chart "
                 + (
@@ -2408,8 +2419,13 @@ class Supervisor:
         cls,
         documents: list[ClassifiedDocument],
         sub_agent_outputs: dict[str, str],
-    ) -> str:
-        """Build the ```linechart block from extracted CIC data, "" when there is none.
+    ) -> tuple[str, str]:
+        """Build the ```linechart block from extracted CIC data.
+
+        Returns ``(block, title)``, or ``("", "")`` when there is no chart to
+        draw. The title travels with the block because it varies with the data
+        (see DEBT_CHART_TITLE_DEBT_ONLY) and _insert_debt_chart needs the same
+        string for its fallback heading.
 
         The debt series is written here rather than by the agent on purpose:
         these are 24 figures traced to section 2.6 of a named file, and a
@@ -2420,6 +2436,18 @@ class Supervisor:
         straight transcription, not something re-typed into a table cell.
         """
 
+        # This chart is the credit-relationship section's content, and every
+        # caller hands over the *unfiltered* document list — so without this
+        # gate any run that merely had a CIC S10A file in the folder grew a debt
+        # chart, including single BUSINESS_ACTIVITY / FINANCIAL / CREDIT_PROPOSAL
+        # / RISK runs and even plain conversation answers. Those reports have no
+        # credit-relationship heading, so it landed at the very end of the page.
+        # Keyed on the agent's output rather than a route name because that is
+        # what the revenue series is read from below: the same condition that
+        # makes a chart meaningful also makes it complete.
+        if "CREDIT_RELATIONSHIP_AGENT" not in sub_agent_outputs:
+            return "", ""
+
         series = merge_debt_series(
             (doc.filename, doc.cic_s10a_extraction)
             for doc in documents
@@ -2428,7 +2456,7 @@ class Supervisor:
         # One point is a dot, not a trend. Below two the chart says nothing the
         # balance table does not already say better.
         if len(series) < 2:
-            return ""
+            return "", ""
 
         months = [row["thang"] for row in series]
         debt = [row["du_no"] for row in series]
@@ -2453,22 +2481,37 @@ class Supervisor:
                 [None if value is None else value / divisor for value in revenue]
             )
 
-        return build_linechart_block(
-            title=cls.DEBT_CHART_TITLE,
-            unit=unit,
-            columns=columns,
-            labels=months,
-            series=series_values,
-            note=cls.VAT_ESTIMATE_NOTE if estimated else "",
+        title = (
+            cls.DEBT_CHART_TITLE if has_revenue else cls.DEBT_CHART_TITLE_DEBT_ONLY
+        )
+        return (
+            build_linechart_block(
+                title=title,
+                unit=unit,
+                columns=columns,
+                labels=months,
+                series=series_values,
+                note=cls.VAT_ESTIMATE_NOTE if estimated else "",
+            ),
+            title,
         )
 
     @classmethod
-    def _insert_debt_chart(cls, response: str, block: str) -> tuple[str, str]:
+    def _insert_debt_chart(
+        cls,
+        response: str,
+        block: str,
+        title: str,
+    ) -> tuple[str, str]:
         """Place the chart under the credit-relationship heading.
 
         Returns ``(text, where)``; ``where`` names the anchor that matched so the
         step log can say whether the chart landed in its section or was appended
         as a fallback.
+
+        ``title`` is only used by that fallback, and is taken from the caller
+        rather than the class constant so the heading cannot promise a revenue
+        series the block itself leaves out.
 
         Appending is the last resort rather than the failure case: a chart at the
         end of the memo is worse than one in its section, but far better than a
@@ -2490,7 +2533,7 @@ class Supervisor:
                         anchor,
                     )
         return (
-            f"{response}\n\n## {cls.DEBT_CHART_TITLE}\n\n{block}\n",
+            f"{response}\n\n## {title}\n\n{block}\n",
             "appended",
         )
 
