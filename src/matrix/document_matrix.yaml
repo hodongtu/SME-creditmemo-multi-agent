@@ -554,10 +554,17 @@ groups:
         requirement:
           cap_moi: "Bắt buộc"
           tai_cap: "Bắt buộc"
+        sitevisit_extraction: true
         agents:
           BUSINESS_ACTIVITY_AGENT: R
           FINANCIAL_ANALYSIS_AGENT: R
           RISK_ASSESSMENT_AGENT: R
+          # Added with the extraction pass: both read the structured block, and
+          # a block only ever sees documents the matrix routed to that agent.
+          # Credit proposal needs next year's revenue/COGS plan to size a limit;
+          # credit relationship needs the buy/sell side to read the debt against.
+          CREDIT_PROPOSAL_AGENT: R
+          CREDIT_RELATIONSHIP_AGENT: R
         keywords:
           - "bao cao khao sat thuc dia"
           - "khao sat thuc dia"

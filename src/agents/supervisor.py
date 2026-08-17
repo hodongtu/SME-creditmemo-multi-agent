@@ -56,6 +56,7 @@ from src.matrix.document_matrix import (
     get_type,
     is_bctc_type,
     is_cic_r21_type,
+    is_sitevisit_type,
     is_cic_s10a_type,
     is_proposal_type,
     primary_agent_for_type,
@@ -76,6 +77,10 @@ from src.agents.cic_s10a_extraction import (
 from src.agents.cic_r21_extraction import (
     build_cic_r21_extraction_chain,
     extract_cic_r21_structured_data,
+)
+from src.agents.sitevisit_extraction import (
+    build_sitevisit_extraction_chain,
+    extract_sitevisit_structured_data,
 )
 from src.agents.vat_revenue import parse_vat_revenue_block, strip_vat_revenue_block
 from src.agents.industry_knowledge import (
@@ -312,6 +317,21 @@ class Supervisor:
     # giving it the JSON here would contradict routing everywhere else follows.
     CIC_R21_JSON_AGENTS = ("CREDIT_RELATIONSHIP_AGENT", "RISK_ASSESSMENT_AGENT")
 
+    # The site-visit report goes to everyone, which none of the four above do.
+    # It is the one document describing the business itself rather than one
+    # facet of it: business activity takes the products and the buy/sell side,
+    # financial analysis and credit proposal take next year's revenue and COGS
+    # plan, credit relationship reads the trading pattern behind the debt, and
+    # risk takes the officer's on-site findings. The matrix routes it to all
+    # five to match — a block only ever sees documents routed to that agent.
+    SITEVISIT_JSON_AGENTS = (
+        "BUSINESS_ACTIVITY_AGENT",
+        "FINANCIAL_ANALYSIS_AGENT",
+        "CREDIT_RELATIONSHIP_AGENT",
+        "CREDIT_PROPOSAL_AGENT",
+        "RISK_ASSESSMENT_AGENT",
+    )
+
     # The flag each extraction pass selects documents by. Single-sourced because
     # three things key off the same pass names: which passes a route needs, which
     # ones then run, and how many calls the skipped ones would have cost.
@@ -320,6 +340,7 @@ class Supervisor:
         "Proposal": "is_proposal",
         "CIC S10A": "is_cic_s10a",
         "CIC R21": "is_cic_r21",
+        "Sitevisit": "is_sitevisit",
     }
 
     # Which agents each route actually runs. Structured extraction costs one LLM
@@ -345,6 +366,7 @@ class Supervisor:
     # the document's raw OCR.
     CIC_S10A_BLOCK_HEADING = "[EXTRACTED CIC S10A REPORT]"
     CIC_R21_BLOCK_HEADING = "[EXTRACTED CIC R21 REPORT]"
+    SITEVISIT_BLOCK_HEADING = "[EXTRACTED SITE VISIT REPORT]"
 
     # The debt/revenue chart inserted into the credit-relationship section.
     DEBT_CHART_TITLE = "Diễn biến dư nợ và doanh thu VAT 12 tháng gần nhất"
@@ -433,6 +455,11 @@ class Supervisor:
         self.cic_r21_extraction_chain = (
             build_cic_r21_extraction_chain(config.cic_r21_extraction_llm)
             if config.cic_r21_extraction_llm
+            else None
+        )
+        self.sitevisit_extraction_chain = (
+            build_sitevisit_extraction_chain(config.sitevisit_extraction_llm)
+            if config.sitevisit_extraction_llm
             else None
         )
         self.workflow_graph = self._build_workflow_graph()
@@ -812,6 +839,7 @@ class Supervisor:
             ("Proposal", self._extract_proposal_documents),
             ("CIC S10A", self._extract_cic_s10a_documents),
             ("CIC R21", self._extract_cic_r21_documents),
+            ("Sitevisit", self._extract_sitevisit_documents),
         ):
             if label in needed:
                 run_pass(documents, steps)
@@ -845,6 +873,7 @@ class Supervisor:
             "Proposal": set(cls.PROPOSAL_JSON_AGENTS),
             "CIC S10A": set(cls.CIC_S10A_JSON_AGENTS),
             "CIC R21": set(cls.CIC_R21_JSON_AGENTS),
+            "Sitevisit": set(cls.SITEVISIT_JSON_AGENTS),
         }
         return {
             label
@@ -1098,6 +1127,7 @@ class Supervisor:
             is_proposal = is_proposal_type(document_type)
             is_cic_s10a = is_cic_s10a_type(document_type)
             is_cic_r21 = is_cic_r21_type(document_type)
+            is_sitevisit = is_sitevisit_type(document_type)
             steps.append(
                 f"Classified document: {filename} -> "
                 + (f"{document_type} " if document_type else "(no type matched) ")
@@ -1134,6 +1164,7 @@ class Supervisor:
                     is_proposal=is_proposal,
                     is_cic_s10a=is_cic_s10a,
                     is_cic_r21=is_cic_r21,
+                    is_sitevisit=is_sitevisit,
                 )
             )
         return documents
@@ -1258,6 +1289,23 @@ class Supervisor:
             error_attr="cic_r21_extraction_error",
             label="CIC R21",
             missing_llm_message="No cic_r21_extraction_llm configured.",
+        )
+
+    def _extract_sitevisit_documents(
+        self,
+        documents: list[ClassifiedDocument],
+        steps: list[str],
+    ) -> None:
+        self._run_structured_extraction(
+            documents,
+            steps,
+            flag_attr="is_sitevisit",
+            chain=self.sitevisit_extraction_chain,
+            extract=extract_sitevisit_structured_data,
+            result_attr="sitevisit_extraction",
+            error_attr="sitevisit_extraction_error",
+            label="Sitevisit",
+            missing_llm_message="No sitevisit_extraction_llm configured.",
         )
 
     @staticmethod
@@ -2223,6 +2271,12 @@ class Supervisor:
             if reads_cic_r21_json
             else ""
         )
+        reads_sitevisit_json = target_agent in self.SITEVISIT_JSON_AGENTS
+        sitevisit_block = (
+            self._build_sitevisit_structured_block(usable)
+            if reads_sitevisit_json
+            else ""
+        )
         industry_block = (
             self._build_industry_knowledge_block(usable, input_text, target_agent)
             if target_agent in self.INDUSTRY_KNOWLEDGE_AGENTS
@@ -2239,6 +2293,9 @@ class Supervisor:
                 proposal_block,
                 cic_s10a_block,
                 cic_r21_block,
+                # Counted with the rest: next year's plan carries revenue and
+                # COGS, so it can disagree about units with any block above it.
+                sitevisit_block,
             )
             if block
         )
@@ -2264,6 +2321,7 @@ class Supervisor:
             - len(proposal_block)
             - len(cic_s10a_block)
             - len(cic_r21_block)
+            - len(sitevisit_block)
             - len(industry_block)
             - len(unit_warning)
             - block_overhead,
@@ -2316,6 +2374,15 @@ class Supervisor:
                     "Extracted document content: đã trích xuất có cấu trúc "
                     f"— xem {self.CIC_R21_BLOCK_HEADING} bên dưới."
                 )
+            elif (
+                reads_sitevisit_json
+                and doc.is_sitevisit
+                and doc.sitevisit_extraction
+            ):
+                content_section = (
+                    "Extracted document content: đã trích xuất có cấu trúc "
+                    f"— xem {self.SITEVISIT_BLOCK_HEADING} bên dưới."
+                )
             else:
                 content_section = "\n".join(
                     [
@@ -2333,6 +2400,7 @@ class Supervisor:
         proposal_section = f"{proposal_block}\n\n" if proposal_block else ""
         cic_s10a_section = f"{cic_s10a_block}\n\n" if cic_s10a_block else ""
         cic_r21_section = f"{cic_r21_block}\n\n" if cic_r21_block else ""
+        sitevisit_section = f"{sitevisit_block}\n\n" if sitevisit_block else ""
         industry_section = f"{industry_block}\n\n" if industry_block else ""
         return truncate_text(
             (
@@ -2343,6 +2411,7 @@ class Supervisor:
                 f"{proposal_section}"
                 f"{cic_s10a_section}"
                 f"{cic_r21_section}"
+                f"{sitevisit_section}"
                 f"{industry_section}"
                 f"{self.DOC_SECTION_HEADER}"
                 f"{docs_text}"
@@ -2734,6 +2803,49 @@ class Supervisor:
             )
         return "\n\n".join(parts)
 
+    @classmethod
+    def _build_sitevisit_structured_block(
+        cls,
+        selected: list[ClassifiedDocument],
+    ) -> str:
+        """Render the extracted site-visit report for the prompt.
+
+        The warning about ``conclusion`` is the point of writing a header at
+        all. Every other extracted block is measurement — a balance figure is
+        the balance figure. This one ends with one person's judgement, and an
+        agent that cites it the same way would be telling the reader the file
+        records a fact when it records an opinion.
+        """
+
+        sitevisit_docs = [
+            doc for doc in selected if doc.is_sitevisit and doc.sitevisit_extraction
+        ]
+        if not sitevisit_docs:
+            return ""
+        parts = [
+            cls.SITEVISIT_BLOCK_HEADING,
+            "Trích xuất từ Báo cáo khảo sát thực địa: thông tin cuộc khảo sát, "
+            "ngành nghề và mã GSO, sản phẩm/dịch vụ chính, đầu vào - đầu ra, "
+            "kế hoạch kinh doanh năm tiếp theo, và kết luận của cán bộ khảo sát.",
+            "ĐƠN VỊ: mọi số tiền trong \"business_plan_next_year\" đã quy về "
+            "ĐỒNG. Trường \"source_unit\" ghi đơn vị gốc in trên báo cáo.",
+            "QUAN TRỌNG - khối \"conclusion\" (overall_assessment, risks_noted, "
+            "recommendation, conditions) là Ý KIẾN CHỦ QUAN của cán bộ khảo "
+            "sát, KHÔNG phải dữ kiện đo được. Được dùng làm tham khảo và phải "
+            "nói rõ là nhận định của cán bộ khảo sát khi nhắc tới; TUYỆT ĐỐI "
+            "không trích dẫn như dữ kiện đọc từ hồ sơ.",
+            "\"gso_code\" là null nghĩa là báo cáo không in mã ngành GSO - "
+            "không tự tra cứu hay suy ra từ tên ngành.",
+            "Các khối còn lại là quan sát tại chỗ: dùng để đối chiếu với số "
+            "liệu trên BCTC, chênh lệch giữa hai nguồn là thông tin đáng nêu.",
+        ]
+        for doc in sitevisit_docs:
+            parts.append(
+                f"--- {doc.filename} ---\n"
+                + json.dumps(doc.sitevisit_extraction, ensure_ascii=False, indent=2)
+            )
+        return "\n\n".join(parts)
+
     @staticmethod
     def _build_bctc_structured_block(
         selected: list[ClassifiedDocument],
@@ -2860,6 +2972,12 @@ class Supervisor:
             "cic_r21_extraction",
             "cic_r21_extraction_error",
             "CIC R21",
+        ),
+        (
+            "is_sitevisit",
+            "sitevisit_extraction",
+            "sitevisit_extraction_error",
+            "KHẢO SÁT",
         ),
     )
 

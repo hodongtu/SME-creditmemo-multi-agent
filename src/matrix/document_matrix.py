@@ -76,6 +76,12 @@ class DocumentType:
     # mid-project — the flag name is internal, only the matrix YAML key and the
     # Python module need to agree with each other.
     cic_r21_extraction: bool = False
+    # The site-visit report. Unlike the four above it is not a form with fixed
+    # boxes — it is written prose — so the pass pulls out the parts that are
+    # facts about the business (industry, GSO code, main products, who it buys
+    # from and sells to, next year's plan) and keeps the officer's own verdict
+    # in a block of its own, labelled as opinion.
+    sitevisit_extraction: bool = False
 
     @property
     def routing_signature(self) -> frozenset[str]:
@@ -317,6 +323,9 @@ def _load(path: Path) -> DocumentMatrix:
                 cic_r21_extraction=bool(
                     entry.get("cic_r21_extraction", False)
                 ),
+                sitevisit_extraction=bool(
+                    entry.get("sitevisit_extraction", False)
+                ),
             )
 
     if not types:
@@ -419,6 +428,13 @@ def is_cic_r21_type(type_id: str) -> bool:
 
     doc = get_type(type_id)
     return bool(doc and doc.cic_r21_extraction)
+
+
+def is_sitevisit_type(type_id: str) -> bool:
+    """True when this document type is a site-visit report to be extracted."""
+
+    doc = get_type(type_id)
+    return bool(doc and doc.sitevisit_extraction)
 
 
 def routing_signature(type_id: str) -> frozenset[str]:

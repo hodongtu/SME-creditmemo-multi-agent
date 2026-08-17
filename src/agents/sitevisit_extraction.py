@@ -1,0 +1,173 @@
+"""LLM extraction of the site-visit report into structured JSON.
+
+Runs once per document whose matrix type is flagged ``sitevisit_extraction``
+(see src/matrix/document_matrix.yaml and ``is_sitevisit_type``). The report is
+the only document in the set written *after* someone went and looked: it carries
+the industry and GSO code, what the customer actually makes, who it buys from and
+sells to, and the plan for next year. Every specialist consumes some part of
+that, which is why all five read this block.
+
+Two things make it different from the other four passes:
+
+- It is prose, not a form. The other passes lift numbered boxes; this one has to
+  find facts spread through paragraphs, so the prompt names the fields rather
+  than the section numbers.
+- It mixes observation with judgement. The officer's verdict — the risks noted
+  on site, the recommendation — sits in ``conclusion`` and nowhere else, kept
+  apart on purpose: it is one person's opinion, and an agent that cites it as
+  document evidence would be telling the reader the file says something it does
+  not. The block header says so out loud.
+
+Next year's plan carries money, and Vietnamese reports write it in triệu or tỷ as
+often as in đồng, so amounts are normalised to đồng on the way out — the same net
+``proposal_extraction`` needs for the same reason.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from src.agents.structured_extraction import build_extraction_chain, run_extraction
+from src.utils.common import normalize_text
+
+REQUIRED_TOP_LEVEL_KEYS = {
+    "survey_info",
+    "business_profile",
+    "supply_chain",
+    "business_plan_next_year",
+    "conclusion",
+}
+
+# Units these reports actually use. Applied only when the block reports
+# something other than đồng — the prompt asks for đồng, this is the net.
+_UNIT_MULTIPLIERS = {
+    "dong": 1,
+    "vnd": 1,
+    "trieu dong": 10**6,
+    "trieu": 10**6,
+    "ty dong": 10**9,
+    "ty": 10**9,
+}
+
+# Only one block holds money. Kept as a mapping anyway so adding a second block
+# later is a one-line change rather than a rewrite of the normaliser.
+_AMOUNT_FIELDS: dict[str, tuple[str, ...]] = {
+    "business_plan_next_year": (
+        "net_revenue",
+        "cogs",
+        "gross_profit",
+        "profit_before_tax",
+    ),
+}
+
+SITEVISIT_EXTRACTION_SYSTEM_PROMPT = """
+Bạn trích xuất Báo cáo khảo sát thực địa của khách hàng doanh nghiệp thành JSON.
+
+Đây là văn bản tự do, không phải biểu mẫu có ô cố định. Thông tin nằm rải rác
+trong các đoạn văn — hãy tìm theo NỘI DUNG, đừng tìm theo số thứ tự mục.
+
+QUY TẮC BẮT BUỘC:
+- Chỉ ghi thông tin CÓ THẬT trong tài liệu. Không suy đoán, không điền giá trị
+  "hợp lý". Không tìm thấy thì để null (hoặc [] với danh sách).
+- Tách bạch QUAN SÁT và Ý KIẾN. Mọi đánh giá, nhận định, khuyến nghị của cán bộ
+  khảo sát chỉ được đặt trong khối "conclusion". Bốn khối còn lại chỉ chứa dữ
+  kiện đọc được.
+- Mọi số tiền quy về ĐỒNG. Nếu báo cáo ghi triệu/tỷ thì nhân lên và ghi đơn vị
+  gốc vào "source_unit" của khối đó.
+- Mã GSO (mã ngành kinh tế theo Tổng cục Thống kê) chỉ ghi khi tài liệu in rõ
+  mã đó. Không tự tra, không tự suy từ tên ngành.
+
+Trả về JSON đúng cấu trúc sau, không kèm giải thích:
+
+{{
+  "survey_info": {{
+    "survey_date": "YYYY-MM-DD hoặc nguyên văn nếu không rõ, null nếu không có",
+    "officers": ["họ tên cán bộ khảo sát"],
+    "location": "địa điểm khảo sát",
+    "customer_participants": ["họ tên - chức vụ phía khách hàng"]
+  }},
+  "business_profile": {{
+    "industry": "ngành nghề kinh doanh",
+    "gso_code": "mã ngành GSO nếu tài liệu in rõ, null nếu không",
+    "main_products": [
+      {{"name": "sản phẩm/dịch vụ", "note": "ghi chú nếu có"}}
+    ]
+  }},
+  "supply_chain": {{
+    "inputs": [
+      {{"supplier": "nhà cung cấp", "item": "mặt hàng", "terms": "điều khoản nếu có"}}
+    ],
+    "outputs": [
+      {{"customer": "khách hàng đầu ra", "item": "mặt hàng", "terms": "điều khoản nếu có"}}
+    ]
+  }},
+  "business_plan_next_year": {{
+    "year": "năm kế hoạch, null nếu không nêu",
+    "source_unit": "đơn vị tiền ghi trong báo cáo (dong/trieu dong/ty dong)",
+    "net_revenue": 0,
+    "cogs": 0,
+    "gross_profit": 0,
+    "profit_before_tax": 0,
+    "assumptions": ["căn cứ/giả định của kế hoạch nếu báo cáo có nêu"]
+  }},
+  "conclusion": {{
+    "overall_assessment": "đánh giá chung của cán bộ khảo sát",
+    "risks_noted": ["rủi ro cán bộ ghi nhận tại chỗ"],
+    "recommendation": "đề xuất của cán bộ",
+    "conditions": ["điều kiện kèm theo nếu có"]
+  }},
+  "extraction_notes": ["ghi chú về mục thiếu, không chắc chắn, hoặc OCR kém"]
+}}
+"""
+
+
+def _unit_multiplier(source_unit: Any) -> int:
+    """Multiplier that turns a block's stated unit into đồng, 1 when unknown."""
+
+    return _UNIT_MULTIPLIERS.get(normalize_text(str(source_unit or "")), 1)
+
+
+def _scale(value: Any, multiplier: int) -> Any:
+    if multiplier == 1 or not isinstance(value, (int, float)) or isinstance(value, bool):
+        return value
+    return value * multiplier
+
+
+def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
+    """Convert every amount to đồng using the block's own source_unit, in place."""
+
+    for block_name, fields in _AMOUNT_FIELDS.items():
+        block = result.get(block_name)
+        if not isinstance(block, dict):
+            continue
+        multiplier = _unit_multiplier(block.get("source_unit"))
+        if multiplier == 1:
+            continue
+        for field in fields:
+            block[field] = _scale(block.get(field), multiplier)
+    return result
+
+
+def build_sitevisit_extraction_chain(llm: Any):
+    """Build the JSON-output extraction chain for the site-visit report."""
+
+    return build_extraction_chain(SITEVISIT_EXTRACTION_SYSTEM_PROMPT, llm)
+
+
+def extract_sitevisit_structured_data(
+    chain: Any,
+    filename: str,
+    content: str,
+) -> tuple[dict[str, Any] | None, str]:
+    """Run the extraction chain and validate its shape. Never raises."""
+
+    result, error = run_extraction(
+        chain,
+        filename,
+        content,
+        REQUIRED_TOP_LEVEL_KEYS,
+        "No sitevisit extraction LLM configured.",
+    )
+    if result is None:
+        return None, error
+    return normalize_amounts(result), ""

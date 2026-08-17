@@ -98,6 +98,11 @@ class ClassifiedDocument:
     # The other CIC form sharing that letterhead — R20/R21, the collateral
     # report. Same reasoning as is_cic_s10a: different structure, own pass.
     is_cic_r21: bool = False
+    # The site-visit report. The odd one out: the four above are forms with
+    # fixed boxes, this is prose, so the pass separates what the officer
+    # *observed* about the business from what the officer *concluded* — the
+    # conclusion block is opinion and agents must not cite it as evidence.
+    is_sitevisit: bool = False
     bctc_extraction: dict[str, Any] | None = None
     bctc_extraction_error: str = ""
     proposal_extraction: dict[str, Any] | None = None
@@ -106,6 +111,8 @@ class ClassifiedDocument:
     cic_s10a_extraction_error: str = ""
     cic_r21_extraction: dict[str, Any] | None = None
     cic_r21_extraction_error: str = ""
+    sitevisit_extraction: dict[str, Any] | None = None
+    sitevisit_extraction_error: str = ""
 
 
 class UnderwritingGraphState(TypedDict, total=False):

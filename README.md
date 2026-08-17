@@ -172,18 +172,25 @@ answer, and builds an **execution plan**. If required documents are missing
 `EVIDENCE_GAP_CHECK`), avoiding expensive agent runs.
 
 **3. `extract_documents`** — Runs the structured-extraction passes (BCTC, credit application,
-CIC S10A, CIC R21) that turn raw OCR into JSON the agents read as data instead of prose. Each pass
-costs one LLM call **per matching document**, so only the passes the chosen route actually consumes
-are run — which agents read which block is derived from the same constants that build the prompts
-(`CIC_S10A_JSON_AGENTS`, `METRICS_BLOCK_AGENTS`…), so the gate cannot drift from the readers.
+CIC S10A, CIC R21, site-visit report) that turn raw OCR into JSON the agents read as data instead
+of prose. Each pass costs one LLM call **per matching document**, so only the passes the chosen
+route actually consumes are run — which agents read which block is derived from the same constants
+that build the prompts (`CIC_S10A_JSON_AGENTS`, `METRICS_BLOCK_AGENTS`…), so the gate cannot drift
+from the readers.
 
 | Route | Passes run |
 |---|---|
-| `single_business_activity` | *none* |
-| `single_credit_relationship` | CIC S10A, CIC R21 |
-| `single_financial_analysis` | BCTC |
-| `single_credit_proposal` | BCTC, credit application |
-| `single_risk_assessment`, `full_credit_memo` | all four |
+| `single_business_activity` | site visit |
+| `single_credit_relationship` | CIC S10A, CIC R21, site visit |
+| `single_financial_analysis` | BCTC, site visit |
+| `single_credit_proposal` | BCTC, credit application, site visit |
+| `single_risk_assessment`, `full_credit_memo` | all five |
+
+The site-visit report is the one every specialist reads, because it is the only document
+describing the business itself rather than one facet of it — industry and GSO code, main products,
+who the customer buys from and sells to, and next year's revenue/COGS plan. Its `conclusion` block
+is kept separate and labelled as the officer's **opinion**, not measured data, so agents do not
+cite a judgement as though the file recorded a fact.
 
 Deliberately placed **after** the gap check: a run blocked for missing evidence pays for no
 extraction at all. Safe to defer because nothing before this point reads an extraction *result* —
