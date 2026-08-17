@@ -76,7 +76,8 @@ flowchart TD
     D --> F[decide_workflow<br/>pick route + workflow_mode]
     F --> G[evidence_gap_check<br/>Self-Ask: is there enough evidence?]
     G -->|blocked: missing evidence| E2([END])
-    G -->|continue| H[web_search<br/>optional enrichment]
+    G -->|continue| X[extract_documents<br/>only the passes this route reads]
+    X --> H[web_search<br/>optional enrichment]
     H -->|workflow_mode| R{Router}
     R --> W1[conversation]
     R --> W2[single_business_activity]
@@ -106,11 +107,18 @@ extensions: `.pdf .xlsx .xls .csv .txt .md` (capped by `max_files`).
   cached by file hash); XLSX/CSV → tabular read via pandas.
 - **Classification**: identifies *what kind of document* it is — one of the 23 `document_type`
   rows in the routing matrix (`src/matrix/document_matrix.yaml`) — by scoring that type's
-  keywords against the filename and body. If confidence ≥ threshold
+  keywords against the filename and body (a filename hit counts triple — a well-named file
+  states its own type). If confidence ≥ threshold
   (`document_classifier_rule_confidence_threshold`, default **0.65**) it is used as-is;
   otherwise it **falls back to an LLM** classifier that picks from the same catalogue.
-  The rule result is also kept when every plausible type feeds the same agents, since an
-  LLM call could only change the label, not the routing.
+  Two conditions keep the rule result even below the threshold, because in both the LLM
+  could not change anything that matters:
+  - every plausible type feeds the same agents — the label would change, the routing would not;
+  - the filename names **exactly one** type and the body did not overturn it. Confidence is a
+    margin measure, so a clearly-named statement whose text quotes a neighbouring type's
+    vocabulary (a BCTC naming the balance sheet inside itself) can dip under the threshold with
+    nothing genuinely in doubt. Sole ownership is what makes this safe: if body vocabulary pulls
+    a different type to the top, the tiebreak still runs.
 - **Routing**: the matrix maps that type to the agents that consume it, each marked `R`
   (required evidence) or `O` (optional). One document routinely feeds several agents — a BCTC
   is evidence for both `FINANCIAL_ANALYSIS_AGENT` and `RISK_ASSESSMENT_AGENT`. `R` documents
@@ -156,7 +164,26 @@ answer, and builds an **execution plan**. If required documents are missing
 (`can_answer_now = false`) → it stops and returns a response spelling out what is missing (route
 `EVIDENCE_GAP_CHECK`), avoiding expensive agent runs.
 
-**3. `web_search`** — When enabled (`RUN_WEB_SEARCH=true`), `WebSearchProcessorAgent` (Tavily)
+**3. `extract_documents`** — Runs the structured-extraction passes (BCTC, credit application,
+CIC S10A, CIC R21) that turn raw OCR into JSON the agents read as data instead of prose. Each pass
+costs one LLM call **per matching document**, so only the passes the chosen route actually consumes
+are run — which agents read which block is derived from the same constants that build the prompts
+(`CIC_S10A_JSON_AGENTS`, `METRICS_BLOCK_AGENTS`…), so the gate cannot drift from the readers.
+
+| Route | Passes run |
+|---|---|
+| `conversation`, `single_business_activity` | *none* |
+| `single_credit_relationship` | CIC S10A, CIC R21 |
+| `single_financial_analysis` | BCTC |
+| `single_credit_proposal` | BCTC, credit application |
+| `single_risk_assessment`, `full_credit_memo` | all four |
+
+Deliberately placed **after** the gap check: a run blocked for missing evidence pays for no
+extraction at all. Safe to defer because nothing before this point reads an extraction *result* —
+routing and the gap check both work off the document types the matrix assigned. Skipped passes are
+named in the step log with the calls they saved.
+
+**4. `web_search`** — When enabled (`RUN_WEB_SEARCH=true`), `WebSearchProcessorAgent` (Tavily)
 adds market/industry context. The router then branches by `workflow_mode`.
 
 ### Stage 3 — The `full_credit_memo` branch (full pipeline)
@@ -194,6 +221,12 @@ Applied to **every** branch before returning the result:
 
 - **Money formatting** — all VNĐ figures are converted to **billions of VNĐ (tỷ VNĐ)** for
   readability (display only).
+- **Debt/revenue chart** — a `linechart` block drawn by the pipeline from the extracted CIC S10A
+  JSON (debt) and the credit-relationship agent's own transcription of the VAT returns (revenue),
+  so no model retypes the figures. Inserted **only when `CREDIT_RELATIONSHIP_AGENT` actually ran** —
+  it is that section's content, and every branch hands `_finalize` the unfiltered document list, so
+  without the gate any run whose folder merely held a CIC file grew a chart. It anchors under the
+  credit-relationship heading, falling back to the end of the report if the composer reworded it.
 - Returns the full state: `response`, `agent_name`, `steps`, `document_classifications`,
   `agent_outputs`…
 
@@ -343,15 +376,21 @@ disabled (`max_bucket_size=1`), which is what makes exceeding the quota impossib
 unlikely: the four parallel specialists queue on the limiter rather than firing at once.
 
 Set the value **below** your provider's real quota. One full credit memo run costs about **9 LLM
-calls** — four parallel specialists, risk assessment, the memo composer, one BCTC extraction per
-financial statement, and one per document the keyword pass was unsure about. At 9/minute that means
-a full run cannot finish in under a minute; that is the price of never seeing a 429. Every run
+calls** — four parallel specialists, risk assessment, the memo composer, one structured extraction
+per matching document, and one per document the keyword pass was unsure about. At 9/minute that
+means a full run cannot finish in under a minute; that is the price of never seeing a 429. Every run
 reports its own numbers under `result["rate_limit"]` and in the step log, so a throttled run can be
 told apart from a stuck one.
 
-To go faster: raise the limit if your quota allows, name documents clearly so they resolve on the
-keyword pass instead of costing a classification call, or run a single agent (about 3 calls) instead
-of the full memo.
+The memo is the expensive case because it runs every agent and therefore needs every extraction
+pass. Single-agent routes are much cheaper than the document count suggests: a
+`single_business_activity` run reads no structured block at all, so every extraction pass its files
+would have matched is skipped (see `extract_documents` above).
+
+To go faster: raise the limit if your quota allows, run a single agent (about 3 calls) instead of
+the full memo, or **name documents clearly**. Naming is the biggest lever left — a file called
+`BCTC_2024.pdf` or `SO CHI TIET 331 - CONG NO PHAI TRA.xlsx` settles on the keyword pass, while
+`SO 331.xlsx` or `scan001.pdf` matches nothing and costs a classification call every run.
 
 **Tracing (optional):** `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`.
 
