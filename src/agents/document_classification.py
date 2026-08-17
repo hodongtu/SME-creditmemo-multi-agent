@@ -31,6 +31,7 @@ __all__ = [
     "detect_loan_program",
     "discover_documents",
     "document_type_scores",
+    "filename_keyword_owner",
     # Re-exported from src.utils.common: it lives there so the matrix loader can
     # share it without an import cycle, but callers have always imported it from
     # this module.
@@ -153,6 +154,26 @@ def routing_is_unambiguous(scores: dict[str, int]) -> bool:
     return len(signatures) == 1
 
 
+def filename_keyword_owner(filename: str) -> str | None:
+    """The one type whose keywords hit the *filename*, or None if 0 or 2+ do.
+
+    A well-named file names its own type ("BCTC_2024.pdf", "CIC_S10A.pdf") — the
+    same premise FILENAME_KEYWORD_WEIGHT already encodes. Sole ownership is the
+    part that matters: two types both matching the name is a real ambiguity that
+    only reading the document can settle.
+
+    Scored with an empty body so only the name is consulted; the weighting is
+    irrelevant here since every hit comes from the same source.
+    """
+
+    owners = [
+        type_id
+        for type_id, score in document_type_scores(filename, "").items()
+        if score
+    ]
+    return owners[0] if len(owners) == 1 else None
+
+
 def rule_classify_document(filename: str, content: str) -> dict[str, Any]:
     """Classify a document into a matrix document type using keyword signals."""
 
@@ -171,6 +192,7 @@ def rule_classify_document(filename: str, content: str) -> dict[str, Any]:
             "confidence": 0.0,
             "scores": scores,
             "routing_unambiguous": False,
+            "filename_decisive": False,
         }
 
     sorted_scores = sorted(scores.values(), reverse=True)
@@ -194,6 +216,13 @@ def rule_classify_document(filename: str, content: str) -> dict[str, Any]:
         "confidence": confidence,
         "scores": scores,
         "routing_unambiguous": routing_is_unambiguous(scores),
+        # True only when the filename names exactly one type AND the body did not
+        # overturn it. Deliberately not "the filename matched something": when
+        # body vocabulary pulls a different type to the top, the name and the
+        # content genuinely disagree, and that is the case the LLM tiebreak
+        # exists for — measured at 99 such pairs across the matrix, every one
+        # routing somewhere different.
+        "filename_decisive": best_type == filename_keyword_owner(filename),
     }
 
 

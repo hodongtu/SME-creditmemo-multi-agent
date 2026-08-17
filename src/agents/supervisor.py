@@ -1240,6 +1240,11 @@ class Supervisor:
             # plausible type routes to the same agents: the LLM could only
             # change the label, not where the document goes.
             or rule["routing_unambiguous"]
+            # Or when the filename names exactly one type and the body agreed.
+            # Confidence is a margin measure, so a well-named file whose text
+            # happens to quote a neighbouring type's vocabulary can dip under
+            # the threshold with nothing actually in doubt.
+            or rule["filename_decisive"]
         ):
             return rule
 
