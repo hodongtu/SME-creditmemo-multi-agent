@@ -20,14 +20,21 @@ assumed, and each is reported instead of being silently repaired:
 - a marker with no definition renders as literal ``[^7]`` text in the PDF;
 - a definition nobody references still appears in the source list.
 
-A fourth was measured the same way but IS silently repaired, because it is a
-pure formatting slip rather than a question about the evidence: an edit that
-runs two definitions together on one source line (``[^ba1]: x [^ba2]: y``)
-produces exactly the second failure mode above for ``[^ba2]`` — no line
-anchors it as its own definition, so it is swallowed into ``[^ba1]``'s source
-text. ``_split_squeezed_definitions`` un-squeezes these before either function
-below ever sees them, so the audit below never has to tell a genuinely missing
-source from one that just needed a line break.
+Two more were measured the same way but ARE silently repaired, because both are
+pure formatting slips rather than questions about the evidence:
+
+- an edit that runs two definitions together on one source line
+  (``[^ba1]: x [^ba2]: y``) produces exactly the second failure mode above for
+  ``[^ba2]`` — no line anchors it as its own definition, so it is swallowed into
+  ``[^ba1]``'s source text. ``_split_squeezed_definitions`` un-squeezes these
+  before either function below ever sees them, so the audit never has to tell a
+  genuinely missing source from one that just needed a line break;
+- two labels defined with the same source, which prints one document twice in
+  the list. The prompt already tells agents to reuse a marker for a repeated
+  source; ``_canonical_labels`` is the enforcement half, collapsing them onto
+  the label the reader meets first and rewriting the markers to match. Nothing
+  is in doubt here — the two definitions say the same thing — so there is
+  nothing to ask a reviewer.
 
 Numbering is the library's job, ours is the order: it numbers definitions in the
 order they are *defined*, so a list assembled in any other order makes the reader
@@ -41,6 +48,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+
+from src.utils.common import normalize_text
 
 # Which prefix each agent's labels get before the composer merges them. Two
 # letters, because the label is visible in the .md source a reviewer reads.
@@ -151,6 +160,60 @@ def _split_squeezed_definitions(text: str) -> str:
     return "\n".join(out)
 
 
+def _canonical_labels(
+    seen: dict[str, list[str]],
+    referenced: list[str],
+) -> dict[str, str]:
+    """Map every label to the one label that will represent its source.
+
+    Labels whose authoritative source text is the same thing said the same way
+    collapse onto one representative; everything else maps to itself. Grouped on
+    ``normalize_text`` rather than the raw string so "…, trang 1", "…, trang 1."
+    and "…,  trang 1" count as one source, while "trang 1" and "trang 2" stay
+    apart.
+
+    The representative is whichever member the reader meets first, so numbering
+    still follows reading order. A group nobody references keeps its
+    first-defined label — there is no reading order to follow.
+    """
+
+    order = {label: index for index, label in enumerate(referenced)}
+    unreferenced_rank = len(order)
+    groups: dict[str, list[str]] = {}
+    for label, sources in seen.items():
+        # Last definition wins, matching how markdown resolves a repeated label,
+        # so grouping sees the same source text the reader would have got.
+        groups.setdefault(normalize_text(sources[-1]), []).append(label)
+
+    canonical: dict[str, str] = {}
+    for members in groups.values():
+        if len(members) == 1:
+            canonical[members[0]] = members[0]
+            continue
+        winner = min(members, key=lambda label: order.get(label, unreferenced_rank))
+        for label in members:
+            canonical[label] = winner
+    return canonical
+
+
+def _rewrite_references(lines: list[str], canonical: dict[str, str]) -> list[str]:
+    """Point every marker at its representative label, leaving code blocks alone."""
+
+    flags = _mask_code_fences("\n".join(lines))
+    out: list[str] = []
+    for line, in_code in zip(lines, flags):
+        if in_code:
+            out.append(line)
+            continue
+        out.append(
+            _REFERENCE.sub(
+                lambda m: f"[^{canonical.get(m.group(1), m.group(1))}]",
+                line,
+            )
+        )
+    return out
+
+
 def namespace_footnotes(text: str, prefix: str) -> str:
     """Prefix every footnote label so one agent's markers cannot collide.
 
@@ -237,26 +300,50 @@ def consolidate_footnotes(text: str) -> tuple[str, FootnoteAudit]:
 
     # Pass 2: order of first reference in the body, which is the order the
     # reader meets them and therefore the order they must be numbered in.
-    body_text = "\n".join(body)
-    body_flags = _mask_code_fences(body_text)
-    referenced: list[str] = []
-    for line, in_code in zip(body.copy(), body_flags):
-        if in_code:
-            continue
-        for label in _REFERENCE.findall(line):
-            if label not in referenced:
-                referenced.append(label)
+    def _reference_order(source_lines: list[str]) -> list[str]:
+        flags = _mask_code_fences("\n".join(source_lines))
+        found: list[str] = []
+        for line, in_code in zip(source_lines, flags):
+            if in_code:
+                continue
+            for label in _REFERENCE.findall(line):
+                if label not in found:
+                    found.append(label)
+        return found
 
-    orphans = [label for label in referenced if label not in seen]
-    unused = [
-        (label, sources[-1]) for label, sources in seen.items() if label not in referenced
-    ]
+    # Same source under two labels is the reader seeing one document listed
+    # twice. The prompt already asks agents to reuse a marker for a repeated
+    # source, so this is the enforcement half of that rule — and it has to
+    # rewrite the markers, not just the list, or the collapsed labels would
+    # leave references pointing at definitions that no longer exist.
+    # Captured before the merge drops labels: this reports one label defined
+    # twice with *different* sources, which is a disagreement about the evidence
+    # and must survive whatever the merge below collapses.
     duplicates = [
         (label, sources)
         for label, sources in seen.items()
         # Only a genuine disagreement is worth reporting: the same source
         # written twice is redundant, not dangerous.
         if len(sources) > 1 and len(set(sources)) > 1
+    ]
+
+    canonical = _canonical_labels(seen, _reference_order(body))
+    if any(label != winner for label, winner in canonical.items()):
+        body = _rewrite_references(body, canonical)
+    for label, winner in canonical.items():
+        if label != winner:
+            del seen[label]
+
+    body_text = "\n".join(body)
+    referenced = _reference_order(body)
+
+    orphans = [label for label in referenced if label not in seen]
+    # Computed after the merge, and only over surviving labels: a definition
+    # that went unreferenced but repeated a source already in the list is
+    # redundant, not lost evidence, and reporting it would be noise. One with a
+    # source of its own is still reported, exactly as before.
+    unused = [
+        (label, sources[-1]) for label, sources in seen.items() if label not in referenced
     ]
 
     # Referenced definitions first, in reading order; then the unreferenced
