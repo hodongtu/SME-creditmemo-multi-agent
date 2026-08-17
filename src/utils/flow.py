@@ -71,7 +71,6 @@ def get_flow_mermaid() -> str:
 
         build_input["Build agent input<br/>history + web context + selected docs"]
         financial_ratio_calc["Pre-compute financial ratios<br/>custom formulas from financial-analysis-template.md"]
-        conversation["CONVERSATION_AGENT"]
         financial["FINANCIAL_ANALYSIS_AGENT"]
         business["BUSINESS_ACTIVITY_AGENT"]
 
@@ -141,7 +140,6 @@ def get_flow_mermaid() -> str:
         response_cache -->|Hit| cache_response --> build_ui_response
         response_cache -->|Miss| route_choice
 
-        route_choice -->|General chat| conversation
         route_choice -->|Financial analysis| build_input --> financial_ratio_calc --> financial
         route_choice -->|Business activity| build_input --> business
         route_choice -->|Credit memo / risk assessment| risk_workflow
@@ -151,7 +149,6 @@ def get_flow_mermaid() -> str:
         history_context --> build_input
         risk_workflow --> financial_ratio_calc --> risk_financial --> risk_business --> risk_assessment
 
-        conversation --> output_guardrails
         financial --> output_guardrails
         business --> output_guardrails
         risk_assessment --> output_guardrails

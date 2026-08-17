@@ -13,7 +13,6 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langgraph.graph import END, StateGraph
@@ -103,8 +102,6 @@ You are an expert for SME underwriting at a bank.
 Your task is to serve as a supervisor/planner for a multi-agent team.
 
 Available routes:
-- CONVERSATION_AGENT: greetings, general chat, clarifying questions, or
-  non-analysis requests.
 - FINANCIAL_ANALYSIS_AGENT: finance-related analysis, including financial
   statements, ledgers, VAT declarations, bank statements, receivables/payables,
   revenue, expenses, cash flow, assets, liabilities, and capital structure.
@@ -138,6 +135,28 @@ Rules:
   RISK_ASSESSMENT_AGENT -> CREDIT_MEMO.
 - Return JSON only with route, reasoning, and confidence.
 """
+
+# Where routing lands when nothing else decides: the decision LLM returned an id
+# that is not a route, or no keyword matched. Named once so the choice is
+# greppable rather than repeated as a literal at six call sites. Financial
+# analysis because _fallback_route already prefers it whenever files are present,
+# and because a request with documents but no stated task is far more often about
+# the figures than anything else.
+DEFAULT_ROUTE: AgentName = "FINANCIAL_ANALYSIS_AGENT"
+DEFAULT_WORKFLOW_MODE: WorkflowMode = "single_financial_analysis"
+
+# Answer for a request that carries no documents and asks for no analysis — a
+# greeting, or a question about the tool itself. Written out rather than routed
+# to an agent: there is nothing to analyse, so an LLM call could only produce
+# chat, and this system is not a chatbot.
+OUT_OF_SCOPE_RESPONSE = (
+    "Hệ thống này chỉ thực hiện thẩm định tín dụng SME trên hồ sơ khách hàng.\n\n"
+    "Để bắt đầu, vui lòng:\n"
+    "- Cung cấp hồ sơ (BCTC, tờ khai thuế GTGT, sao kê, báo cáo CIC, "
+    "giấy đề nghị cấp tín dụng…), và\n"
+    "- Nêu rõ yêu cầu, ví dụ: *\"Lập báo cáo thẩm định cho khách hàng này\"* "
+    "hoặc *\"Phân tích hoạt động kinh doanh\"*."
+)
 
 CREDIT_MEMO_KEYWORDS = [
     "credit memo",
@@ -307,7 +326,6 @@ class Supervisor:
     # call per matching document, so the run needs to know who is going to read
     # the result before it pays for it — see _passes_needed_for_route.
     ROUTE_AGENTS: dict[str, tuple[str, ...]] = {
-        "CONVERSATION_AGENT": (),
         "BUSINESS_ACTIVITY_AGENT": ("BUSINESS_ACTIVITY_AGENT",),
         "CREDIT_RELATIONSHIP_AGENT": ("CREDIT_RELATIONSHIP_AGENT",),
         "FINANCIAL_ANALYSIS_AGENT": ("FINANCIAL_ANALYSIS_AGENT",),
@@ -431,7 +449,6 @@ class Supervisor:
         workflow.add_node("evidence_gap_check", self._graph_evidence_gap_check)
         workflow.add_node("extract_documents", self._graph_extract_documents)
         workflow.add_node("web_search", self._graph_web_search)
-        workflow.add_node("conversation", self._graph_run_conversation)
         workflow.add_node(
             "single_business_activity",
             self._graph_run_business_activity,
@@ -461,7 +478,11 @@ class Supervisor:
             self._graph_after_input_guardrail,
             {"blocked": END, "continue": "discover_documents"},
         )
-        workflow.add_edge("discover_documents", "classify_documents")
+        workflow.add_conditional_edges(
+            "discover_documents",
+            self._graph_after_discover_documents,
+            {"out_of_scope": END, "continue": "classify_documents"},
+        )
         workflow.add_edge("classify_documents", "decide_workflow")
         workflow.add_edge("decide_workflow", "evidence_gap_check")
         workflow.add_conditional_edges(
@@ -474,7 +495,6 @@ class Supervisor:
             "web_search",
             self._graph_select_workflow_branch,
             {
-                "conversation": "conversation",
                 "single_business_activity": "single_business_activity",
                 "single_credit_relationship": "single_credit_relationship",
                 "single_financial_analysis": "single_financial_analysis",
@@ -484,7 +504,6 @@ class Supervisor:
             },
         )
         for node in [
-            "conversation",
             "single_business_activity",
             "single_credit_relationship",
             "single_financial_analysis",
@@ -559,7 +578,62 @@ class Supervisor:
         )
         steps = state.get("steps", [])
         steps.append(f"Discovered {len(files)} supported file(s)")
-        return {**state, "files": files, "steps": steps}
+        if files or self._has_analysis_intent(state.get("query", "")):
+            return {**state, "files": files, "steps": steps}
+
+        # Nothing to analyse and nothing asked for — answer from a constant and
+        # stop. Sitting here rather than earlier because only now is "no usable
+        # document" certain: the caller may have passed a folder holding nothing
+        # this system reads. Still ahead of every cost, since discovery only
+        # lists filenames and all OCR belongs to classify_documents.
+        steps.append("Out of scope: no documents and no analysis request")
+        return {
+            **state,
+            "files": files,
+            "steps": steps,
+            "output_state": self._build_state(
+                state.get("query", ""),
+                OUT_OF_SCOPE_RESPONSE,
+                "OUT_OF_SCOPE",
+                {"route": "OUT_OF_SCOPE", "reasoning": "No documents, no analysis request."},
+                [],
+                {},
+                {},
+                {},
+                "",
+                steps,
+            ),
+        }
+
+    @staticmethod
+    def _graph_after_discover_documents(state: UnderwritingGraphState) -> str:
+        """Stop when there is nothing to analyse and nothing was asked."""
+
+        return "out_of_scope" if state.get("output_state") else "continue"
+
+    @classmethod
+    def _has_analysis_intent(cls, query: str) -> bool:
+        """True when the request names work one of the specialists can do.
+
+        Read off the same keyword lists routing already uses, so a request that
+        would have reached an agent can never be turned away here. Kept separate
+        from "are there documents": asking for financial analysis without
+        attaching statements should still reach the evidence gap check, which
+        answers with the specific documents that are missing.
+        """
+
+        normalized = (query or "").lower()
+        return any(
+            cls._contains_any(normalized, keywords)
+            for keywords in (
+                CREDIT_MEMO_KEYWORDS,
+                CREDIT_PROPOSAL_ROUTE_KEYWORDS,
+                RISK_ASSESSMENT_ROUTE_KEYWORDS,
+                CREDIT_RELATIONSHIP_ROUTE_KEYWORDS,
+                FINANCIAL_ROUTE_KEYWORDS,
+                BUSINESS_ROUTE_KEYWORDS,
+            )
+        )
 
     def _graph_classify_documents(
         self,
@@ -666,7 +740,7 @@ class Supervisor:
         steps = state.get("steps", [])
         gap_analysis = self._analyze_evidence_gaps(
             documents,
-            decision.get("route", "CONVERSATION_AGENT"),
+            decision.get("route", DEFAULT_ROUTE),
         )
         execution_plan = self._build_execution_plan(decision, gap_analysis)
         steps.append("Built Self-Ask evidence gap analysis")
@@ -730,7 +804,7 @@ class Supervisor:
 
         documents = state.get("documents") or []
         steps = state.get("steps", [])
-        route = (state.get("decision") or {}).get("route", "CONVERSATION_AGENT")
+        route = (state.get("decision") or {}).get("route", DEFAULT_ROUTE)
         needed = self._passes_needed_for_route(route)
 
         for label, run_pass in (
@@ -820,15 +894,7 @@ class Supervisor:
     ) -> WorkflowMode:
         """Route graph execution by deterministic workflow mode."""
 
-        return state.get("workflow_mode", "conversation")
-
-    def _graph_run_conversation(
-        self,
-        state: UnderwritingGraphState,
-    ) -> UnderwritingGraphState:
-        """Run the conversation branch."""
-
-        return {**state, "output_state": self._run_conversation_branch(state)}
+        return state.get("workflow_mode", DEFAULT_WORKFLOW_MODE)
 
     def _graph_run_business_activity(
         self,
@@ -926,23 +992,6 @@ class Supervisor:
                 state.get("steps", []),
             ),
         }
-
-    def _run_conversation_branch(
-        self,
-        state: UnderwritingGraphState,
-    ) -> dict[str, Any]:
-        """Adapt graph state to the existing conversation runner."""
-
-        return self._run_conversation(
-            state.get("query", ""),
-            state.get("history_context", ""),
-            state.get("decision") or {},
-            state.get("documents") or [],
-            state.get("web_context", ""),
-            state.get("execution_plan") or {},
-            state.get("gap_analysis") or {},
-            state.get("steps", []),
-        )
 
     def _run_single_agent_branch(
         self,
@@ -1381,7 +1430,7 @@ class Supervisor:
                         ),
                     }
                 )
-                route = decision.get("route", "CONVERSATION_AGENT")
+                route = decision.get("route", DEFAULT_ROUTE)
             except Exception:
                 decision = {
                     "reasoning": (
@@ -1421,7 +1470,6 @@ class Supervisor:
         """Map a route to the deterministic workflow branch."""
 
         route_modes = {
-            "CONVERSATION_AGENT": "conversation",
             "BUSINESS_ACTIVITY_AGENT": "single_business_activity",
             "CREDIT_RELATIONSHIP_AGENT": "single_credit_relationship",
             "FINANCIAL_ANALYSIS_AGENT": "single_financial_analysis",
@@ -1429,7 +1477,7 @@ class Supervisor:
             "CREDIT_PROPOSAL_AGENT": "single_credit_proposal",
             "CREDIT_MEMO": "full_credit_memo",
         }
-        return route_modes.get(route, "conversation")
+        return route_modes.get(route, DEFAULT_WORKFLOW_MODE)
 
     def _override_route(
         self,
@@ -1451,7 +1499,19 @@ class Supervisor:
             return "FINANCIAL_ANALYSIS_AGENT"
         if self._contains_any(normalized, BUSINESS_ROUTE_KEYWORDS):
             return "BUSINESS_ACTIVITY_AGENT"
-        if route == "CONVERSATION_AGENT" and has_file:
+        valid_routes = {
+            "FINANCIAL_ANALYSIS_AGENT",
+            "BUSINESS_ACTIVITY_AGENT",
+            "CREDIT_RELATIONSHIP_AGENT",
+            "RISK_ASSESSMENT_AGENT",
+            "CREDIT_PROPOSAL_AGENT",
+            "CREDIT_MEMO",
+        }
+        # The request named no task, so let the evidence decide. Previously
+        # reached via route == CONVERSATION_AGENT, which was how the decision
+        # step said "this is not analysis"; with that route gone, the same
+        # situation shows up as a route it does not recognise.
+        if route not in valid_routes and has_file:
             both_analysis_docs = {
                 "FINANCIAL_ANALYSIS_AGENT",
                 "BUSINESS_ACTIVITY_AGENT",
@@ -1467,17 +1527,9 @@ class Supervisor:
             ]:
                 if candidate in document_routes:
                     return candidate
-        if route in {
-            "CONVERSATION_AGENT",
-            "FINANCIAL_ANALYSIS_AGENT",
-            "BUSINESS_ACTIVITY_AGENT",
-            "CREDIT_RELATIONSHIP_AGENT",
-            "RISK_ASSESSMENT_AGENT",
-            "CREDIT_PROPOSAL_AGENT",
-            "CREDIT_MEMO",
-        }:
+        if route in valid_routes:
             return route
-        return "CONVERSATION_AGENT"
+        return DEFAULT_ROUTE
 
     def _fallback_route(self, input_text: str, has_file: bool) -> AgentName:
         normalized = input_text.lower()
@@ -1512,7 +1564,11 @@ class Supervisor:
             ],
         ):
             return "FINANCIAL_ANALYSIS_AGENT"
-        return "CONVERSATION_AGENT"
+        # No keyword matched and no file. Requests like this are turned away
+        # after discovery, so reaching here means the caller drove the graph
+        # some other way — answer with the default rather than inventing a
+        # route the workflow has no branch for.
+        return DEFAULT_ROUTE
 
     def _analyze_evidence_gaps(
         self,
@@ -1547,7 +1603,6 @@ class Supervisor:
                 inventory[bucket].append(doc.filename)
 
         required = {
-            "CONVERSATION_AGENT": [],
             "FINANCIAL_ANALYSIS_AGENT": ["financial_documents"],
             "BUSINESS_ACTIVITY_AGENT": ["business_activity_documents"],
             "RISK_ASSESSMENT_AGENT": [
@@ -1600,11 +1655,7 @@ class Supervisor:
         return {
             "evidence_inventory": inventory,
             "missing_evidence": missing,
-            "recommended_actions": (
-                ["run_available_analysis_agents"]
-                if route != "CONVERSATION_AGENT"
-                else ["answer_directly"]
-            ),
+            "recommended_actions": ["run_available_analysis_agents"],
             "can_proceed": can_proceed,
             "summary": (
                 f"Route {route}. Available evidence: {available}. "
@@ -1647,25 +1698,21 @@ class Supervisor:
         elif route == "CREDIT_PROPOSAL_AGENT":
             agents = ["CREDIT_PROPOSAL_AGENT"]
             order = ["credit_proposal_calculation", "reflection"]
-        elif route in {
-            "FINANCIAL_ANALYSIS_AGENT",
-            "BUSINESS_ACTIVITY_AGENT",
-            "CREDIT_RELATIONSHIP_AGENT",
-        }:
-            agents = [route]
+        else:
+            # Every remaining route is a single specialist. Unknown ids land
+            # here too and are answered with the default rather than a plan
+            # naming an agent that no longer exists.
+            agents = [route if route in self.ROUTE_AGENTS else DEFAULT_ROUTE]
             order = [
                 (
                     "financial_analysis"
-                    if route == "FINANCIAL_ANALYSIS_AGENT"
+                    if agents[0] == "FINANCIAL_ANALYSIS_AGENT"
                     else "credit_relationship_analysis"
-                    if route == "CREDIT_RELATIONSHIP_AGENT"
+                    if agents[0] == "CREDIT_RELATIONSHIP_AGENT"
                     else "business_activity_analysis"
                 ),
                 "reflection",
             ]
-        else:
-            agents = ["CONVERSATION_AGENT"]
-            order = ["conversation", "reflection"]
 
         return {
             "plan_version": "notebook-local-v1",
@@ -1688,60 +1735,13 @@ class Supervisor:
         document_summary: str,
         steps: list[str],
     ) -> str:
-        if not self.web_search_agent or decision["route"] == "CONVERSATION_AGENT":
+        if not self.web_search_agent:
             return ""
         steps.append("Running WEB_SEARCH_AGENT")
         web_query = f"{query}\n\n{document_summary}"
         return self.web_search_agent.process_web_search_results(
             web_query,
             conversation_history,
-        )
-
-    def _run_conversation(
-        self,
-        input_text: str,
-        history_context: str,
-        decision: dict[str, Any],
-        documents: list[ClassifiedDocument],
-        web_context: str,
-        execution_plan: dict[str, Any],
-        gap_analysis: dict[str, Any],
-        steps: list[str],
-    ) -> dict[str, Any]:
-        steps.append("Running CONVERSATION_AGENT")
-        prompt = f"""
-        You are an AI-powered Credit Underwriting Conversation Assistant.
-        Answer in the same language as the user request.
-
-        Recent conversation history:
-        {history_context or 'No previous conversation.'}
-
-        User query:
-        {input_text}
-        """
-        raw = (
-            self.config.conversation_llm.invoke(prompt)
-            if self.config.conversation_llm
-            else AIMessage(
-                content=(
-                    "Mình sẵn sàng hỗ trợ. Vui lòng cung cấp câu hỏi "
-                    "hoặc tài liệu cần phân tích."
-                )
-            )
-        )
-        response = extract_text_from_agent_output(raw)
-        return self._finalize(
-            input_text,
-            response,
-            "CONVERSATION_AGENT",
-            decision,
-            documents,
-            {"CONVERSATION_AGENT": response},
-            web_context,
-            history_context,
-            execution_plan,
-            gap_analysis,
-            steps,
         )
 
     def _run_single_agent(

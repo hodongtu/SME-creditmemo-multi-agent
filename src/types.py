@@ -7,7 +7,6 @@ from typing import Any, Literal, TypedDict
 
 
 AgentName = Literal[
-    "CONVERSATION_AGENT",
     "FINANCIAL_ANALYSIS_AGENT",
     "BUSINESS_ACTIVITY_AGENT",
     "CREDIT_RELATIONSHIP_AGENT",
@@ -16,7 +15,6 @@ AgentName = Literal[
     "CREDIT_MEMO",
 ]
 WorkflowMode = Literal[
-    "conversation",
     "single_business_activity",
     "single_credit_relationship",
     "single_financial_analysis",

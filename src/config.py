@@ -131,7 +131,6 @@ class Config:
 
     decision_llm: Any = None
     document_llm: Any = None
-    conversation_llm: Any = None
     analysis_llm: Any = None
     credit_memo_llm: Any = None
     # Powers LocalGuardrails' input/output safety checks (see guardrails.py).
@@ -159,7 +158,6 @@ class Config:
     def __post_init__(self) -> None:
         if self.agent_input_char_budgets is None:
             self.agent_input_char_budgets = {
-                "CONVERSATION_AGENT": 8_000,
                 "FINANCIAL_ANALYSIS_AGENT": 60_000,
                 "BUSINESS_ACTIVITY_AGENT": 20_000,
                 "CREDIT_RELATIONSHIP_AGENT": 20_000,

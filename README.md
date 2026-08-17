@@ -72,21 +72,21 @@ flowchart TD
     A --> B[input_guardrail<br/>input safety check]
     B -->|blocked| E1([END])
     B -->|continue| C[discover_documents<br/>scan PDF/XLS/CSV/TXT/MD files]
-    C --> D[classify_documents<br/>OCR + classify → route documents]
+    C -->|out of scope: no docs, no analysis asked| E3([END])
+    C -->|continue| D[classify_documents<br/>OCR + classify → route documents]
     D --> F[decide_workflow<br/>pick route + workflow_mode]
     F --> G[evidence_gap_check<br/>Self-Ask: is there enough evidence?]
     G -->|blocked: missing evidence| E2([END])
     G -->|continue| X[extract_documents<br/>only the passes this route reads]
     X --> H[web_search<br/>optional enrichment]
     H -->|workflow_mode| R{Router}
-    R --> W1[conversation]
     R --> W2[single_business_activity]
     R --> W3[single_credit_relationship]
     R --> W4[single_financial_analysis]
     R --> W5[single_risk_assessment]
     R --> W6[single_credit_proposal]
     R --> W7[full_credit_memo]
-    W1 & W2 & W3 & W4 & W5 & W6 & W7 --> FIN[_finalize<br/>format tỷ VNĐ]
+    W2 & W3 & W4 & W5 & W6 & W7 --> FIN[_finalize<br/>format tỷ VNĐ]
     FIN --> ENDN([END])
 ```
 
@@ -101,6 +101,14 @@ LLM to classify the input as safe/unsafe. If **UNSAFE** → stop immediately wit
 
 **3. `discover_documents`** — Recursively scans the paths in `INPUT_PATHS` for files with valid
 extensions: `.pdf .xlsx .xls .csv .txt .md` (capped by `max_files`).
+
+If it finds **nothing** and the request also names no analysis task (a greeting, a question about
+the tool), the run stops here with a fixed reply saying what the system does and what it needs —
+route `OUT_OF_SCOPE`, **zero LLM calls and zero OCR**. This is not a chatbot: with no documents and
+no task there is nothing to analyse, and an LLM could only produce small talk. The check needs both
+halves, which is why it sits here rather than earlier: *"phân tích tài chính"* sent without
+attaching statements still goes through, so `evidence_gap_check` can answer with the **specific**
+documents that are missing.
 
 **4. `classify_documents`** — For each file:
 - **Text extraction**: PDF → OCR (`pypdfium2` renders pages → image preprocessing → Tesseract,
@@ -151,7 +159,6 @@ The 7 possible workflow modes:
 
 | workflow_mode | Meaning |
 |---|---|
-| `conversation` | Plain Q&A, no specialist needed |
 | `single_business_activity` | Business-activity analysis only |
 | `single_credit_relationship` | Credit-relationship analysis only (T24/CIC) |
 | `single_financial_analysis` | Financial analysis only |
@@ -172,7 +179,7 @@ are run — which agents read which block is derived from the same constants tha
 
 | Route | Passes run |
 |---|---|
-| `conversation`, `single_business_activity` | *none* |
+| `single_business_activity` | *none* |
 | `single_credit_relationship` | CIC S10A, CIC R21 |
 | `single_financial_analysis` | BCTC |
 | `single_credit_proposal` | BCTC, credit application |
@@ -341,7 +348,7 @@ MODEL_DOCUMENT=gpt-4o-mini        # document classification (LLM fallback)
 MODEL_ANALYZER=gpt-4o-mini        # specialist agents
 MODEL_CREDIT_MEMO=gpt-4o-mini     # memo composition
 MODEL_GUARDRAIL=gpt-4o-mini       # input/output safety guardrail
-MODEL_ECONOMY=gpt-4o-mini         # conversation
+MODEL_ECONOMY=gpt-4o-mini         # cheaper structured extractions
 ```
 
 **API & endpoint:**
