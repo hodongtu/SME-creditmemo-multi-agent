@@ -293,6 +293,35 @@ class Supervisor:
     # giving it the JSON here would contradict routing everywhere else follows.
     CIC_R21_JSON_AGENTS = ("CREDIT_RELATIONSHIP_AGENT", "RISK_ASSESSMENT_AGENT")
 
+    # The flag each extraction pass selects documents by. Single-sourced because
+    # three things key off the same pass names: which passes a route needs, which
+    # ones then run, and how many calls the skipped ones would have cost.
+    EXTRACTION_PASS_FLAGS = {
+        "BCTC": "is_bctc",
+        "Proposal": "is_proposal",
+        "CIC S10A": "is_cic_s10a",
+        "CIC R21": "is_cic_r21",
+    }
+
+    # Which agents each route actually runs. Structured extraction costs one LLM
+    # call per matching document, so the run needs to know who is going to read
+    # the result before it pays for it — see _passes_needed_for_route.
+    ROUTE_AGENTS: dict[str, tuple[str, ...]] = {
+        "CONVERSATION_AGENT": (),
+        "BUSINESS_ACTIVITY_AGENT": ("BUSINESS_ACTIVITY_AGENT",),
+        "CREDIT_RELATIONSHIP_AGENT": ("CREDIT_RELATIONSHIP_AGENT",),
+        "FINANCIAL_ANALYSIS_AGENT": ("FINANCIAL_ANALYSIS_AGENT",),
+        "RISK_ASSESSMENT_AGENT": ("RISK_ASSESSMENT_AGENT",),
+        "CREDIT_PROPOSAL_AGENT": ("CREDIT_PROPOSAL_AGENT",),
+        "CREDIT_MEMO": (
+            "BUSINESS_ACTIVITY_AGENT",
+            "CREDIT_RELATIONSHIP_AGENT",
+            "FINANCIAL_ANALYSIS_AGENT",
+            "CREDIT_PROPOSAL_AGENT",
+            "RISK_ASSESSMENT_AGENT",
+        ),
+    }
+
     # Heading of the CIC blocks. Named constants because two things have to
     # agree on the exact string: the block itself, and the pointer that replaces
     # the document's raw OCR.
@@ -400,6 +429,7 @@ class Supervisor:
         workflow.add_node("classify_documents", self._graph_classify_documents)
         workflow.add_node("decide_workflow", self._graph_decide_workflow)
         workflow.add_node("evidence_gap_check", self._graph_evidence_gap_check)
+        workflow.add_node("extract_documents", self._graph_extract_documents)
         workflow.add_node("web_search", self._graph_web_search)
         workflow.add_node("conversation", self._graph_run_conversation)
         workflow.add_node(
@@ -437,8 +467,9 @@ class Supervisor:
         workflow.add_conditional_edges(
             "evidence_gap_check",
             self._graph_after_evidence_gap_check,
-            {"blocked": END, "continue": "web_search"},
+            {"blocked": END, "continue": "extract_documents"},
         )
+        workflow.add_edge("extract_documents", "web_search")
         workflow.add_conditional_edges(
             "web_search",
             self._graph_select_workflow_branch,
@@ -552,10 +583,10 @@ class Supervisor:
             steps,
             loan_program,
         )
-        self._extract_bctc_documents(documents, steps)
-        self._extract_proposal_documents(documents, steps)
-        self._extract_cic_s10a_documents(documents, steps)
-        self._extract_cic_r21_documents(documents, steps)
+        # Structured extraction deliberately does NOT happen here. It costs one
+        # LLM call per matching document, and which of those results anybody
+        # reads depends on the route, which is not decided until two nodes from
+        # now — so it runs in _graph_extract_documents instead.
         document_routes: set[str] = set()
         for doc in documents:
             if doc.agent == "GENERAL_CONTEXT":
@@ -679,6 +710,94 @@ class Supervisor:
         """Choose whether missing required evidence blocks execution."""
 
         return "blocked" if state.get("output_state") else "continue"
+
+    def _graph_extract_documents(
+        self,
+        state: UnderwritingGraphState,
+    ) -> UnderwritingGraphState:
+        """Run only the structured extractions this route will actually read.
+
+        Placed after the evidence gap check rather than beside classification so
+        two kinds of waste disappear: a run blocked for missing evidence pays for
+        no extraction at all, and a route whose agents never read a given block
+        does not pay for it either — a single BUSINESS_ACTIVITY run used to spend
+        an LLM call per CIC and BCTC file that nothing downstream then opened.
+
+        Safe to defer because nothing between classification and here reads an
+        extraction *result*: routing and the gap check both work off the document
+        types the matrix assigned.
+        """
+
+        documents = state.get("documents") or []
+        steps = state.get("steps", [])
+        route = (state.get("decision") or {}).get("route", "CONVERSATION_AGENT")
+        needed = self._passes_needed_for_route(route)
+
+        for label, run_pass in (
+            ("BCTC", self._extract_bctc_documents),
+            ("Proposal", self._extract_proposal_documents),
+            ("CIC S10A", self._extract_cic_s10a_documents),
+            ("CIC R21", self._extract_cic_r21_documents),
+        ):
+            if label in needed:
+                run_pass(documents, steps)
+
+        skipped = self._describe_skipped_passes(documents, needed)
+        if skipped:
+            # Say it out loud: a missing extraction block otherwise looks
+            # identical to one that failed, and the two need different fixes.
+            steps.append(
+                f"Saved LLM calls — no agent on route {route} reads: {skipped}"
+            )
+        return {
+            **state,
+            "documents": documents,
+            # Rebuilt because the tags in it report extraction state, which only
+            # exists now — the copy the routing node read was written before any
+            # of this ran.
+            "document_summary": self._format_document_summary(documents),
+            "steps": steps,
+        }
+
+    @classmethod
+    def _passes_needed_for_route(cls, route: str) -> set[str]:
+        """Which extraction passes the agents on this route actually consume."""
+
+        agents = set(cls.ROUTE_AGENTS.get(route, ()))
+        consumers = {
+            # Financial analysis and credit proposal read the BCTC JSON itself;
+            # the metrics agents read ratios computed from the same extraction.
+            "BCTC": set(cls.BCTC_JSON_STATEMENTS) | set(cls.METRICS_BLOCK_AGENTS),
+            "Proposal": set(cls.PROPOSAL_JSON_AGENTS),
+            "CIC S10A": set(cls.CIC_S10A_JSON_AGENTS),
+            "CIC R21": set(cls.CIC_R21_JSON_AGENTS),
+        }
+        return {
+            label
+            for label, readers in consumers.items()
+            if agents & readers
+        }
+
+    @classmethod
+    def _describe_skipped_passes(
+        cls,
+        documents: list[ClassifiedDocument],
+        needed: set[str],
+    ) -> str:
+        """Name the skipped passes and how many documents each would have cost.
+
+        Counts documents rather than just naming passes so the step log shows the
+        saving, not merely the decision.
+        """
+
+        parts = []
+        for label, flag_attr in cls.EXTRACTION_PASS_FLAGS.items():
+            if label in needed:
+                continue
+            count = sum(1 for doc in documents if getattr(doc, flag_attr))
+            if count:
+                parts.append(f"{label} ({count} document(s), {count} LLM call(s))")
+        return ", ".join(parts)
 
     def _graph_web_search(
         self,
@@ -2749,13 +2868,17 @@ class Supervisor:
         """
 
         tags = []
-        for flag_attr, result_attr, _, label in cls.EXTRACTION_PASSES:
-            if getattr(doc, flag_attr):
-                tags.append(
-                    f" [{label}]"
-                    if getattr(doc, result_attr)
-                    else f" [{label}, trích xuất lỗi]"
-                )
+        for flag_attr, _, error_attr, label in cls.EXTRACTION_PASSES:
+            if not getattr(doc, flag_attr):
+                continue
+            # Keyed on the error, not on a missing result: this summary is built
+            # twice, and the first time — for the routing node — no pass has run
+            # yet. Testing the result alone would report every document as a
+            # failed extraction at that point, which is the opposite of true.
+            if getattr(doc, error_attr):
+                tags.append(f" [{label}, trích xuất lỗi]")
+            else:
+                tags.append(f" [{label}]")
         return "".join(tags)
 
     @classmethod
