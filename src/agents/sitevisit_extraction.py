@@ -27,8 +27,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.agents.structured_extraction import build_extraction_chain, run_extraction
-from src.utils.common import normalize_text
+from src.agents.structured_extraction import (
+    build_extraction_chain,
+    resolve_money_multiplier,
+    run_extraction,
+)
 
 REQUIRED_TOP_LEVEL_KEYS = {
     "survey_info",
@@ -39,16 +42,6 @@ REQUIRED_TOP_LEVEL_KEYS = {
     "conclusion",
 }
 
-# Units these reports actually use. Applied only when the block reports
-# something other than đồng — the prompt asks for đồng, this is the net.
-_UNIT_MULTIPLIERS = {
-    "dong": 1,
-    "vnd": 1,
-    "trieu dong": 10**6,
-    "trieu": 10**6,
-    "ty dong": 10**9,
-    "ty": 10**9,
-}
 
 # Only one block holds money. Kept as a mapping anyway so adding a second block
 # later is a one-line change rather than a rewrite of the normaliser.
@@ -137,7 +130,7 @@ Trả về JSON đúng cấu trúc sau, không kèm giải thích:
 def _unit_multiplier(source_unit: Any) -> int:
     """Multiplier that turns a block's stated unit into đồng, 1 when unknown."""
 
-    return _UNIT_MULTIPLIERS.get(normalize_text(str(source_unit or "")), 1)
+    return resolve_money_multiplier(source_unit)
 
 
 def _scale(value: Any, multiplier: int) -> Any:
@@ -158,6 +151,58 @@ def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
             continue
         for field in fields:
             block[field] = _scale(block.get(field), multiplier)
+    return result
+
+
+# Fields in lc_terms that are shares, so must land between 0 and 1.
+_RATIO_FIELDS = (
+    "import_ratio",
+    "lc_share_of_import",
+    "sight_share",
+    "deferred_share",
+)
+
+
+def normalize_lc_ratios(result: dict[str, Any]) -> dict[str, Any]:
+    """Force lc_terms shares onto a 0-1 scale, in place, and say what changed.
+
+    The prompt asks for decimals and a model will still answer 60 for "60%"
+    often enough to matter: the credit-need table multiplies these by 100 to
+    display and by the projected COGS to size the facility, so an unnoticed 60
+    becomes 6000% and a hundredfold LC turnover.
+
+    A value between 1 and 100 can only be a percentage — the scale it is
+    supposed to be on stops at 1 — so it is divided and the reinterpretation is
+    written into extraction_notes rather than done quietly. Anything above 100,
+    or negative, is not a share at all: it is dropped so the calculator falls
+    back to its documented default instead of computing on nonsense.
+    """
+
+    block = result.get("lc_terms")
+    if not isinstance(block, dict):
+        return result
+    notes = result.setdefault("extraction_notes", [])
+    if not isinstance(notes, list):
+        notes = result["extraction_notes"] = []
+
+    for field in _RATIO_FIELDS:
+        value = block.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if 0 <= value <= 1:
+            continue
+        if 1 < value <= 100:
+            block[field] = value / 100
+            notes.append(
+                f"lc_terms.{field}: đọc được {value} — hiểu là phần trăm và "
+                f"quy về {value / 100}."
+            )
+        else:
+            block[field] = None
+            notes.append(
+                f"lc_terms.{field}: giá trị {value} không phải tỷ lệ hợp lệ "
+                "(ngoài khoảng 0-100%) — đã bỏ, hệ thống dùng mặc định."
+            )
     return result
 
 
@@ -183,4 +228,4 @@ def extract_sitevisit_structured_data(
     )
     if result is None:
         return None, error
-    return normalize_amounts(result), ""
+    return normalize_lc_ratios(normalize_amounts(result)), ""

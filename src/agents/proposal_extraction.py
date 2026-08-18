@@ -18,8 +18,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from src.agents.structured_extraction import build_extraction_chain, run_extraction
-from src.utils.common import normalize_text
+from src.agents.structured_extraction import (
+    build_extraction_chain,
+    resolve_money_multiplier,
+    run_extraction,
+)
 
 REQUIRED_TOP_LEVEL_KEYS = {
     "capital_plan",
@@ -28,17 +31,6 @@ REQUIRED_TOP_LEVEL_KEYS = {
     "repayment_plan",
     "collateral",
     "credit_request",
-}
-
-# Multipliers for the units the form actually uses. Applied only when a block
-# reports a unit other than đồng — the prompt asks for đồng, this is the net.
-_UNIT_MULTIPLIERS = {
-    "dong": 1,
-    "vnd": 1,
-    "trieu dong": 10**6,
-    "trieu": 10**6,
-    "ty dong": 10**9,
-    "ty": 10**9,
 }
 
 # Where amounts live, per block: scalar fields, and list fields with their own
@@ -156,7 +148,7 @@ Trả về CHÍNH XÁC JSON theo schema sau, không thêm text nào khác:
 def _unit_multiplier(source_unit: Any) -> int:
     """Multiplier that turns a block's stated unit into đồng, 1 when unknown."""
 
-    return _UNIT_MULTIPLIERS.get(normalize_text(str(source_unit or "")), 1)
+    return resolve_money_multiplier(source_unit)
 
 
 def _scale(value: Any, multiplier: int) -> Any:

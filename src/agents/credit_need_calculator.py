@@ -528,6 +528,20 @@ def build_credit_need_table(
                 + " và ".join(dropped)
                 + " — đã bỏ phần này khỏi bảng."
             )
+    # Backstop for a unit failure nobody anticipated. The two fixes upstream
+    # only catch the spellings they know about, and getting this wrong is a
+    # factor of a thousand or more — large enough that no real business swings
+    # that far year to year, so a gap this size means the source figure was
+    # never scaled rather than that the customer collapsed.
+    if revenue_latest and revenue_plan:
+        ratio = revenue_plan / revenue_latest
+        if ratio < 0.01 or ratio > 100:
+            table.warnings.append(
+                f"Nghi sai đơn vị: doanh thu năm kế hoạch ({revenue_plan:,.0f}) "
+                f"lệch {ratio:.4g} lần so với năm gần nhất "
+                f"({revenue_latest:,.0f}). Kiểm tra 'source_unit' trong hồ sơ "
+                f"nguồn ({revenue_src}) trước khi dùng bảng này."
+            )
     if ccc is None:
         table.warnings.append(
             "Thiếu chu kỳ tiền — không tính được nhu cầu vốn lưu động."
