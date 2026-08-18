@@ -19,6 +19,11 @@ from langgraph.graph import END, StateGraph
 
 from src.agents.financial_ratio_calculator import (
     FinancialRatioCalculator,
+    # Money in the credit-need table must read exactly like money in the
+    # metrics block — same scale, same separators. Sharing the formatter is
+    # what stops the two drifting apart again; they sat in one prompt showing
+    # 220,05 and 220.050.000.000 for the same figure.
+    _format_number,
 )
 from src.utils.common import normalize_text
 from src.utils.extractors import extract_document_text
@@ -250,6 +255,24 @@ VIETNAMESE_CHARS = set(
     "ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệ"
     "íìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ"
 )
+
+
+def _format_credit_need_value(value: float | None, unit: str) -> str:
+    """One cell of the credit-need table.
+
+    Money goes through the metrics block's own formatter (đồng -> tỷ VNĐ,
+    Vietnamese separators). The other two units do not: percentages in this
+    table are already on a 0-100 scale, and _format_number would multiply them
+    by 100 again.
+    """
+
+    if value is None:
+        return ""
+    if unit == "VNĐ":
+        return _format_number(value, "value")
+    if unit == "%":
+        return f"{value:,.1f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+    return f"{value:,.0f}".replace(",", ".")
 
 
 class Supervisor:
@@ -2173,6 +2196,7 @@ class Supervisor:
             loan_program=applied,
             loan_program_detection=detection,
             rate_limit=rate_limit,
+            credit_need=self._build_credit_need_data(documents),
         )
 
     @staticmethod
@@ -2570,8 +2594,9 @@ class Supervisor:
             cls.CREDIT_NEED_BLOCK_HEADING,
             "Bảng dưới đã được hệ thống TÍNH SẴN bằng công thức cố định. Dùng "
             "thẳng các con số này, TUYỆT ĐỐI không tự tính lại từ số liệu thô.",
-            "ĐƠN VỊ: các dòng tiền tính bằng ĐỒNG; dòng ghi % và ngày giữ "
-            "nguyên đơn vị của nó.",
+            "ĐƠN VỊ: các dòng tiền ghi bằng **tỷ VNĐ** (giống khối "
+            "[PRE-COMPUTED FINANCIAL METRICS]); dòng ghi % và ngày giữ nguyên "
+            "đơn vị của nó. Giữ đúng đơn vị này khi trình bày.",
             "CỘT \"Nguồn\" cho biết con số đến từ đâu và BẮT BUỘC phải nêu lại "
             "khi diễn giải: \"mặc định\" nghĩa là hồ sơ KHÔNG nêu và hệ thống "
             "dùng tỷ lệ chính sách — không được trình bày như số liệu của khách "
@@ -2581,15 +2606,51 @@ class Supervisor:
             "|---|---:|---:|---|---|---|",
         ]
         for row in table.rows:
-            fmt = lambda v: "" if v is None else f"{v:,.0f}".replace(",", ".")
             lines.append(
-                f"| {row.label} | {fmt(row.latest)} | {fmt(row.plan)} "
-                f"| {row.unit} | {row.source} | {row.note} |"
+                f"| {row.label} | {_format_credit_need_value(row.latest, row.unit)} "
+                f"| {_format_credit_need_value(row.plan, row.unit)} "
+                f"| {'tỷ VNĐ' if row.unit == 'VNĐ' else row.unit} "
+                f"| {row.source} | {row.note} |"
             )
         if table.warnings:
             lines.append("")
             lines.extend(f"CẢNH BÁO: {w}" for w in table.warnings)
         return "\n".join(lines)
+
+    @classmethod
+    def _build_credit_need_data(
+        cls,
+        documents: list[ClassifiedDocument],
+    ) -> dict[str, Any]:
+        """The credit-need table as data, for the run log rather than a prompt.
+
+        Recomputed rather than shared with _build_credit_need_block, matching
+        how _build_financial_metrics_block and _build_financial_metrics_data
+        already work: the two are called from different places in the graph, and
+        the arithmetic is free next to the LLM calls around it.
+        """
+
+        usable = [doc for doc in documents if doc.extraction_status == "success"]
+        if not usable:
+            return {}
+        try:
+            calculator = FinancialRatioCalculator()
+            payload = [asdict(doc) for doc in usable]
+            yearly_metrics = calculator.extract_yearly_metrics(payload)
+            if not yearly_metrics:
+                return {}
+            return build_credit_need_table(
+                yearly_metrics,
+                calculator.compute_ratios(yearly_metrics),
+                next((d.proposal_extraction for d in usable
+                      if d.is_proposal and d.proposal_extraction), None),
+                next((d.sitevisit_extraction for d in usable
+                      if d.is_sitevisit and d.sitevisit_extraction), None),
+                [d.cic_s10a_extraction for d in usable
+                 if d.is_cic_s10a and d.cic_s10a_extraction],
+            ).as_dict()
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
 
     @staticmethod
     def _build_financial_metrics_data(
@@ -3206,6 +3267,7 @@ class Supervisor:
         loan_program: str = "",
         loan_program_detection: dict[str, Any] | None = None,
         rate_limit: dict[str, Any] | None = None,
+        credit_need: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "status": "success",
@@ -3228,6 +3290,10 @@ class Supervisor:
             # Deterministic ratio computation as data (not just the markdown
             # block) so a finished run can be audited afterwards.
             "financial_metrics": financial_metrics or {},
+            # The credit-need table as data. Money stays in đồng here even
+            # though the prompt shows tỷ VNĐ — a monitoring dump should carry
+            # the figure, not its presentation.
+            "credit_need": credit_need or {},
             "sub_agent_outputs": sub_agent_outputs or {},
             "execution_plan": execution_plan or {},
             "gap_analysis": gap_analysis or {},
