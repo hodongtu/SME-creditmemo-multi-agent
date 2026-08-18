@@ -95,6 +95,7 @@ from src.agents.industry_knowledge import (
     select_industry,
 )
 from src.utils.charts import build_linechart_block, pick_unit
+from src.utils.source_list import build_source_lines
 from src.agents.specialist import (
     BusinessActivityAnalysis,
     CreditMemoComposerAgent,
@@ -2273,6 +2274,7 @@ class Supervisor:
 
             return doc.agent_relevance.get(target_agent) == "R"
 
+        source_list_block = self._build_source_list_block(usable)
         metrics_block = self._build_financial_metrics_block(
             documents,
             target_agent,
@@ -2360,6 +2362,7 @@ class Supervisor:
             1_000,
             budget
             - len(base)
+            - len(source_list_block)
             - len(metrics_block)
             - len(bctc_block)
             - len(self.DOC_SECTION_HEADER)
@@ -2454,6 +2457,9 @@ class Supervisor:
         return truncate_text(
             (
                 f"{base}\n\n"
+                # Near the top on purpose: the final truncate trims the tail, and
+                # a source list that got cut is the exact failure this replaced.
+                f"{source_list_block}\n\n"
                 f"{unit_warning}"
                 f"{metrics_block}\n\n"
                 f"{bctc_block}\n\n"
@@ -2509,6 +2515,50 @@ class Supervisor:
                 f"Extraction status: {doc.extraction_status}",
                 f"Extraction error: {doc.extraction_error}",
                 "",
+            ]
+        )
+
+    SOURCE_LIST_BLOCK_HEADING = "[DANH SÁCH NGUỒN — CHÉP NGUYÊN VĂN]"
+
+    @classmethod
+    def _build_source_list_block(
+        cls,
+        documents: list[ClassifiedDocument],
+    ) -> str:
+        """The finished "Nguồn thông tin" list, for the agent to copy verbatim.
+
+        Computed rather than described because describing it did not work: the
+        rule that used to ask the model to group these itself shipped with worked
+        examples, and the model returned one of the examples instead of reading
+        the sixteen files in front of it. Collapsing a file list is arithmetic,
+        and arithmetic asked of a model comes back wrong quietly.
+
+        Built from the documents that survived extraction, which is the set the
+        report is actually written from — a file that failed to extract is named
+        in the run summary but contributed no evidence, so listing it as a source
+        would overstate the memo the same way the old bug understated it.
+        """
+
+        lines = build_source_lines(
+            [(doc.filename, doc.document_type) for doc in documents]
+        )
+        if not lines:
+            return ""
+        return "\n".join(
+            [
+                cls.SOURCE_LIST_BLOCK_HEADING,
+                # Named by section rather than by placeholder: the two prompt
+                # paths disagree about braces — create_agent passes the system
+                # prompt through raw so the template still reads {{TenFile}},
+                # while the direct chain renders it down to {TenFile}. Pointing
+                # at the field by its heading matches whichever the agent got.
+                "Danh sách dưới đã được hệ thống lập sẵn từ đúng những tài liệu "
+                "bạn đang đọc. CHÉP NGUYÊN VĂN vào trường \"Hồ sơ\"/\"Nguồn "
+                "dữ liệu\" ở đầu báo cáo, mỗi dòng dưới đây là MỘT dòng con. "
+                "TUYỆT ĐỐI không gom thêm, không rút gọn thêm, không bỏ dòng "
+                "nào, không đổi thứ tự.",
+                "",
+                *(f"- {line}" for line in lines),
             ]
         )
 

@@ -248,28 +248,11 @@ class SpecialistAgent:
         - Mọi chỗ dạng {{{{TenTruong}}}} là chỗ cần thay bằng giá trị thật lấy từ
         hồ sơ. Nếu không có giá trị, ghi "Không có dữ liệu".
         TUYỆT ĐỐI không để lại dấu {{{{ }}}} trong câu trả lời.
-        - Trường "Hồ sơ"/"Nguồn dữ liệu" ở đầu báo cáo viết MỘT DÒNG CON CHO MỖI
-        LOẠI TÀI LIỆU, không phải mỗi file. Khoá gom là dòng "Document type:"
-        ghi kèm từng tài liệu trong phần evidence — các file có CÙNG một
-        "Document type" thì gom về một dòng, KHÔNG tự suy đoán theo tên file.
-        Trong dòng đó, rút gọn phần kỳ cho ngắn: dải liên tục dùng dấu gạch
-        ngang, các kỳ rời thì liệt kê.
-        Ví dụ ĐÚNG — 3 file BCTC và 4 file tờ khai thuế thành 2 dòng:
-            - BCTC 2024, 2025 & 2026
-            - TKT 01-04/2025
-        Ví dụ SAI — mỗi file một dòng, danh sách dài không cần thiết:
-            - BCTC_2024.pdf
-            - BCTC_2025.pdf
-            - BCTC_2026.pdf
-        Ví dụ SAI — dồn các LOẠI KHÁC NHAU vào cùng một dòng:
-            - BCTC 2024-2026, TKT 01-04/2025, sổ chi tiết 131
-        Ràng buộc kèm theo:
-          + Loại khác nhau luôn nằm ở dòng khác nhau. Có bao nhiêu loại tài
-          liệu đã dùng thì có bấy nhiêu dòng con.
-          + KHÔNG được bỏ sót: mọi tài liệu đã dùng phải nằm trong một dòng nào
-          đó. Loại chỉ có một file thì ghi thẳng tên file, không cần rút gọn.
-          + Không đọc được kỳ từ tên file thì để tài liệu đó ở dòng riêng và ghi
-          nguyên tên file — TUYỆT ĐỐI không bịa kỳ để gom cho gọn.
+        - Trường "Hồ sơ"/"Nguồn dữ liệu" ở đầu báo cáo: danh sách đã được hệ
+        thống lập sẵn trong khối [DANH SÁCH NGUỒN — CHÉP NGUYÊN VĂN] ở phần
+        dữ liệu. CHÉP ĐÚNG các dòng đó, mỗi dòng là một dòng con. TUYỆT ĐỐI
+        không tự gom, không tự rút gọn, không tự thêm bớt dòng — việc gom nhóm
+        và rút gọn kỳ đã do hệ thống tính, tự làm lại sẽ ra số tài liệu sai.
         Mỗi dòng con thụt vào ĐÚNG BỐN dấu
         cách so với dấu "-" của dòng "Hồ sơ" phía trên — ít hơn bốn dấu cách,
         trình markdown sẽ không nhận là danh sách con và hiển thị phẳng ra
