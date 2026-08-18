@@ -5,6 +5,15 @@ Runs once per document whose matrix type is flagged ``bctc_extraction``
 turning noisy raw OCR text into a compact structured record — report type, period,
 audit opinion, the 3 core statements, and a bounded summary of the notes section —
 so FINANCIAL_ANALYSIS_AGENT can consume clean data instead of a multi-page raw dump.
+
+Money is read as printed and scaled here, the same arrangement the other four
+extraction passes use. This pass was the last one asking the model to convert
+units itself, which put the arithmetic in the one place nothing could check it:
+a statement printed in triệu đồng came through a thousandfold short whenever the
+model missed the unit line, and the ``unit`` field still said "VNĐ" because the
+schema said so. ``normalize_amounts`` now does the conversion from each block's
+own ``source_unit``, and ``FinancialRatioCalculator.detect_unit_anomalies``
+catches what slips past by comparing year to year.
 """
 
 from __future__ import annotations
@@ -12,7 +21,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from src.agents.structured_extraction import build_extraction_chain, run_extraction
+from src.agents.structured_extraction import (
+    build_extraction_chain,
+    resolve_money_multiplier,
+    run_extraction,
+)
 from src.utils.common import normalize_text
 
 REQUIRED_TOP_LEVEL_KEYS = {
@@ -40,8 +53,16 @@ Chỉ dùng dữ kiện có trong văn bản nguồn. Không tự suy diễn hay
 Nếu một trường không xác định được, để giá trị null (hoặc mảng/chuỗi rỗng),
 KHÔNG bỏ qua trường đó.
 
-Toàn bộ giá trị tiền tệ ghi bằng SỐ NGUYÊN đơn vị VNĐ (không chia tỷ, không
-định dạng dấu phẩy/chấm), giữ đúng dấu (âm cho khoản mục ghi âm/trong ngoặc).
+QUY TẮC ĐƠN VỊ TIỀN:
+- GHI ĐÚNG CON SỐ IN TRÊN GIẤY, chỉ bỏ dấu phân cách hàng nghìn. TUYỆT ĐỐI
+  KHÔNG tự nhân lên triệu/tỷ, KHÔNG tự quy đổi đơn vị — việc quy đổi do chương
+  trình làm. Bảng đề "Đơn vị tính: triệu đồng" và in 240.800 thì trả 240800,
+  KHÔNG phải 240800000000.
+- Giữ đúng dấu: âm cho khoản mục ghi âm hoặc đặt trong ngoặc.
+- "source_unit" của MỖI bảng ghi đơn vị in ở đầu chính bảng đó:
+  "dong" | "trieu dong" | "ty dong". Bảng không chú thích đơn vị nào thì để
+  "dong". Thuyết minh có đơn vị riêng thì ghi vào source_unit của
+  "notes_summary" — đừng chép đơn vị của bảng chính sang.
 
 Văn bản OCR có các mốc "--- Page N ---" đánh dấu ranh giới trang, dùng để trích
 dẫn nguồn cho người đọc. Với MỖI BẢNG, bắt buộc điền "page" của bảng đó (số
@@ -90,26 +111,30 @@ Trả về CHÍNH XÁC JSON theo schema sau, không thêm text nào khác:
   }},
   "balance_sheet": {{
     "unit": "VNĐ",
+    "source_unit": "dong | trieu dong | ty dong — đơn vị IN ở đầu bảng, mặc định dong",
     "page": <số trang nơi bảng bắt đầu, bắt buộc nếu xác định được>,
     "years": ["các kỳ xuất hiện trong bảng, mỗi kỳ ghi dạng 'Năm YYYY'"],
     "line_items": [
       {{"label": "tên chỉ tiêu", "code": "mã số nếu có hoặc null",
-        "values": {{"Năm YYYY": <số VNĐ>}}, "page": <số trang nguyên hoặc null>}}
+        "values": {{"Năm YYYY": <số như in trên giấy>}}, "page": <số trang nguyên hoặc null>}}
       // LIỆT KÊ HẾT MỌI DÒNG CỦA BẢNG, không rút gọn
     ]
   }},
-  "income_statement": {{"unit": "VNĐ", "page": <số trang>, "years": [], "line_items": []}},
-  "cash_flow_statement": {{"unit": "VNĐ", "page": <số trang>, "years": [], "line_items": []}},
+  "income_statement": {{"unit": "VNĐ", "source_unit": "dong | trieu dong | ty dong",
+                       "page": <số trang>, "years": [], "line_items": []}},
+  "cash_flow_statement": {{"unit": "VNĐ", "source_unit": "dong | trieu dong | ty dong",
+                          "page": <số trang>, "years": [], "line_items": []}},
   "notes_summary": {{
+    "source_unit": "dong | trieu dong | ty dong — đơn vị IN trong thuyết minh, mặc định dong",
     "accounting_policies": "tóm tắt ngắn gọn hoặc chuỗi rỗng (kèm '(trang N)' ở cuối nếu xác định được)",
     "related_party_transactions": [
-      {{"counterparty": "...", "nature": "...", "amount": <số VNĐ hoặc null>, "year": "...",
+      {{"counterparty": "...", "nature": "...", "amount": <số như in trên giấy, hoặc null>, "year": "...",
         "page": <số trang nguyên hoặc null>}}
     ],
     "contingent_liabilities": ["... (trang N)"],
     "subsequent_events": ["... (trang N)"],
     "key_item_breakdowns": [
-      {{"item": "vd: Vay và nợ thuê tài chính", "breakdown": "...", "amount": <số VNĐ hoặc null>,
+      {{"item": "vd: Vay và nợ thuê tài chính", "breakdown": "...", "amount": <số như in trên giấy, hoặc null>,
         "page": <số trang nguyên hoặc null>}}
     ],
     "other_material_disclosures": ["... (trang N)"]
@@ -340,6 +365,61 @@ def normalize_extraction_periods(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+# The three statements plus the notes each carry their own printed unit: a
+# balance sheet in đồng sitting next to a note in triệu is ordinary in these
+# bundles, so one unit for the whole document would be wrong for part of it.
+_STATEMENT_KEYS = ("balance_sheet", "income_statement", "cash_flow_statement")
+
+
+def _scale(value: Any, multiplier: int) -> Any:
+    """Scale one figure to đồng, leaving anything that is not a number alone."""
+
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return value
+    return round(value * multiplier, 2)
+
+
+def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
+    """Convert every amount to đồng using each block's own source_unit, in place.
+
+    BCTC was the last pass that asked the model to do this arithmetic itself.
+    That is a bad place for it: a statement printed in triệu đồng comes through
+    a thousand-fold short whenever the model misses the unit line at the top of
+    the table, and nothing downstream could tell that figure from a real one —
+    the ``unit`` field said "VNĐ" because the schema said so, not because
+    anybody checked. The four other passes already read the printed unit and
+    scale here; this one now matches them.
+
+    Both consumers of the result are protected by this: FINANCIAL_ANALYSIS_AGENT
+    reads these statements directly, and ``financial_metrics`` turns them into
+    the revenue figure the credit-need table divides by.
+    """
+
+    for key in _STATEMENT_KEYS:
+        statement = result.get(key)
+        if not isinstance(statement, dict):
+            continue
+        multiplier = resolve_money_multiplier(statement.get("source_unit"))
+        for line_item in statement.get("line_items") or []:
+            if not isinstance(line_item, dict):
+                continue
+            values = line_item.get("values")
+            if isinstance(values, dict):
+                line_item["values"] = {
+                    period: _scale(value, multiplier)
+                    for period, value in values.items()
+                }
+
+    notes = result.get("notes_summary")
+    if isinstance(notes, dict):
+        multiplier = resolve_money_multiplier(notes.get("source_unit"))
+        for field in ("related_party_transactions", "key_item_breakdowns"):
+            for entry in notes.get(field) or []:
+                if isinstance(entry, dict):
+                    entry["amount"] = _scale(entry.get("amount"), multiplier)
+    return result
+
+
 def extract_bctc_structured_data(
     chain: Any,
     filename: str,
@@ -360,4 +440,4 @@ def extract_bctc_structured_data(
     )
     if result is None:
         return None, error
-    return normalize_extraction_periods(result), ""
+    return normalize_amounts(normalize_extraction_periods(result)), ""

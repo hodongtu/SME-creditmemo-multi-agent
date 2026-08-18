@@ -429,6 +429,55 @@ class FinancialRatioCalculator:
             self.source_files_by_year(documents),
         )
 
+    # A year-on-year swing this large is not a business event, it is a unit that
+    # never got scaled. Deliberately looser than the 100x backstop in
+    # credit_need_calculator, which compares a plan against the year it was
+    # built from — two figures that cannot be far apart. Consecutive BCTC years
+    # can be: a company incorporated mid-year books a few hundred million and
+    # then a full year at sixty billion, and at 100x that customer gets told its
+    # own growth is a data error. 1000 is the smallest gap a real unit mistake
+    # can produce, since nghìn đồng is the finest unit resolve_money_multiplier
+    # knows, so nothing genuine is caught and nothing spurious is.
+    UNIT_ANOMALY_METRICS = ("net_revenue", "total_assets")
+    UNIT_ANOMALY_LOW = 0.001
+    UNIT_ANOMALY_HIGH = 1000
+
+    def detect_unit_anomalies(
+        self,
+        yearly_metrics: dict[str, dict[str, float]],
+    ) -> list[str]:
+        """Flag consecutive years whose magnitudes cannot both be in đồng.
+
+        The BCTC pass reads the unit printed on each statement and scales here,
+        but a bundle can carry two statements printed in different units, and a
+        model can miss the unit line on one of them. Then one year is a million
+        times the other and every ratio spanning the pair is meaningless.
+
+        Says so rather than guessing which year is wrong — either could be, and
+        silently rescaling one would turn a visible inconsistency into an
+        invisible fabrication.
+        """
+
+        warnings: list[str] = []
+        years = sorted(yearly_metrics)
+        for metric in self.UNIT_ANOMALY_METRICS:
+            for earlier, later in zip(years, years[1:]):
+                a = yearly_metrics.get(earlier, {}).get(metric)
+                b = yearly_metrics.get(later, {}).get(metric)
+                if not a or not b:
+                    continue
+                ratio = b / a
+                if self.UNIT_ANOMALY_LOW < ratio < self.UNIT_ANOMALY_HIGH:
+                    continue
+                warnings.append(
+                    f"NGHI SAI ĐƠN VỊ: {metric} {later} ({b:,.0f}) lệch "
+                    f"{ratio:.4g} lần so với {earlier} ({a:,.0f}). Nhiều khả "
+                    f"năng một trong hai bảng in bằng triệu/tỷ đồng mà không "
+                    f"ghi rõ đơn vị. KHÔNG dùng tăng trưởng hay tỷ lệ bắc cầu "
+                    f"giữa hai năm này; nêu rõ nghi vấn đơn vị trong báo cáo."
+                )
+        return warnings
+
     def source_files_by_year(
         self,
         documents: list[dict[str, Any]],
@@ -655,6 +704,12 @@ class FinancialRatioCalculator:
             "(đã chia 10^9, 2 chữ số thập phân). Giữ nguyên đơn vị này khi trình bày.",
             "",
         ]
+        # Above the numbers, not below them: a reader who has already worked
+        # through the table has drawn the conclusion the warning exists to stop.
+        anomalies = self.detect_unit_anomalies(yearly_metrics)
+        if anomalies:
+            lines.extend(anomalies)
+            lines.append("")
         if source_files:
             lines.extend(
                 [
