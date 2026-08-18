@@ -82,6 +82,7 @@ from src.agents.sitevisit_extraction import (
     build_sitevisit_extraction_chain,
     extract_sitevisit_structured_data,
 )
+from src.agents.credit_need_calculator import build_credit_need_table
 from src.agents.vat_revenue import parse_vat_revenue_block, strip_vat_revenue_block
 from src.agents.industry_knowledge import (
     load_industry_manifest,
@@ -331,6 +332,21 @@ class Supervisor:
         "CREDIT_PROPOSAL_AGENT",
         "RISK_ASSESSMENT_AGENT",
     )
+
+    # Who gets the computed credit-need table. Credit proposal alone: the table
+    # *is* its report, while for anyone else it would be a second opinion on
+    # figures they were not asked to produce.
+    CREDIT_NEED_BLOCK_AGENTS = ("CREDIT_PROPOSAL_AGENT",)
+
+    # Agents that need the CIC S10A extraction to have *run* without reading the
+    # JSON block itself. Credit proposal subtracts the balance outstanding at
+    # other lenders from the working-capital need, so the pass has to happen on a
+    # single-proposal route — but handing it the raw block would also strip that
+    # document's OCR, which it has no use for. Kept apart from
+    # CIC_S10A_JSON_AGENTS so the two reasons cannot be confused later.
+    CIC_S10A_CALCULATOR_AGENTS = ("CREDIT_PROPOSAL_AGENT",)
+
+    CREDIT_NEED_BLOCK_HEADING = "[BẢNG TÍNH NHU CẦU TÍN DỤNG]"
 
     # The flag each extraction pass selects documents by. Single-sourced because
     # three things key off the same pass names: which passes a route needs, which
@@ -871,7 +887,10 @@ class Supervisor:
             # the metrics agents read ratios computed from the same extraction.
             "BCTC": set(cls.BCTC_JSON_STATEMENTS) | set(cls.METRICS_BLOCK_AGENTS),
             "Proposal": set(cls.PROPOSAL_JSON_AGENTS),
-            "CIC S10A": set(cls.CIC_S10A_JSON_AGENTS),
+            "CIC S10A": (
+                set(cls.CIC_S10A_JSON_AGENTS)
+                | set(cls.CIC_S10A_CALCULATOR_AGENTS)
+            ),
             "CIC R21": set(cls.CIC_R21_JSON_AGENTS),
             "Sitevisit": set(cls.SITEVISIT_JSON_AGENTS),
         }
@@ -2277,6 +2296,7 @@ class Supervisor:
             if reads_sitevisit_json
             else ""
         )
+        credit_need_block = self._build_credit_need_block(documents, target_agent)
         industry_block = (
             self._build_industry_knowledge_block(usable, input_text, target_agent)
             if target_agent in self.INDUSTRY_KNOWLEDGE_AGENTS
@@ -2296,6 +2316,7 @@ class Supervisor:
                 # Counted with the rest: next year's plan carries revenue and
                 # COGS, so it can disagree about units with any block above it.
                 sitevisit_block,
+                credit_need_block,
             )
             if block
         )
@@ -2322,6 +2343,7 @@ class Supervisor:
             - len(cic_s10a_block)
             - len(cic_r21_block)
             - len(sitevisit_block)
+            - len(credit_need_block)
             - len(industry_block)
             - len(unit_warning)
             - block_overhead,
@@ -2401,6 +2423,9 @@ class Supervisor:
         cic_s10a_section = f"{cic_s10a_block}\n\n" if cic_s10a_block else ""
         cic_r21_section = f"{cic_r21_block}\n\n" if cic_r21_block else ""
         sitevisit_section = f"{sitevisit_block}\n\n" if sitevisit_block else ""
+        credit_need_section = (
+            f"{credit_need_block}\n\n" if credit_need_block else ""
+        )
         industry_section = f"{industry_block}\n\n" if industry_block else ""
         return truncate_text(
             (
@@ -2412,6 +2437,7 @@ class Supervisor:
                 f"{cic_s10a_section}"
                 f"{cic_r21_section}"
                 f"{sitevisit_section}"
+                f"{credit_need_section}"
                 f"{industry_section}"
                 f"{self.DOC_SECTION_HEADER}"
                 f"{docs_text}"
@@ -2488,6 +2514,82 @@ class Supervisor:
             )
         except Exception as exc:
             return f"[PRE-COMPUTED FINANCIAL METRICS unavailable: {exc}]"
+
+    @classmethod
+    def _build_credit_need_block(
+        cls,
+        documents: list[ClassifiedDocument],
+        target_agent: str,
+    ) -> str:
+        """Render the computed credit-need table for the credit proposal prompt.
+
+        Built from every successfully-extracted document rather than the target
+        agent's routed subset, for the same reason _build_financial_metrics_block
+        is: these are derived facts about the customer, and the CIC report the
+        other-lender balance comes from is not routed to the proposal agent.
+
+        The source column is the part that must survive into the report. With a
+        real credit application most guarantee and LC rows fall back to policy
+        defaults, and a reviewer who cannot tell those from figures read off the
+        customer's paperwork is being shown an assumption as evidence.
+        """
+
+        if target_agent not in cls.CREDIT_NEED_BLOCK_AGENTS:
+            return ""
+        usable = [doc for doc in documents if doc.extraction_status == "success"]
+        if not usable:
+            return ""
+        try:
+            calculator = FinancialRatioCalculator()
+            payload = [asdict(doc) for doc in usable]
+            yearly_metrics = calculator.extract_yearly_metrics(payload)
+            if not yearly_metrics:
+                return ""
+            table = build_credit_need_table(
+                yearly_metrics,
+                calculator.compute_ratios(yearly_metrics),
+                next(
+                    (d.proposal_extraction for d in usable
+                     if d.is_proposal and d.proposal_extraction),
+                    None,
+                ),
+                next(
+                    (d.sitevisit_extraction for d in usable
+                     if d.is_sitevisit and d.sitevisit_extraction),
+                    None,
+                ),
+                [d.cic_s10a_extraction for d in usable
+                 if d.is_cic_s10a and d.cic_s10a_extraction],
+            )
+        except Exception as exc:
+            return f"[BẢNG TÍNH NHU CẦU TÍN DỤNG unavailable: {exc}]"
+
+        if not table.rows:
+            return ""
+        lines = [
+            cls.CREDIT_NEED_BLOCK_HEADING,
+            "Bảng dưới đã được hệ thống TÍNH SẴN bằng công thức cố định. Dùng "
+            "thẳng các con số này, TUYỆT ĐỐI không tự tính lại từ số liệu thô.",
+            "ĐƠN VỊ: các dòng tiền tính bằng ĐỒNG; dòng ghi % và ngày giữ "
+            "nguyên đơn vị của nó.",
+            "CỘT \"Nguồn\" cho biết con số đến từ đâu và BẮT BUỘC phải nêu lại "
+            "khi diễn giải: \"mặc định\" nghĩa là hồ sơ KHÔNG nêu và hệ thống "
+            "dùng tỷ lệ chính sách — không được trình bày như số liệu của khách "
+            "hàng. \"tính toán\" là suy ra từ các dòng khác trong chính bảng này.",
+            "",
+            f"| Chỉ tiêu | {table.latest_year} | {table.plan_year} | Đơn vị | Nguồn | Ghi chú |",
+            "|---|---:|---:|---|---|---|",
+        ]
+        for row in table.rows:
+            fmt = lambda v: "" if v is None else f"{v:,.0f}".replace(",", ".")
+            lines.append(
+                f"| {row.label} | {fmt(row.latest)} | {fmt(row.plan)} "
+                f"| {row.unit} | {row.source} | {row.note} |"
+            )
+        if table.warnings:
+            lines.append("")
+            lines.extend(f"CẢNH BÁO: {w}" for w in table.warnings)
+        return "\n".join(lines)
 
     @staticmethod
     def _build_financial_metrics_data(

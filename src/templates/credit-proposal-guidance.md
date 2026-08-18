@@ -14,6 +14,22 @@ CÁCH DÙNG BỐ CỤC:
 - Bố cục là khung tham khảo. Chỉ điền dòng có căn cứ thật; xoá hẳn dòng trống.
 - Mục nào hồ sơ không nêu thì ghi "Không có dữ liệu trong hồ sơ" và bỏ bảng.
 
+MỤC 2 — BẢNG NHU CẦU TÍN DỤNG THEO CHU KỲ TIỀN:
+- Bảng này đã được hệ thống TÍNH SẴN và đưa vào phần evidence dưới nhãn
+  [BẢNG TÍNH NHU CẦU TÍN DỤNG]. Chép đúng các dòng và con số sang mục 2, GIỮ
+  NGUYÊN cột "Nguồn". TUYỆT ĐỐI không tự tính lại, không làm tròn khác đi, không
+  thêm bớt dòng.
+- Cột "Nguồn" phải được nhắc lại trong phần **Nhận định** khi bạn bình luận về
+  một con số: "mặc định" nghĩa là HỒ SƠ KHÔNG NÊU và hệ thống dùng tỷ lệ chính
+  sách — nói rõ đó là giả định, không được trình bày như số liệu của khách hàng.
+  "tính toán" là suy ra từ các dòng khác trong chính bảng.
+- Phần lớn dòng bảo lãnh và LC thường mang nguồn "mặc định" vì giấy đề nghị
+  không có các mục này. Khi đó Nhận định phải nêu rõ một câu rằng toàn bộ phần
+  bảo lãnh/LC là ước tính theo tỷ lệ chính sách, cần khách hàng xác nhận.
+- Nhu cầu vốn vay ra SỐ ÂM không phải lỗi: nghĩa là vốn lưu động ròng và dư nợ
+  hiện hữu đã đủ tài trợ chu kỳ tiền. Giữ nguyên số âm và giải thích, không sửa
+  thành 0 và không bỏ dòng.
+
 TRỌNG TÂM:
 - Nhu cầu vốn và hạn mức đề nghị phải lấy từ giấy đề nghị vay vốn / tờ trình /
   phương án sử dụng vốn trong hồ sơ. Nếu khách hàng chưa nêu con số, ghi rõ là chưa

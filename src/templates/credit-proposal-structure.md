@@ -20,7 +20,14 @@
 
 **Nhận định**:
 
-## 2. Đề xuất cấp tín dụng
+## 2. Nhu cầu tín dụng theo chu kỳ tiền
+
+| Chỉ tiêu | Năm gần nhất | Năm kế hoạch | Nguồn |
+|---|---:|---:|---|
+
+**Nhận định**:
+
+## 3. Đề xuất cấp tín dụng
 
 | Chỉ tiêu | Đề xuất |
 |---|---|
@@ -33,24 +40,24 @@
 
 **Nhận định**:
 
-## 3. Nguồn trả nợ
+## 4. Nguồn trả nợ
 
 | Nguồn trả nợ | Giá trị dự kiến | Cơ sở xác định |
 |---|---:|---|
 
 **Nhận định**:
 
-## 4. Tài sản bảo đảm
+## 5. Tài sản bảo đảm
 
 | Loại tài sản | Mô tả | Giá trị định giá | Tỷ lệ cho vay/giá trị TSBĐ |
 |---|---|---:|---:|
 
 **Nhận định**:
 
-## 5. Điều kiện cấp tín dụng
+## 6. Điều kiện cấp tín dụng
 
 **Nhận định**:
 
-## 6. Kết luận
+## 7. Kết luận
 
 **Nhận định**:
