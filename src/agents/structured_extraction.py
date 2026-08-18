@@ -30,8 +30,10 @@ def resolve_money_multiplier(source_unit: Any) -> int:
     tỷ VNĐ came through unscaled — off by a factor of a billion, and quiet about
     it. Any phrasing carrying the word survives this version.
 
-    Unknown units mean 1: the prompts already ask for đồng, so no marker is the
-    normal case rather than an error.
+    Unknown units mean 1, and the prompts say so explicitly: a page that prints
+    no unit is in đồng. That default has to be stated in both places — a prompt
+    that leaves it open invites the model to guess "triệu", and the guess is
+    indistinguishable here from a page that really said triệu.
     """
 
     tokens = normalize_text(str(source_unit or "")).split()

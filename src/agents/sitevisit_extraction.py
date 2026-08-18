@@ -20,7 +20,12 @@ Two things make it different from the other four passes:
 
 Next year's plan carries money, and Vietnamese reports write it in triệu or tỷ as
 often as in đồng, so amounts are normalised to đồng on the way out — the same net
-``proposal_extraction`` needs for the same reason.
+``proposal_extraction`` needs for the same reason. The conversion happens here and
+only here: the prompt asks for the figure exactly as printed plus the unit the page
+states. An earlier version asked the model to convert *and* record the unit, and
+then converted again, so a model that followed the instruction correctly produced
+a figure a million times too large. Whoever owns the arithmetic has to own all of
+it.
 """
 
 from __future__ import annotations
@@ -66,8 +71,11 @@ QUY TẮC BẮT BUỘC:
 - Tách bạch QUAN SÁT và Ý KIẾN. Mọi đánh giá, nhận định, khuyến nghị của cán bộ
   khảo sát chỉ được đặt trong khối "conclusion". Bốn khối còn lại chỉ chứa dữ
   kiện đọc được.
-- Mọi số tiền quy về ĐỒNG. Nếu báo cáo ghi triệu/tỷ thì nhân lên và ghi đơn vị
-  gốc vào "source_unit" của khối đó.
+- KHÔNG tự quy đổi đơn vị tiền. Ghi con số ĐÚNG NHƯ IN trên giấy: báo cáo viết
+  "240.800 triệu đồng" thì trả 240800, KHÔNG phải 240800000000. Hệ thống tự nhân
+  theo "source_unit" — bạn quy đổi thêm lần nữa là số sai gấp triệu lần.
+- "source_unit" ghi đơn vị in trên trang: "dong" | "trieu dong" | "ty dong".
+  Trang không chú thích đơn vị nào thì để "dong".
 - Mã GSO (mã ngành kinh tế theo Tổng cục Thống kê) chỉ ghi khi tài liệu in rõ
   mã đó. Không tự tra, không tự suy từ tên ngành.
 - Khối "lc_terms": chỉ điền khi báo cáo NÓI RÕ về hoạt động nhập khẩu và thanh
@@ -101,7 +109,7 @@ Trả về JSON đúng cấu trúc sau, không kèm giải thích:
   }},
   "business_plan_next_year": {{
     "year": "năm kế hoạch, null nếu không nêu",
-    "source_unit": "đơn vị tiền ghi trong báo cáo (dong/trieu dong/ty dong)",
+    "source_unit": "dong | trieu dong | ty dong — đơn vị IN trên trang, mặc định dong",
     "net_revenue": 0,
     "cogs": 0,
     "gross_profit": 0,
@@ -134,21 +142,31 @@ def _unit_multiplier(source_unit: Any) -> int:
 
 
 def _scale(value: Any, multiplier: int) -> Any:
-    if multiplier == 1 or not isinstance(value, (int, float)) or isinstance(value, bool):
+    """Scale to đồng and round, leaving anything that is not a number alone.
+
+    Rounded to two decimals because đồng is the smallest unit there is — more
+    precision than that is float noise from the multiply, and it reaches the
+    reader as a tail of meaningless digits.
+    """
+
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
         return value
-    return value * multiplier
+    return round(value * multiplier, 2)
 
 
 def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
-    """Convert every amount to đồng using the block's own source_unit, in place."""
+    """Convert every amount to đồng using the block's own source_unit, in place.
+
+    This is the only place the conversion happens — see the module docstring for
+    what it cost to have it in two. Runs even when the multiplier is 1, because
+    the rounding is wanted whether or not there was a unit to apply.
+    """
 
     for block_name, fields in _AMOUNT_FIELDS.items():
         block = result.get(block_name)
         if not isinstance(block, dict):
             continue
         multiplier = _unit_multiplier(block.get("source_unit"))
-        if multiplier == 1:
-            continue
         for field in fields:
             block[field] = _scale(block.get(field), multiplier)
     return result

@@ -60,11 +60,11 @@ QUY TẮC ĐƠN VỊ TIỀN — quan trọng nhất:
 Biểu mẫu này dùng nhiều đơn vị khác nhau ngay trong cùng một mục: bảng gói thầu
 thường ghi bằng ĐỒNG, phần "Hiệu quả của phương án" ghi bằng TRIỆU ĐỒNG, bảng tài
 sản bảo đảm ghi bằng TỶ ĐỒNG.
-- MỌI số tiền trong JSON phải quy về ĐỒNG (VNĐ). "240.800 triệu đồng" -> 240800000000.
-- Ghi đơn vị đọc được trên bản gốc vào "source_unit" của khối đó ("đồng",
-  "triệu đồng", "tỷ đồng"), để người đọc truy ngược được.
-- Không đoán đơn vị. Không thấy ghi đơn vị thì để source_unit là "" và giữ nguyên
-  con số như trên giấy.
+- KHÔNG tự quy đổi. Ghi con số ĐÚNG NHƯ IN trên giấy: mục ghi "240.800 triệu
+  đồng" thì trả 240800, KHÔNG phải 240800000000. Hệ thống tự nhân theo
+  "source_unit" — bạn quy đổi thêm lần nữa là số sai gấp triệu lần.
+- "source_unit" của TỪNG khối ghi đơn vị in ngay trên bảng/mục đó:
+  "dong" | "trieu dong" | "ty dong". Mục không chú thích đơn vị nào thì để "dong".
 
 QUY TẮC CHUNG:
 - Chỉ trích thứ có trên giấy. Ô trống thì để null, KHÔNG suy diễn, KHÔNG lấy số
@@ -76,11 +76,11 @@ QUY TẮC CHUNG:
 Trả về CHÍNH XÁC JSON theo schema sau, không thêm text nào khác:
 {{
   "capital_plan": {{
-    "total": <số VNĐ hoặc null>,
-    "own_capital": <số VNĐ hoặc null>,
-    "loan_capital": <số VNĐ hoặc null>,
-    "other_capital": <số VNĐ hoặc null>,
-    "source_unit": "đồng | triệu đồng | tỷ đồng | ''",
+    "total": <số như in trên giấy, hoặc null>,
+    "own_capital": <số như in trên giấy, hoặc null>,
+    "loan_capital": <số như in trên giấy, hoặc null>,
+    "other_capital": <số như in trên giấy, hoặc null>,
+    "source_unit": "dong | trieu dong | ty dong",
     "page": <số nguyên hoặc null>
   }},
   "business_plan": {{
@@ -90,24 +90,24 @@ Trả về CHÍNH XÁC JSON theo schema sau, không thêm text nào khác:
       {{"title": "vd: Các gói thầu/công trình đã ký",
         "items": [
           {{"name": "tên gói thầu/công trình",
-            "contract_value": <số VNĐ hoặc null>,
-            "planned_value": <giá trị dự kiến thực hiện năm kế hoạch, số VNĐ hoặc null>,
+            "contract_value": <số như in trên giấy, hoặc null>,
+            "planned_value": <giá trị dự kiến thực hiện năm kế hoạch, số như in trên giấy, hoặc null>,
             "note": "ghi chú hoặc ''"}}
         ],
-        "total_contract_value": <số VNĐ hoặc null>,
-        "total_planned_value": <số VNĐ hoặc null>}}
+        "total_contract_value": <số như in trên giấy, hoặc null>,
+        "total_planned_value": <số như in trên giấy, hoặc null>}}
     ],
-    "source_unit": "...",
+    "source_unit": "dong | trieu dong | ty dong",
     "page": <số nguyên hoặc null>
   }},
   "plan_efficiency": {{
-    "revenue": <số VNĐ hoặc null>,
-    "cogs": <giá vốn, số VNĐ hoặc null>,
-    "selling_admin_expense": <chi phí bán hàng và quản lý, số VNĐ hoặc null>,
-    "interest_expense": <chi phí lãi vay, số VNĐ hoặc null>,
-    "depreciation": <khấu hao, số VNĐ hoặc null>,
-    "profit": <lợi nhuận, số VNĐ hoặc null>,
-    "source_unit": "...",
+    "revenue": <số như in trên giấy, hoặc null>,
+    "cogs": <giá vốn, số như in trên giấy, hoặc null>,
+    "selling_admin_expense": <chi phí bán hàng và quản lý, số như in trên giấy, hoặc null>,
+    "interest_expense": <chi phí lãi vay, số như in trên giấy, hoặc null>,
+    "depreciation": <khấu hao, số như in trên giấy, hoặc null>,
+    "profit": <lợi nhuận, số như in trên giấy, hoặc null>,
+    "source_unit": "dong | trieu dong | ty dong",
     "page": <số nguyên hoặc null>
   }},
   "repayment_plan": {{
@@ -120,24 +120,24 @@ Trả về CHÍNH XÁC JSON theo schema sau, không thêm text nào khác:
     "items": [
       {{"category": "vd: Bất động sản",
         "description": "mô tả tài sản",
-        "value": <số VNĐ hoặc null>,
+        "value": <số như in trên giấy, hoặc null>,
         "owner": "chủ sở hữu hoặc ''",
         "status": "tình trạng cầm cố/thế chấp hoặc ''",
         "note": "ghi chú hoặc ''"}}
     ],
-    "total_value": <số VNĐ hoặc null>,
-    "source_unit": "...",
+    "total_value": <số như in trên giấy, hoặc null>,
+    "source_unit": "dong | trieu dong | ty dong",
     "page": <số nguyên hoặc null>
   }},
   "credit_request": {{
-    "total_limit": <tổng mức/hạn mức đề nghị, số VNĐ hoặc null>,
+    "total_limit": <tổng mức/hạn mức đề nghị, số như in trên giấy, hoặc null>,
     "facilities": [
       {{"name": "vd: Hạn mức cho vay",
-        "amount": <số VNĐ hoặc null>,
+        "amount": <số như in trên giấy, hoặc null>,
         "method": "phương thức cho vay hoặc ''",
         "tenor": "thời hạn hoặc ''"}}
     ],
-    "source_unit": "...",
+    "source_unit": "dong | trieu dong | ty dong",
     "page": <số nguyên hoặc null>
   }},
   "extraction_notes": ["ghi chú về mục thiếu, không chắc chắn, hoặc OCR kém"]
@@ -160,10 +160,14 @@ def _scale(value: Any, multiplier: int) -> Any:
 def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
     """Convert every amount to đồng using each block's own source_unit, in place.
 
-    The prompt already asks for đồng; this is the safety net for when the model
-    echoes the page's unit instead. Blocks are scaled independently because the
-    form genuinely mixes units between adjacent tables — treating the document as
-    having one unit is how a figure ends up a million times off.
+    The prompt asks for the figure exactly as printed plus the unit the page
+    states; the conversion is here and nowhere else. It used to be in both — the
+    prompt said convert *and* record the unit, and this then converted again — so
+    a model that obeyed produced a figure a million times too large.
+
+    Blocks are scaled independently because the form genuinely mixes units
+    between adjacent tables: the tender table is in đồng while "Hiệu quả của
+    phương án" right below it is in triệu.
     """
 
     for block_name, fields in _AMOUNT_FIELDS.items():

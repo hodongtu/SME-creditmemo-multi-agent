@@ -90,6 +90,22 @@ class Row:
     source: str = ""
     note: str = ""
 
+    def __post_init__(self) -> None:
+        """Round both years to two decimals.
+
+        Done here rather than in ``as_dict`` so the JSON export and the report
+        block round identically — they read the row directly and would otherwise
+        disagree in the last digits. Two decimals is the floor for every unit the
+        table uses: đồng has no smaller part, and days and percentages are not
+        measured finer than that either. What is being cut is float noise from
+        the divisions, not precision anyone can act on.
+        """
+
+        for attr in ("latest", "plan"):
+            value = getattr(self, attr)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                object.__setattr__(self, attr, round(value, 2))
+
 
 @dataclass
 class CreditNeedTable:
