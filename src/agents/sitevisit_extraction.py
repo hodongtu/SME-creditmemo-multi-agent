@@ -35,6 +35,7 @@ REQUIRED_TOP_LEVEL_KEYS = {
     "business_profile",
     "supply_chain",
     "business_plan_next_year",
+    "lc_terms",
     "conclusion",
 }
 
@@ -76,6 +77,10 @@ QUY TẮC BẮT BUỘC:
   gốc vào "source_unit" của khối đó.
 - Mã GSO (mã ngành kinh tế theo Tổng cục Thống kê) chỉ ghi khi tài liệu in rõ
   mã đó. Không tự tra, không tự suy từ tên ngành.
+- Khối "lc_terms": chỉ điền khi báo cáo NÓI RÕ về hoạt động nhập khẩu và thanh
+  toán bằng L/C. Mọi tỷ lệ ghi dạng thập phân (60% -> 0.6). Không suy ra tỷ lệ
+  từ danh sách nhà cung cấp nước ngoài — không nêu thì để null, hệ thống sẽ
+  dùng giá trị mặc định và ghi rõ đó là giả định.
 
 Trả về JSON đúng cấu trúc sau, không kèm giải thích:
 
@@ -109,6 +114,14 @@ Trả về JSON đúng cấu trúc sau, không kèm giải thích:
     "gross_profit": 0,
     "profit_before_tax": 0,
     "assumptions": ["căn cứ/giả định của kế hoạch nếu báo cáo có nêu"]
+  }},
+  "lc_terms": {{
+    "import_ratio": <tỷ lệ nhập khẩu trên tổng mua vào, dạng 0.0-1.0, null nếu không nêu>,
+    "lc_share_of_import": <tỷ lệ hàng nhập cần mở L/C, 0.0-1.0, null nếu không nêu>,
+    "sight_share": <tỷ lệ L/C trả ngay trên doanh số mở L/C, 0.0-1.0, null nếu không nêu>,
+    "deferred_share": <tỷ lệ L/C trả chậm, 0.0-1.0, null nếu không nêu>,
+    "sight_days": <số ngày trung bình từ mở đến thanh toán L/C trả ngay, null nếu không nêu>,
+    "deferred_days": <số ngày trung bình L/C trả chậm, null nếu không nêu>
   }},
   "conclusion": {{
     "overall_assessment": "đánh giá chung của cán bộ khảo sát",

@@ -37,9 +37,9 @@ SRC_CIC = "CIC"
 SRC_DERIVED = "tính toán"
 SRC_DEFAULT = "mặc định"
 
-# Guarantee turnover is grossed up from planned revenue: a contractor's
-# guarantee facilities cover work beyond the revenue recognised in one year.
-GUARANTEE_REVENUE_RATIO = 0.70
+# Last-resort stand-in for the value of contracts needing a guarantee, used only
+# when neither a contract plan nor a growth rate is available.
+GUARANTEE_REVENUE_RATIO = 0.30
 
 # (label, share of guarantee turnover, average days outstanding, name keys).
 # The shares are policy defaults, used per type only when the credit
@@ -67,7 +67,12 @@ GUARANTEE_NAME_MARKER = "bao lanh"
 LC_NAME_TOKENS = ("lc",)
 LC_NAME_PHRASES = ("thu tin dung", "tin dung chung tu")
 
+# Import ratio belongs in the 331 payables ledger (foreign suppliers' credit
+# turnover over the period's total). No extraction pass reads that ledger yet,
+# so it falls back to this and the row says so.
 IMPORT_RATIO_DEFAULT = 0.50
+# Of what is imported, the share settled by letter of credit.
+LC_SHARE_OF_IMPORT_DEFAULT = 0.50
 LC_SIGHT_SHARE_DEFAULT = 0.50
 LC_DEFERRED_SHARE_DEFAULT = 0.50
 LC_SIGHT_DAYS_DEFAULT = 30
@@ -176,6 +181,21 @@ def _facilities(proposal: dict[str, Any] | None) -> list[tuple[str, float]]:
     return out
 
 
+def _is_lc_name(name: str) -> bool:
+    """True when a facility name denotes a letter of credit.
+
+    Whole tokens, not substrings: "L/C" normalises to the two tokens "l" and
+    "c", and searching for "lc" inside the string would fire on unrelated words.
+    """
+
+    tokens = name.split()
+    return (
+        any(token in tokens for token in LC_NAME_TOKENS)
+        or ("l" in tokens and "c" in tokens)
+        or any(phrase in name for phrase in LC_NAME_PHRASES)
+    )
+
+
 def guarantee_turnover_from_file(
     proposal: dict[str, Any] | None,
 ) -> dict[str, float]:
@@ -205,16 +225,75 @@ def lc_turnover_from_file(proposal: dict[str, Any] | None) -> float | None:
     for name, amount in _facilities(proposal):
         if GUARANTEE_NAME_MARKER in name:
             continue
-        tokens = name.split()
-        is_lc = (
-            any(token in tokens for token in LC_NAME_TOKENS)
-            or ("l" in tokens and "c" in tokens)
-            or any(phrase in name for phrase in LC_NAME_PHRASES)
-        )
-        if is_lc:
+        if _is_lc_name(name):
             total += amount
             seen = True
     return total if seen else None
+
+
+def planned_contract_value(proposal: dict[str, Any] | None) -> float | None:
+    """Total value the application plans to execute next year, or None.
+
+    Section B of the form lists contracts already signed with a "giá trị dự kiến
+    thực hiện năm kế hoạch" column; that total is the closest thing the file has
+    to the value of work needing a guarantee.
+    """
+
+    block = (proposal or {}).get("business_plan")
+    if not isinstance(block, dict):
+        return None
+    total = 0.0
+    seen = False
+    for section in block.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        value = _num(section.get("total_planned_value"))
+        if value is not None:
+            total += value
+            seen = True
+    return total if seen else None
+
+
+def _survey_lc(survey: dict[str, Any] | None, key: str) -> float | None:
+    block = (survey or {}).get("lc_terms")
+    return _num(block.get(key)) if isinstance(block, dict) else None
+
+
+def _pick(
+    survey_value: float | None,
+    default: float,
+) -> tuple[float, str]:
+    """Site-visit figure when the report stated one, else the policy default."""
+
+    if survey_value is not None:
+        return survey_value, SRC_SURVEY
+    return default, SRC_DEFAULT
+
+
+def requested_sections(proposal: dict[str, Any] | None) -> dict[str, bool]:
+    """Which of the three blocks the credit application actually asks for.
+
+    The bank's rule is to drop a block the customer raised no need for. Read off
+    the facility list rather than guessed: a form asking only for a working
+    capital limit should not be answered with a page of guarantee estimates.
+
+    With no application at all every block stays on — there is nothing saying
+    the customer does not need them, and silently emitting an empty table would
+    read as a system fault rather than an absence of demand.
+    """
+
+    names = [name for name, _amount in _facilities(proposal)]
+    if not names:
+        return {"loan": True, "guarantee": True, "lc": True, "stated": False}
+    guarantee = any(GUARANTEE_NAME_MARKER in name for name in names)
+    lc = lc_turnover_from_file(proposal) is not None
+    # Anything that is neither a guarantee nor an LC is a funded facility.
+    loan = any(
+        GUARANTEE_NAME_MARKER not in name
+        and not _is_lc_name(name)
+        for name in names
+    )
+    return {"loan": loan, "guarantee": guarantee, "lc": lc, "stated": True}
 
 
 def _plan_value(
@@ -295,6 +374,10 @@ def build_credit_need_table(
             table.plan_year = f"Năm {raw}" if raw.isdigit() else raw
             break
 
+    sections = requested_sections(proposal_extraction)
+    show_guarantees = sections["guarantee"]
+    show_lc = sections["lc"]
+
     add = table.rows.append
     add(Row("Doanh thu thuần", "VNĐ", revenue_latest, revenue_plan, revenue_src))
     add(Row("Giá vốn hàng bán", "VNĐ", cogs_latest, cogs_plan, cogs_src))
@@ -348,58 +431,103 @@ def build_credit_need_table(
     # bond puts that one on the customer's figure and leaves the other four on
     # the policy share, each carrying its own source flag.
     stated_guarantees = guarantee_turnover_from_file(proposal_extraction)
-    guarantee_revenue = _div(revenue_plan, GUARANTEE_REVENUE_RATIO)
-    remaining = [
-        label for label, *_ in GUARANTEE_TYPES if label not in stated_guarantees
-    ]
-    add(Row(
-        "Doanh thu bảo lãnh", "VNĐ", None, guarantee_revenue, SRC_DEFAULT,
-        f"Doanh thu năm kế hoạch / {GUARANTEE_REVENUE_RATIO:.0%}"
-        + ("" if len(remaining) == len(GUARANTEE_TYPES)
-           else f" — chỉ là cơ sở cho {len(remaining)} loại chưa có số trong hồ sơ"),
-    ))
-    for label, share, days, _keys in GUARANTEE_TYPES:
-        stated = stated_guarantees.get(label)
-        if stated is not None:
-            # The form states a limit; the row is an average balance. Treated as
-            # the turnover and put through the same tenor conversion, so the two
-            # columns stay the same kind of number.
-            add(Row(label, "VNĐ", None, _balance(stated, 1.0, days),
-                    SRC_PROPOSAL, f"Hạn mức đề nghị × {days} ngày / 365"))
-        else:
-            add(Row(label, "VNĐ", None, _balance(guarantee_revenue, share, days),
-                    SRC_DEFAULT, f"{share:.0%} × {days} ngày"))
-
-    # --- LC: planning year only ---------------------------------------------
-    add(Row("Tỷ lệ nhập khẩu", "%", None, IMPORT_RATIO_DEFAULT * 100, SRC_DEFAULT))
-    stated_lc = lc_turnover_from_file(proposal_extraction)
-    if stated_lc is not None:
-        lc_turnover, lc_source, lc_note = stated_lc, SRC_PROPOSAL, "Hạn mức L/C đề nghị"
+    # Contract value needing a guarantee, down the three tiers the bank states.
+    contract_value = planned_contract_value(proposal_extraction)
+    if contract_value is not None:
+        base_source, base_note = SRC_PROPOSAL, "Tổng giá trị dự kiến thực hiện năm kế hoạch"
     else:
-        lc_turnover = (
-            None if revenue_plan is None else revenue_plan * IMPORT_RATIO_DEFAULT
-        )
-        lc_source = SRC_DERIVED
-        lc_note = "Doanh thu năm kế hoạch × tỷ lệ nhập khẩu"
-    add(Row("Doanh số mở LC dự kiến", "VNĐ", None, lc_turnover, lc_source, lc_note))
-    add(Row("Tỷ lệ LC trả ngay/Doanh số mở LC", "%", None,
-            LC_SIGHT_SHARE_DEFAULT * 100, SRC_DEFAULT))
-    add(Row("Tỷ lệ LC trả chậm/Doanh số mở LC", "%", None,
-            LC_DEFERRED_SHARE_DEFAULT * 100, SRC_DEFAULT))
-    add(Row("Số ngày trung bình thanh toán LC trả ngay", "ngày", None,
-            LC_SIGHT_DAYS_DEFAULT, SRC_DEFAULT))
-    add(Row("Số ngày trung bình thanh toán LC trả chậm", "ngày", None,
-            LC_DEFERRED_DAYS_DEFAULT, SRC_DEFAULT))
-    lc_days = (
-        LC_SIGHT_SHARE_DEFAULT * LC_SIGHT_DAYS_DEFAULT
-        + LC_DEFERRED_SHARE_DEFAULT * LC_DEFERRED_DAYS_DEFAULT
-    )
-    add(Row("Số ngày trung bình thanh toán LC bình quân", "ngày", None,
-            lc_days, SRC_DERIVED, "Bình quân gia quyền theo tỷ lệ trả ngay/trả chậm"))
-    add(Row("Số dư LC trung bình", "VNĐ", None,
-            _balance(lc_turnover, 1.0, lc_days), SRC_DERIVED,
-            "Doanh số mở LC × số ngày bình quân / 365"))
+        growth = _num(ratios.get("revenue_growth"))
+        if revenue_latest is not None and growth is not None:
+            contract_value = revenue_latest * (1 + growth / 100)
+            base_source = SRC_STATEMENTS
+            base_note = f"Doanh thu năm gần nhất × (1 + tăng trưởng {growth:.1f}%)"
+        elif revenue_plan is not None:
+            contract_value = revenue_plan * GUARANTEE_REVENUE_RATIO
+            base_source = SRC_DEFAULT
+            base_note = f"Doanh thu năm kế hoạch × {GUARANTEE_REVENUE_RATIO:.0%}"
+        else:
+            contract_value, base_source, base_note = None, "", ""
 
+    if show_guarantees:
+        add(Row("Giá trị hợp đồng cần bảo lãnh", "VNĐ", None, contract_value,
+                base_source, base_note))
+        for label, share, days, _keys in GUARANTEE_TYPES:
+            stated = stated_guarantees.get(label)
+            if stated is not None:
+                # The form states a limit while the row is an average balance,
+                # so the stated amount goes through the same tenor conversion
+                # rather than being dropped in as-is.
+                add(Row(label, "VNĐ", None, _balance(stated, 1.0, days),
+                        SRC_PROPOSAL, f"Hạn mức đề nghị / (365 / {days} ngày)"))
+            else:
+                add(Row(label, "VNĐ", None, _balance(contract_value, share, days),
+                        base_source or SRC_DEFAULT,
+                        f"× {share:.0%} rồi / (365 / {days} ngày)"))
+
+    # --- LC: planning year only, based on projected COGS ---------------------
+    if show_lc:
+        import_ratio, import_src = _pick(
+            _survey_lc(sitevisit_extraction, "import_ratio"), IMPORT_RATIO_DEFAULT)
+        lc_share, lc_share_src = _pick(
+            _survey_lc(sitevisit_extraction, "lc_share_of_import"),
+            LC_SHARE_OF_IMPORT_DEFAULT)
+        sight_share, sight_share_src = _pick(
+            _survey_lc(sitevisit_extraction, "sight_share"), LC_SIGHT_SHARE_DEFAULT)
+        deferred_share, deferred_share_src = _pick(
+            _survey_lc(sitevisit_extraction, "deferred_share"),
+            LC_DEFERRED_SHARE_DEFAULT)
+        sight_days, sight_days_src = _pick(
+            _survey_lc(sitevisit_extraction, "sight_days"), LC_SIGHT_DAYS_DEFAULT)
+        deferred_days, deferred_days_src = _pick(
+            _survey_lc(sitevisit_extraction, "deferred_days"),
+            LC_DEFERRED_DAYS_DEFAULT)
+
+        add(Row("Tỷ lệ nhập khẩu", "%", None, import_ratio * 100, import_src,
+                "Nguồn chuẩn là sổ chi tiết 331 (phát sinh có của NCC nước ngoài "
+                "/ tổng phát sinh có) — chưa có trích xuất sổ này"
+                if import_src == SRC_DEFAULT else ""))
+        add(Row("Tỷ lệ hàng nhập cần mở LC", "%", None, lc_share * 100, lc_share_src))
+
+        stated_lc = lc_turnover_from_file(proposal_extraction)
+        if stated_lc is not None:
+            lc_turnover, lc_source = stated_lc, SRC_PROPOSAL
+            lc_note = "Hạn mức L/C đề nghị"
+        elif cogs_plan is not None:
+            lc_turnover = cogs_plan * import_ratio * lc_share
+            lc_source = SRC_DERIVED
+            lc_note = "Giá vốn dự phóng × tỷ lệ nhập khẩu × tỷ lệ cần LC"
+        else:
+            lc_turnover, lc_source, lc_note = None, "", ""
+        add(Row("Doanh số mở LC dự kiến", "VNĐ", None, lc_turnover, lc_source, lc_note))
+
+        add(Row("Tỷ lệ LC trả ngay/Doanh số mở LC", "%", None,
+                sight_share * 100, sight_share_src))
+        add(Row("Tỷ lệ LC trả chậm/Doanh số mở LC", "%", None,
+                deferred_share * 100, deferred_share_src))
+        add(Row("Số ngày trung bình thanh toán LC trả ngay", "ngày", None,
+                sight_days, sight_days_src))
+        add(Row("Số ngày trung bình thanh toán LC trả chậm", "ngày", None,
+                deferred_days, deferred_days_src))
+        lc_days = sight_share * sight_days + deferred_share * deferred_days
+        add(Row("Số ngày trung bình thanh toán LC bình quân", "ngày", None,
+                lc_days, SRC_DERIVED,
+                "Bình quân gia quyền theo tỷ lệ trả ngay/trả chậm"))
+        add(Row("Số dư LC trung bình", "VNĐ", None,
+                _balance(lc_turnover, 1.0, lc_days), SRC_DERIVED,
+                "Doanh số mở LC × số ngày bình quân / 365"))
+
+    if sections["stated"]:
+        dropped = [
+            name for name, shown in (
+                ("bảo lãnh", show_guarantees), ("LC", show_lc),
+            ) if not shown
+        ]
+        if dropped:
+            table.warnings.append(
+                "Giấy đề nghị không nêu nhu cầu "
+                + " và ".join(dropped)
+                + " — đã bỏ phần này khỏi bảng."
+            )
     if ccc is None:
         table.warnings.append(
             "Thiếu chu kỳ tiền — không tính được nhu cầu vốn lưu động."
