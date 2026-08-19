@@ -1,62 +1,67 @@
 # =============================================================================
-# MA TRẬN PHÂN LOẠI TÀI LIỆU  (nhóm hồ sơ -> loại tài liệu -> agent sử dụng)
+# DOCUMENT CLASSIFICATION MATRIX  (dossier group -> document type -> agents)
 # =============================================================================
-# Nguồn: docs/document_matrix.xlsx — bản nghiệp vụ, KHÔNG nằm trong repo
-# (xem .gitignore). File này là bản chép tay của workbook đó; sửa workbook thì
-# phải cập nhật lại đây bằng tay.
+# Source: docs/document_matrix.xlsx — the business copy, NOT in the repo (see
+# .gitignore). This file is a hand transcription of that workbook; editing the
+# workbook means updating this by hand.
 #
-# ĐÂY LÀ NGUỒN SỰ THẬT cho việc định tuyến tài liệu. Sửa file này là đổi được
-# tài liệu nào đi tới agent nào — không cần đụng vào code Python.
+# THIS IS THE SOURCE OF TRUTH for document routing. Editing this file changes
+# which document reaches which agent — no Python change required.
 #
-# --- Cách đọc một `type` -----------------------------------------------------
-#   id        : khoá kỹ thuật, không đổi (đã ghi vào log/monitoring).
-#   label     : nguyên văn dòng chứng từ trong file Excel gốc.
-#   keywords  : từ khoá nhận diện loại tài liệu này từ TÊN FILE và NỘI DUNG.
-#               Viết không dấu, chữ thường. Hệ thống tự bỏ dấu + hạ chữ thường
-#               cả từ khoá lẫn văn bản trước khi so, nên viết có dấu vẫn chạy;
-#               để không dấu cho thống nhất và thấy rõ dạng đem đi so khớp.
-#               Trùng tên file được tính điểm nặng gấp 3 lần trùng nội dung.
-#   agents    : agent nào dùng loại tài liệu này, kèm mức R/O.
-#                 R = Required — bằng chứng cốt lõi, được ưu tiên ngân sách.
-#                 O = Optional — có thì dùng, xếp sau R.
-#               Giá trị dạng scalar (`R`) = giống nhau ở cả 4 chương trình vay.
-#               Giá trị dạng map = tách theo chương trình, PHẢI ghi đủ cả 4.
-#   requirement : cột "Cấp mới"/"Tái cấp" của file gốc. Hiện CHƯA đấu vào logic,
-#               giữ lại để sau này dựng checklist hồ sơ còn thiếu.
-#   bctc_extraction : true = kích hoạt bước trích xuất BCTC ra JSON có cấu trúc
-#               (src/agents/bctc_extraction.py).
-#   proposal_extraction : true = trích Giấy đề nghị cấp tín dụng (mục B, C, D)
-#               (src/agents/proposal_extraction.py).
-#   cic_s10a_extraction : true = trích Báo cáo chi tiết quan hệ tín dụng CIC mã
-#               S10A (src/agents/cic_s10a_extraction.py). Đặt tên theo mã phiếu
-#               vì CIC phát hành nhiều loại báo cáo khác hẳn nhau về cấu trúc:
-#               S10A là quan hệ tín dụng, R20/R21 là bảo đảm tiền vay.
-#   cic_r21_extraction : true = trích Báo cáo thông tin bảo đảm tiền vay CIC
-#               (src/agents/cic_r21_extraction.py). Trên giấy mã phiếu in là
-#               "R20"; tên cờ giữ "r21" vì đó là tên đã đăng ký cho module —
-#               chỉ file YAML này và module Python cần khớp tên nhau, không
-#               liên quan gì đến chữ in trên báo cáo.
-#               MỖI cờ tốn thêm 1 lượt gọi LLM cho mỗi tài liệu khớp.
+# --- How to read a `type` ----------------------------------------------------
+#   id        : technical key, never changed (it is written into logs/monitoring).
+#   label     : the document line verbatim from the source Excel file.
+#   keywords  : terms that identify this type from the FILENAME and the CONTENT.
+#               Written unaccented and lowercase. The system strips accents and
+#               lowercases both keywords and text before comparing, so accented
+#               spellings work too; unaccented is the convention here so the form
+#               actually being compared is visible.
+#               A filename hit scores 3x a content hit.
+#   agents    : which agents use this type, with an R/O level.
+#                 R = Required — core evidence, gets budget priority.
+#                 O = Optional — used when present, ranked after R.
+#               A scalar value (`R`) = identical across all 4 loan programs.
+#               A map value = per-program, and MUST list all 4.
+#   requirement : the "Cấp mới"/"Tái cấp" columns of the source file. NOT wired
+#               into any logic yet; kept for a future missing-document checklist.
+#   bctc_extraction : true = run the financial-statement pass that turns the
+#               document into structured JSON (src/agents/bctc_extraction.py).
+#   proposal_extraction : true = extract the credit application, sections B, C
+#               and D (src/agents/proposal_extraction.py).
+#   cic_s10a_extraction : true = extract the CIC credit-relationship report,
+#               form S10A (src/agents/cic_s10a_extraction.py). Named after the
+#               form code because CIC issues several reports whose structures
+#               have nothing in common: S10A is credit relationships, R20/R21 is
+#               loan collateral.
+#   cic_r21_extraction : true = extract the CIC loan-collateral report
+#               (src/agents/cic_r21_extraction.py). The printed form code is
+#               "R20"; the flag keeps "r21" because that is the name the module
+#               was registered under — only this YAML and the Python module need
+#               to agree, and neither has to match what the report prints.
+#               EACH flag costs one extra LLM call per matching document.
 #
-# --- Chọn agent chính --------------------------------------------------------
-# `primary_agent` khai ở cấp nhóm, áp cho mọi loại trong nhóm. Nếu agent đó
-# không có mặt trong `agents` của loại (vd I.1 chỉ có RA) thì lấy agent mức R
-# đầu tiên theo thứ tự CP > CR > FS > BA > RA. Có thể override ở cấp loại.
+# --- Choosing the primary agent ----------------------------------------------
+# `primary_agent` is declared at group level and applies to every type in the
+# group. When that agent is absent from a type's `agents` (e.g. I.1 lists only
+# RA), the first R-level agent wins, in the order CP > CR > FS > BA > RA. It can
+# be overridden per type.
 #
-# Nhóm VI không tồn tại trong file gốc (đánh số nhảy V -> VII). Giữ nguyên.
+# Group VI does not exist in the source file (numbering jumps V -> VII). Kept.
 # =============================================================================
 
 version: 1
 
-# 4 chương trình vay. File Excel gộp B1CP/MISA/PL++ vào một cột vì hiện đang
-# giống nhau; ở đây tách hẳn để khi nào lệch nhau chỉ cần sửa giá trị.
+# The 4 loan programs. The Excel file merges B1CP/MISA/PL++ into one column
+# because they agree today; they are separate here so that the day they diverge
+# is a value edit rather than a restructure.
 #
-# `aliases` = cách người dùng có thể gọi chương trình đó trong câu hỏi. Hệ thống
-# dò các cụm này trong prompt để biết dùng cột nào (xem detect_loan_program).
-# Alias được chuẩn hoá y như từ khoá tài liệu: bỏ dấu, hạ chữ thường, mọi ký tự
-# không phải chữ/số thành khoảng trắng — nên "PL++" và "PL+" đều thành "pl".
-# So khớp theo trọn token, vì vậy "P/L" (thành "p l") KHÔNG bị nhận nhầm.
-# Một alias chỉ được trỏ tới một chương trình; trùng là lỗi ngay lúc load.
+# `aliases` = how a user might name the program in a question. The system looks
+# for these phrases in the prompt to pick the right column (see
+# detect_loan_program). Aliases are normalised exactly like document keywords:
+# accents stripped, lowercased, every non-alphanumeric character turned into a
+# space — so "PL++" and "PL+" both become "pl". Matching is whole-token, which
+# is why "P/L" (becoming "p l") is NOT mistaken for it.
+# An alias may point at only one program; a duplicate is an error at load time.
 loan_programs:
   - id: B1CP
     label: "B1CP"
@@ -250,9 +255,9 @@ groups:
           - "thue gtgt"
           - "gtgt"
           - "vat declaration"
-          # "Ảnh chụp phần mềm bán hàng" là một phương án thay thế của chính
-          # dòng này, nên từ khoá đặt ở đây (III.4 cũng nhắc tới nhưng chỉ như
-          # một chứng từ kèm theo).
+          # "Ảnh chụp phần mềm bán hàng" is an alternative for this line
+          # itself, so the keyword lives here (III.4 mentions it too, but only
+          # as a supporting document).
           - "phan mem ban hang"
 
       - id: sao_ke_tai_khoan_tctd
@@ -283,8 +288,8 @@ groups:
         requirement:
           cap_moi: "Bắt buộc với từng chân dung KH"
           tai_cap: "Bắt buộc với từng chân dung KH"
-        # Dòng DUY NHẤT trong toàn ma trận có mức khác nhau giữa các chương
-        # trình vay: PLO coi là bắt buộc, ba chương trình còn lại là tuỳ chọn.
+        # The ONLY line in the whole matrix whose level differs by loan
+        # program: PLO treats it as required, the other three as optional.
         agents:
           BUSINESS_ACTIVITY_AGENT:  {B1CP: O, MISA: O, PLPP: O, PLO: R}
           FINANCIAL_ANALYSIS_AGENT: {B1CP: O, MISA: O, PLPP: O, PLO: R}
@@ -301,11 +306,12 @@ groups:
           - "cong no nguoi mua"
           - "cong no nguoi ban"
           - "hang ton kho"
-          # "so du dau ky"/"so du cuoi ky" đã bỏ: chúng có mặt ở mọi sổ sách kế
-          # toán — sổ cái, sổ chi tiết, bảng cân đối — nên không phân biệt được
-          # loại nào. Chúng đủ để kéo "SỔ CHI TIẾT TÀI KHOẢN 331" về hoà 2-2 với
-          # type này, rồi thứ tự trong matrix cho type này thắng: sai loại, sai
-          # routing, và không có dấu hiệu nào báo.
+          # "so du dau ky"/"so du cuoi ky" removed: they appear in every set
+          # of accounting records — the general ledger, the detail ledgers, the
+          # balance sheet — so they say nothing about which type a document is.
+          # They were enough to tie "SỔ CHI TIẾT TÀI KHOẢN 331" 2-2 with this
+          # type, and matrix order then handed it the win: wrong type, wrong
+          # routing, and nothing to signal it.
 
       - id: so_chi_tiet_khoan_muc_khac
         label: "Các sổ chi tiết khoản mục khác (nếu có)"
@@ -334,9 +340,9 @@ groups:
           Đề nghị cấp tín dụng/hạn mức kiêm phương án kinh doanh/sử dụng vốn
           trong đó nêu rõ phương án/kế hoạch kinh doanh/sử dụng vốn của năm đề
           nghị cấp hạn mức; Đề nghị phát hành bảo lãnh.
-        # Mục B (phương án vốn + kế hoạch kinh doanh + hiệu quả + trả nợ),
-        # mục C (tài sản bảo đảm) và mục D (đề nghị cấp tín dụng) được trích
-        # xuất ra JSON — xem src/agents/proposal_extraction.py.
+        # Section B (capital plan + business plan + efficiency + repayment),
+        # section C (collateral) and section D (credit request) are extracted
+        # into JSON — see src/agents/proposal_extraction.py.
         proposal_extraction: true
         requirement:
           cap_moi: "Bắt buộc"
@@ -481,11 +487,11 @@ groups:
           tai_cap: "Bắt buộc"
         cic_s10a_extraction: true
         agents:
-          # FINANCIAL_ANALYSIS_AGENT đã bỏ: template lẫn guidance của FA không
-          # nhắc CIC lần nào, nên tài liệu này chỉ chiếm ngân sách ký tự của các
-          # bằng chứng FA thật sự dùng. Nó cũng là tài liệu duy nhất FA nhận
-          # dưới dạng OCR thô trong khi CR/RA đọc bản đã trích — bất nhất đó
-          # biến mất cùng lúc.
+          # FINANCIAL_ANALYSIS_AGENT removed: neither FA's template nor its
+          # guidance mentions CIC anywhere, so this document only spent the
+          # character budget that the evidence FA does read would otherwise use.
+          # It was also the one document FA received as raw OCR while CR/RA read
+          # the extracted version — that inconsistency goes with it.
           CREDIT_RELATIONSHIP_AGENT: R
           RISK_ASSESSMENT_AGENT: R
         keywords:
@@ -519,14 +525,14 @@ groups:
           - "thong tin cic tai san bao dam"
           - "cic tai san bao dam"
           - "cic tsbd"
-          # Cụm đặc hiệu đọc từ báo cáo CIC mã phiếu R20/R21 thật (đo trên OCR
-          # thật, không phải chữ dựng tay): tiêu đề in đậm "BÁO CÁO THÔNG TIN
-          # BẢO ĐẢM TIỀN VAY" chính nó lại hay bị OCR đọc sai vì cỡ chữ lớn/in
-          # đậm, nên hai cụm dưới bám vào mục 2 — "THÔNG TIN ĐẢM BẢO TIỀN VAY
-          # CỦA KHÁCH HÀNG TẠI CÁC TỔ CHỨC TÍN DỤNG" và nhãn lặp lại ở mỗi
-          # khối tài sản "Danh sách Tài sản bảo đảm:" — cả hai đều đủ dài để
-          # không trùng ngẫu nhiên với S10A hay ho_so_tsbd (giấy tờ sở hữu gốc,
-          # không phải báo cáo CIC).
+          # Phrases taken from a real R20/R21 CIC report (measured on actual
+          # OCR, not invented text): the bold title "BÁO CÁO THÔNG TIN BẢO ĐẢM
+          # TIỀN VAY" is itself often misread, because it is large and bold, so
+          # the two phrases below anchor on section 2 instead — "THÔNG TIN ĐẢM
+          # BẢO TIỀN VAY CỦA KHÁCH HÀNG TẠI CÁC TỔ CHỨC TÍN DỤNG" and the label
+          # repeated above every asset block, "Danh sách Tài sản bảo đảm:".
+          # Both are long enough not to collide by chance with S10A or with
+          # ho_so_tsbd (the original ownership papers, not a CIC report).
           - "dam bao tien vay cua khach hang"
           - "danh sach tai san bao dam"
           - "chi tiet ve bao dam tien vay"

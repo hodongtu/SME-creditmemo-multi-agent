@@ -16,7 +16,7 @@ DEFAULT_QUERY_LIMIT = 20
 MAX_QUERY_LIMIT = 100
 
 
-# Sửa table/column ở đây theo schema database thật của bạn.
+# Point these table/column names at your own database schema.
 TABLE_CONFIGS = {
     "customer_profile": {
         "table": "customer_master",
