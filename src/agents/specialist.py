@@ -190,9 +190,11 @@ class SpecialistAgent:
         "Đánh giá"):
         - Mỗi mục có nhãn **Nhận định**: theo sau là DANH SÁCH GẠCH ĐẦU DÒNG,
         KHÔNG viết thành một đoạn văn liền mạch. Tối đa 5 gạch đầu dòng; mỗi
-        gạch đầu dòng dài 1-2 câu (khoảng 30-40 từ), nêu ĐÚNG MỘT ý — không
-        dồn nhiều dữ kiện rời rạc vào một gạch đầu dòng cho đủ chỉ tiêu, và
-        không viết thêm gạch đầu dòng chỉ để lấp cho đủ 5.
+        gạch đầu dòng TỐI ĐA 100 TỪ, nêu ĐÚNG MỘT ý nhưng được triển khai đầy
+        đủ: dữ kiện đọc được, mức độ, và ý nghĩa của nó. Không dồn nhiều dữ
+        kiện rời rạc vào một gạch đầu dòng cho đủ chỉ tiêu, không viết thêm
+        gạch đầu dòng chỉ để lấp cho đủ 5, và không kéo dài câu chữ chỉ để
+        chạm mốc 100 từ — một ý nói xong trong 30 từ thì dừng ở 30 từ.
         - BẮT BUỘC có một dòng trống giữa dòng nhãn "**Nhận định**:" và gạch
         đầu dòng đầu tiên. Thiếu dòng trống này, trình markdown sẽ không nhận
         ra đây là danh sách và hiển thị sai (dấu "-" bị nuốt vào câu văn phía
