@@ -478,6 +478,71 @@ class FinancialRatioCalculator:
                 )
         return warnings
 
+    # A statement that does not add up is reporting at least one wrong figure,
+    # and the gap is usually far too small for the unit backstop to see: the
+    # sample that prompted this had a gross profit of 572 against a net revenue
+    # of 377, roughly a tenfold error where UNIT_ANOMALY_HIGH is 1000.
+    IDENTITY_TOLERANCE = 0.01
+
+    def detect_identity_breaks(
+        self,
+        yearly_metrics: dict[str, dict[str, float]],
+    ) -> list[str]:
+        """Flag years whose figures contradict the statement's own arithmetic.
+
+        These identities hold in every Vietnamese statement by construction, so a
+        break is proof that a figure was misread — no judgement about the
+        business is involved, which is what makes them safe to assert.
+
+        Reports rather than repairs. Which side is wrong is unknowable from here:
+        a broken gross-profit identity could be a bad revenue, a bad COGS or a bad
+        gross profit, and quietly rewriting one of them would turn a visible
+        contradiction into an invented number that nothing downstream could
+        question. Same reasoning as detect_unit_anomalies.
+        """
+
+        warnings: list[str] = []
+        for year in sorted(yearly_metrics):
+            m = yearly_metrics[year]
+
+            def _has(*keys: str) -> bool:
+                return all(isinstance(m.get(k), (int, float)) for k in keys)
+
+            def _off(actual: float, expected: float) -> bool:
+                scale = max(abs(actual), abs(expected))
+                return scale > 0 and abs(actual - expected) / scale > self.IDENTITY_TOLERANCE
+
+            if _has("gross_profit", "net_revenue", "cogs"):
+                expected = m["net_revenue"] - m["cogs"]
+                if _off(m["gross_profit"], expected):
+                    warnings.append(
+                        f"SỐ LIỆU KHÔNG KHỚP ({year}): lợi nhuận gộp đọc được "
+                        f"{m['gross_profit']:,.0f} nhưng doanh thu thuần "
+                        f"{m['net_revenue']:,.0f} trừ giá vốn {m['cogs']:,.0f} "
+                        f"= {expected:,.0f}. Ít nhất một trong ba số này đọc sai "
+                        f"— đối chiếu BCTC gốc trước khi dùng."
+                    )
+
+            if _has("net_revenue", "gross_revenue") and m["net_revenue"] > m["gross_revenue"]:
+                warnings.append(
+                    f"SỐ LIỆU KHÔNG KHỚP ({year}): doanh thu thuần "
+                    f"{m['net_revenue']:,.0f} lớn hơn doanh thu bán hàng "
+                    f"{m['gross_revenue']:,.0f}, trong khi các khoản giảm trừ "
+                    f"không thể âm. Đối chiếu BCTC gốc trước khi dùng."
+                )
+
+            if _has("total_assets", "total_liabilities", "equity"):
+                expected = m["total_liabilities"] + m["equity"]
+                if _off(m["total_assets"], expected):
+                    warnings.append(
+                        f"SỐ LIỆU KHÔNG KHỚP ({year}): tổng tài sản "
+                        f"{m['total_assets']:,.0f} khác nợ phải trả "
+                        f"{m['total_liabilities']:,.0f} cộng vốn chủ sở hữu "
+                        f"{m['equity']:,.0f} = {expected:,.0f}. Bảng cân đối "
+                        f"không cân — đối chiếu BCTC gốc trước khi dùng."
+                    )
+        return warnings
+
     def source_files_by_year(
         self,
         documents: list[dict[str, Any]],
@@ -531,6 +596,12 @@ class FinancialRatioCalculator:
     CODE_AGREEMENT_BONUS = 100
     CODE_ONLY_SCORE = 40
 
+    # Which signal matched at all, ranked above how well it matched. A line that
+    # names the metric always beats one that merely carries a colliding Mã số,
+    # however the two score against each other.
+    LABEL_TIER = 1
+    CODE_ONLY_TIER = 0
+
     def extract_yearly_metrics(
         self,
         documents: list[dict[str, Any]],
@@ -543,9 +614,9 @@ class FinancialRatioCalculator:
         failed, or no extraction LLM configured) contributes nothing.
         """
         yearly_metrics: dict[str, dict[str, float]] = {}
-        # (year, metric_key) -> match score. Keeping the best-scoring row instead
+        # (year, metric_key) -> (tier, score). Keeping the best-ranked row instead
         # of the first one makes the result independent of line-item order.
-        best_score: dict[tuple[str, str], int] = {}
+        best_score: dict[tuple[str, str], tuple[int, int]] = {}
 
         for document in documents:
             extraction = document.get("bctc_extraction")
@@ -575,7 +646,7 @@ class FinancialRatioCalculator:
                     )
                     if matched is None:
                         continue
-                    metric, score = matched
+                    metric, tier, score = matched
 
                     for year, raw_value in values.items():
                         try:
@@ -591,11 +662,14 @@ class FinancialRatioCalculator:
                             year, current_year, previous_year
                         )
                         slot = (year_key, metric.key)
-                        if score <= best_score.get(slot, -1):
+                        # Tier first, score only to order rows within a tier —
+                        # see match_metric for the line this stops from winning.
+                        rank = (tier, score)
+                        if rank <= best_score.get(slot, (-1, -1)):
                             continue
                         yearly_metrics.setdefault(year_key, {})
                         yearly_metrics[year_key][metric.key] = value
-                        best_score[slot] = score
+                        best_score[slot] = rank
 
         return dict(sorted(yearly_metrics.items()))
 
@@ -605,14 +679,26 @@ class FinancialRatioCalculator:
         label: str,
         code: Any,
         statement_key: str,
-    ) -> tuple[MetricDefinition, int] | None:
-        """Map one statement line to a metric, with a confidence score.
+    ) -> tuple[MetricDefinition, int, int] | None:
+        """Map one statement line to a metric, with a tier and a score.
 
         The label is the primary key and the Mã số only corroborates it. Codes
         extracted from poor scans are frequently wrong — in one real sample the
         model returned 311 (phải trả người bán) for "Nợ ngắn hạn" — so letting a
         code override a clear label would introduce errors rather than remove
         them. A code is used on its own only when no label matches at all.
+
+        The tier is what makes that last sentence true between rows as well as
+        within one. It used to hold only within a row: the caller compared bare
+        scores, and CODE_ONLY_SCORE outranks an ordinary alias match, so a line
+        with no textual relation to the metric could take the slot from the line
+        that named it. Measured on a real statement, "11. Thu nhập khác" won the
+        giá vốn slot from "4. Giá vốn hàng bán" — the extraction had copied the
+        label's ordinal into the code field, and 11 is giá vốn's TT200 code.
+
+        LABEL_TIER beats CODE_ONLY_TIER outright; the score orders rows inside a
+        tier. Scores stay comparable to each other, which they would not if the
+        fix had been to push CODE_ONLY_SCORE below every alias match.
         """
 
         normalized_label = _normalize_text(label)
@@ -652,7 +738,8 @@ class FinancialRatioCalculator:
             candidates.append((metric, score))
 
         if candidates:
-            return max(candidates, key=lambda item: item[1])
+            metric, score = max(candidates, key=lambda item: item[1])
+            return metric, cls.LABEL_TIER, score
 
         # No label matched — OCR may have mangled it beyond recognition. Fall
         # back to the code alone, which is the only remaining signal.
@@ -660,7 +747,7 @@ class FinancialRatioCalculator:
             if statement_key not in metric.statements:
                 continue
             if _code_matches(code_text, metric.codes):
-                return metric, cls.CODE_ONLY_SCORE
+                return metric, cls.CODE_ONLY_TIER, cls.CODE_ONLY_SCORE
         return None
 
     def compute_ratios(
@@ -706,7 +793,10 @@ class FinancialRatioCalculator:
         ]
         # Above the numbers, not below them: a reader who has already worked
         # through the table has drawn the conclusion the warning exists to stop.
-        anomalies = self.detect_unit_anomalies(yearly_metrics)
+        anomalies = (
+            self.detect_unit_anomalies(yearly_metrics)
+            + self.detect_identity_breaks(yearly_metrics)
+        )
         if anomalies:
             lines.extend(anomalies)
             lines.append("")
