@@ -1,0 +1,235 @@
+[
+  {
+    "path": "/fixture/BCTC_MAU_2025.pdf",
+    "filename": "BCTC_MAU_2025.pdf",
+    "content": "BÁO CÁO TÀI CHÍNH công ty mẫu (fixture tổng hợp)",
+    "agent": "FINANCIAL_ANALYSIS_AGENT",
+    "reasoning": "fixture",
+    "confidence": 0.9,
+    "document_type": "bao_cao_tai_chinh",
+    "is_bctc": true,
+    "extraction_status": "success",
+    "extraction_error": "",
+    "bctc_extraction": {
+      "document_type": "BCTC riêng lẻ",
+      "reporting_period": {
+        "period_label": "Năm 2025",
+        "comparative_period_label": "Năm 2024"
+      },
+      "audit_opinion": {
+        "is_audited": true,
+        "opinion_type": "chấp nhận toàn phần"
+      },
+      "balance_sheet": {
+        "unit": "VNĐ",
+        "source_unit": "dong",
+        "page": 3,
+        "years": [
+          "Năm 2025",
+          "Năm 2024"
+        ],
+        "line_items": [
+          {
+            "label": "A. TÀI SẢN NGẮN HẠN",
+            "code": "100",
+            "values": {
+              "Năm 2025": 2000000000000,
+              "Năm 2024": 1800000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "TỔNG CỘNG TÀI SẢN",
+            "code": "270",
+            "values": {
+              "Năm 2025": 3000000000000,
+              "Năm 2024": 2700000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "C. NỢ PHẢI TRẢ",
+            "code": "300",
+            "values": {
+              "Năm 2025": 1800000000000,
+              "Năm 2024": 1600000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "I. Nợ ngắn hạn",
+            "code": "310",
+            "values": {
+              "Năm 2025": 1500000000000,
+              "Năm 2024": 1300000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "D. VỐN CHỦ SỞ HỮU",
+            "code": "400",
+            "values": {
+              "Năm 2025": 1200000000000,
+              "Năm 2024": 1100000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "IV. Hàng tồn kho",
+            "code": "140",
+            "values": {
+              "Năm 2025": 500000000000,
+              "Năm 2024": 450000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "1. Phải thu ngắn hạn của khách hàng",
+            "code": "131",
+            "values": {
+              "Năm 2025": 300000000000,
+              "Năm 2024": 280000000000
+            },
+            "page": 4
+          }
+        ]
+      },
+      "income_statement": {
+        "unit": "VNĐ",
+        "source_unit": "dong",
+        "page": 4,
+        "years": [
+          "Năm 2025",
+          "Năm 2024"
+        ],
+        "line_items": [
+          {
+            "label": "1. Doanh thu bán hàng và cung cấp dịch vụ",
+            "code": "01",
+            "values": {
+              "Năm 2025": 3800000000000,
+              "Năm 2024": 3500000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "2. Các khoản giảm trừ doanh thu",
+            "code": "02",
+            "values": {
+              "Năm 2025": 2000000000,
+              "Năm 2024": 1500000000
+            },
+            "page": 4
+          },
+          {
+            "label": "3. Doanh thu thuần về bán hàng và cung cấp dịch vụ",
+            "code": "10",
+            "values": {
+              "Năm 2025": 3798000000000,
+              "Năm 2024": 3498500000000
+            },
+            "page": 4
+          },
+          {
+            "label": "4. Giá vốn hàng bán",
+            "code": "20",
+            "values": {
+              "Năm 2025": 3478000000000,
+              "Năm 2024": 3200000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "5. Lợi nhuận gộp về bán hàng và cung cấp dịch vụ",
+            "code": "21",
+            "values": {
+              "Năm 2025": 320000000000,
+              "Năm 2024": 298500000000
+            },
+            "page": 4
+          },
+          {
+            "label": "6. Doanh thu hoạt động tài chính",
+            "code": "22",
+            "values": {
+              "Năm 2025": 179000000000,
+              "Năm 2024": 104000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "7. Chi phí tài chính",
+            "code": "24",
+            "values": {
+              "Năm 2025": 116000000000,
+              "Năm 2024": 125000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "8. Chi phí bán hàng",
+            "code": "26",
+            "values": {
+              "Năm 2025": 124000000000,
+              "Năm 2024": 96000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "9. Chi phí quản lý doanh nghiệp",
+            "code": "30",
+            "values": {
+              "Năm 2025": 10000000000,
+              "Năm 2024": 7000000000
+            },
+            "page": 4
+          },
+          {
+            "label": "10. Lợi nhuận thuần từ hoạt động kinh doanh",
+            "code": "10",
+            "values": {
+              "Năm 2025": 1200000000,
+              "Năm 2024": 938000000
+            },
+            "page": 4
+          },
+          {
+            "label": "11. Thu nhập khác",
+            "code": "11",
+            "values": {
+              "Năm 2025": 800000000,
+              "Năm 2024": 600000000
+            },
+            "page": 4
+          },
+          {
+            "label": "16. Lợi nhuận sau thuế thu nhập doanh nghiệp",
+            "code": "60",
+            "values": {
+              "Năm 2025": 50000000000,
+              "Năm 2024": 45000000000
+            },
+            "page": 4
+          }
+        ]
+      },
+      "cash_flow_statement": {
+        "unit": "VNĐ",
+        "source_unit": "dong",
+        "page": 5,
+        "years": [
+          "Năm 2025",
+          "Năm 2024"
+        ],
+        "line_items": []
+      },
+      "notes_summary": {
+        "source_unit": "dong",
+        "accounting_policies": "",
+        "related_party_transactions": [],
+        "key_item_breakdowns": []
+      },
+      "extraction_notes": []
+    }
+  }
+]
