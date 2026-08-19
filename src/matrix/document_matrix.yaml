@@ -301,8 +301,11 @@ groups:
           - "cong no nguoi mua"
           - "cong no nguoi ban"
           - "hang ton kho"
-          - "so du dau ky"
-          - "so du cuoi ky"
+          # "so du dau ky"/"so du cuoi ky" đã bỏ: chúng có mặt ở mọi sổ sách kế
+          # toán — sổ cái, sổ chi tiết, bảng cân đối — nên không phân biệt được
+          # loại nào. Chúng đủ để kéo "SỔ CHI TIẾT TÀI KHOẢN 331" về hoà 2-2 với
+          # type này, rồi thứ tự trong matrix cho type này thắng: sai loại, sai
+          # routing, và không có dấu hiệu nào báo.
 
       - id: so_chi_tiet_khoan_muc_khac
         label: "Các sổ chi tiết khoản mục khác (nếu có)"
@@ -478,7 +481,11 @@ groups:
           tai_cap: "Bắt buộc"
         cic_s10a_extraction: true
         agents:
-          FINANCIAL_ANALYSIS_AGENT: R
+          # FINANCIAL_ANALYSIS_AGENT đã bỏ: template lẫn guidance của FA không
+          # nhắc CIC lần nào, nên tài liệu này chỉ chiếm ngân sách ký tự của các
+          # bằng chứng FA thật sự dùng. Nó cũng là tài liệu duy nhất FA nhận
+          # dưới dạng OCR thô trong khi CR/RA đọc bản đã trích — bất nhất đó
+          # biến mất cùng lúc.
           CREDIT_RELATIONSHIP_AGENT: R
           RISK_ASSESSMENT_AGENT: R
         keywords:
