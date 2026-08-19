@@ -19,7 +19,7 @@ from src.matrix.document_matrix import (
     load_matrix,
 )
 from src.types import VALID_DOCUMENT_AGENTS
-from src.utils.common import normalize_text
+from src.utils.common import SUPPORTED_EXTENSIONS, normalize_text
 from src.utils.paths import PROJECT_ROOT
 
 
@@ -40,7 +40,6 @@ __all__ = [
     "rule_classify_document",
 ]
 
-SUPPORTED_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".csv", ".txt", ".md", ".pptx"}
 
 
 def compute_file_hash(path: str) -> str:

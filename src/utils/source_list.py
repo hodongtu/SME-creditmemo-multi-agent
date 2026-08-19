@@ -27,9 +27,10 @@ follow from what the failure was:
 
 from __future__ import annotations
 
-import os
 import re
 from itertools import groupby
+
+from src.utils.common import SUPPORTED_EXTENSIONS
 
 # A period is a 4-digit year, optionally preceded by a month or quarter. The
 # separator class carries ":" because macOS stores a "/" typed in Finder as a
@@ -108,23 +109,53 @@ def _compress(periods: list[tuple[int, int | None]]) -> str:
     return ", ".join(parts)
 
 
+def _strip_extension(filename: str) -> str:
+    """Drop the extension, but only one the pipeline actually ingests.
+
+    Cutting at the last dot instead would take the year off ``TKT_01.2025`` — a
+    file with no extension at all, which these folders do contain. Discovery has
+    already rejected everything outside SUPPORTED_EXTENSIONS, so a name reaching
+    this list either ends in one of them or ends in nothing.
+    """
+
+    stem, dot, extension = filename.rpartition(".")
+    if dot and f".{extension.lower()}" in SUPPORTED_EXTENSIONS:
+        return stem
+    return filename
+
+
+def _display_names(filenames: list[str]) -> list[str]:
+    """Filenames as the report should print them, extensions off.
+
+    Unless the extension is the only thing telling two of them apart: ``BCTC.pdf``
+    and ``BCTC.xlsx`` would both render as ``BCTC`` and read as a duplicated line.
+    Collapsing them to one entry would be worse — this module's whole rule is that
+    no document disappears — so the group keeps its full names instead.
+    """
+
+    stripped = [_strip_extension(filename) for filename in filenames]
+    if len(set(stripped)) != len(stripped):
+        return list(filenames)
+    return stripped
+
+
 def _lines_for_group(filenames: list[str]) -> list[str]:
     """One line for a group of same-type files, or one line each if it cannot be."""
 
     if len(filenames) == 1:
-        return list(filenames)
+        return _display_names(filenames)
 
     parsed = []
     for filename in filenames:
-        stem = os.path.splitext(filename)[0]
+        stem = _strip_extension(filename)
         period = _parse_period(stem)
         if period is None:
-            return list(filenames)
+            return _display_names(filenames)
         parsed.append((stem, period))
 
     label = _shared_label([(stem, span) for stem, (_, span) in parsed])
     if not label:
-        return list(filenames)
+        return _display_names(filenames)
     return [f"{label} {_compress([period for _, (period, _) in parsed])}"]
 
 

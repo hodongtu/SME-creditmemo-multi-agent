@@ -11,6 +11,18 @@ import re
 import unicodedata
 
 
+# Every extension the pipeline will ingest; discovery rejects the rest before a
+# file is ever classified. Kept here rather than beside the discovery code
+# because two things need it and they sit on opposite sides of the layering:
+# classification filters a folder with it, and the source list uses it to strip
+# an extension off a filename it is about to print. Stripping by "text after the
+# last dot" would eat the year off "TKT_01.2025", a file with no extension at
+# all — knowing the real set is what makes that safe.
+SUPPORTED_EXTENSIONS = frozenset(
+    {".pdf", ".xlsx", ".xls", ".csv", ".txt", ".md", ".pptx"}
+)
+
+
 def contains_any(text: str, keywords: list[str]) -> bool:
     """Return True when any keyword appears in the input text."""
     return any(keyword in text for keyword in keywords)
