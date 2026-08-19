@@ -26,13 +26,32 @@ NODE_MIN_WIDTH = 96
 NODE_MAX_WIDTH = 190
 NODE_PADDING_X = 10
 NODE_PADDING_Y = 8
-LINE_HEIGHT = 13
-FONT_SIZE = 10.5
-EDGE_FONT_SIZE = 8.5
+LINE_HEIGHT = 17
+# SVG user units are CSS px, and WeasyPrint prints them at 72/96 — so a size
+# here is 0.75 of what lands on the page. Measured, not assumed: a 20px label
+# came out of the PDF at exactly 15.00pt.
+PX_TO_PT = 0.75
+# 13.5px = 10.1pt against 9.5pt body text: the boxes read a touch larger than
+# the prose, which is what a diagram wants. Reliable only because a wrapped
+# chain now lays out into the page width instead of being scaled down to reach
+# it — before that, this constant was multiplied by an 0.45 fit factor and the
+# nine-box supply chain printed at 3.5pt.
+FONT_SIZE = 13.5
+EDGE_FONT_SIZE = 10.5
 RANK_GAP = 74
 # Top-down charts need less room between levels: a horizontal gap has to fit an
 # edge label *beside* the connector, a vertical one only above and below it.
 VERTICAL_RANK_GAP = 46
+# What a level needs when nothing is written between it and the next one: room
+# for the connector and its arrowhead, no more. RANK_GAP is sized for an edge
+# label sitting beside the connector, and on a chain with no labels at all those
+# 74s were 36% of the drawing's width — spent on space for text that does not
+# exist, and paid for by shrinking the text that does.
+BARE_RANK_GAP = 30
+BARE_VERTICAL_RANK_GAP = 26
+# Vertical room between wrapped rows: enough for the connector to drop out of
+# one row, run back to the left and arrive on top of the next.
+WRAP_ROW_GAP = 42
 NODE_GAP = 14
 MARGIN = 8
 
@@ -49,14 +68,19 @@ MAX_CHARS_PER_LINE = int((NODE_MAX_WIDTH - 2 * NODE_PADDING_X) / CHAR_WIDTH)
 # contents, which paints the diagram twice on one page.
 PAGE_CONTENT_WIDTH = 726.0
 # Below this the labels stop being readable, so the caller is told the diagram
-# needs splitting rather than being handed an unreadable picture.
-MIN_READABLE_FONT = 6.0
+# needs splitting rather than being handed an unreadable picture. In px, like
+# every size here: 8px is 6pt on the page.
+MIN_READABLE_FONT = 8.0
 
-DEFAULT_FILL = "#ECECFF"
-DEFAULT_STROKE = "#9370DB"
-DEFAULT_TEXT = "#111111"
-EDGE_COLOUR = "#333333"
-GROUP_STROKE = "#999999"
+# The report's own palette (report_style.py) rather than mermaid's purple
+# defaults, which made every diagram look pasted in from another document. The
+# blue is the same accent the blockquote rule and footnote links already use,
+# and the connector grey matches the chart axes in charts.py.
+DEFAULT_FILL = "#f2f7fb"
+DEFAULT_STROKE = "#2f6f9f"
+DEFAULT_TEXT = "#1f2a33"
+EDGE_COLOUR = "#5c7285"
+GROUP_STROKE = "#b9c6d1"
 
 
 @dataclass
@@ -68,6 +92,8 @@ class _Node:
     colour: str
     rank: int = 0
     order: float = 0.0
+    # Which wrapped row this node sits in; 0 for every diagram that fits on one.
+    row: int = 0
     x: float = 0.0
     y: float = 0.0
     width: float = 0.0
@@ -197,10 +223,21 @@ def _order_within_ranks(
                 nodes[node_id].order = float(position)
 
 
+def _labelled_ranks(edges: list["_Edge"], nodes: dict[str, _Node]) -> set[int]:
+    """Levels followed by a gap that has to hold an edge label."""
+
+    return {
+        nodes[edge.src].rank
+        for edge in edges
+        if edge.lines and edge.src in nodes
+    }
+
+
 def _place(
     ranks: dict[int, list[str]],
     nodes: dict[str, _Node],
     vertical: bool = False,
+    labelled: set[int] | None = None,
 ) -> tuple[float, float]:
     """Assign coordinates and return the drawing size.
 
@@ -208,6 +245,8 @@ def _place(
     along one axis, the nodes of a level spread along the other, and each level
     is centred against the largest one so the diagram reads balanced instead of
     hanging off one edge.
+
+    The gap after a level is wide only when an edge leaving it carries a label.
     """
 
     for node in nodes.values():
@@ -222,8 +261,15 @@ def _place(
         spans[key] = sum(sizes) + NODE_GAP * max(0, len(rank_nodes) - 1)
     widest = max(spans.values(), default=0.0)
 
-    gap = VERTICAL_RANK_GAP if vertical else RANK_GAP
+    labelled = labelled or set()
+    wide_gap = VERTICAL_RANK_GAP if vertical else RANK_GAP
+    bare_gap = BARE_VERTICAL_RANK_GAP if vertical else BARE_RANK_GAP
+
+    def gap_after(rank_key: int) -> float:
+        return wide_gap if rank_key in labelled else bare_gap
+
     along = MARGIN
+    last_gap = bare_gap
     for key in sorted(ranks):
         rank_nodes = ranks[key]
         thickness = max(
@@ -240,12 +286,86 @@ def _place(
                 node.x = along + (thickness - node.width) / 2
                 node.y = across
                 across += node.height + NODE_GAP
-        along += thickness + gap
+        last_gap = gap_after(key)
+        along += thickness + last_gap
 
-    extent = along - gap + MARGIN
+    extent = along - last_gap + MARGIN
     if vertical:
         return widest + 2 * MARGIN, extent
     return extent, widest + 2 * MARGIN
+
+
+def _is_linear_chain(nodes: dict[str, _Node], edges: list["_Edge"]) -> bool:
+    """True when the diagram is one unbranched run of boxes.
+
+    Only this shape can be wrapped onto a second row without the picture losing
+    its meaning: there is exactly one path through it, so a reader who reaches
+    the end of a row has only one place to continue. A branching diagram wrapped
+    the same way would put siblings on different rows and imply an order between
+    them that the data does not have.
+    """
+
+    if not edges:
+        return False
+    out_count: dict[str, int] = {}
+    in_count: dict[str, int] = {}
+    for edge in edges:
+        out_count[edge.src] = out_count.get(edge.src, 0) + 1
+        in_count[edge.dst] = in_count.get(edge.dst, 0) + 1
+    return (
+        len(edges) == len(nodes) - 1
+        and all(count <= 1 for count in out_count.values())
+        and all(count <= 1 for count in in_count.values())
+    )
+
+
+def _place_wrapped(
+    order: list[str],
+    nodes: dict[str, _Node],
+    budget: float,
+) -> tuple[float, float]:
+    """Lay a chain out over as many rows as the page width needs.
+
+    This is the chart module's contract applied to flowcharts: the page width is
+    fixed and the content arranges itself into it, rather than the drawing being
+    scaled down until it fits. charts.py packs more months into the same width by
+    moving points closer together; a chain does it by starting a new row.
+
+    Before this, the nine-box supply chain in Business Activity's section 1 came
+    out 1,649px wide, was scaled to 45% to reach the page, and printed at 4.7pt
+    against 9.5pt body text.
+    """
+
+    rows: list[list[str]] = []
+    current: list[str] = []
+    used = 0.0
+    for node_id in order:
+        width = nodes[node_id].width
+        addition = width if not current else width + BARE_RANK_GAP
+        if current and used + addition > budget:
+            rows.append(current)
+            current, used = [node_id], width
+        else:
+            current.append(node_id)
+            used += addition
+    if current:
+        rows.append(current)
+
+    y = MARGIN
+    widest = 0.0
+    for row_index, row in enumerate(rows):
+        height = max(nodes[n].height for n in row)
+        x = MARGIN
+        for node_id in row:
+            node = nodes[node_id]
+            node.row = row_index
+            node.x = x
+            node.y = y + (height - node.height) / 2
+            x += node.width + BARE_RANK_GAP
+        widest = max(widest, x - BARE_RANK_GAP)
+        y += height + WRAP_ROW_GAP
+
+    return widest + MARGIN, y - WRAP_ROW_GAP + MARGIN
 
 
 def _edge_ends(
@@ -260,8 +380,30 @@ def _edge_ends(
     return src.x + src.width, src.cy, dst.x, dst.cy
 
 
+def _wrap_edge_path(src: _Node, dst: _Node) -> str:
+    """Connector from the end of one wrapped row to the start of the next.
+
+    Leaves the source downwards and arrives on top of the target, so the arrow
+    reads as "continue below" rather than as a link back up the chain. Direction
+    matters more here than anywhere else in these diagrams: section 1 is a supply
+    chain, and its guidance is explicit that inputs must not appear to flow from
+    the output end.
+    """
+
+    mid_y = src.y + src.height + (dst.y - (src.y + src.height)) / 2
+    return (
+        f"M{src.cx:.1f} {src.y + src.height:.1f} "
+        f"L{src.cx:.1f} {mid_y:.1f} "
+        f"L{dst.cx:.1f} {mid_y:.1f} "
+        f"L{dst.cx:.1f} {dst.y:.1f}"
+    )
+
+
 def _edge_path(src: _Node, dst: _Node, vertical: bool = False) -> str:
     """Orthogonal connector: out of the source, across, into the target."""
+
+    if src.row != dst.row:
+        return _wrap_edge_path(src, dst)
 
     x1, y1, x2, y2 = _edge_ends(src, dst, vertical)
     if vertical:
@@ -318,7 +460,17 @@ def render_svg(chart) -> str | None:
     # would contradict the markdown view of the same report, which is the exact
     # mismatch this renderer exists to prevent.
     vertical = bool(getattr(chart, "vertical", False))
-    width, height = _place(ranks, nodes, vertical)
+    labelled = _labelled_ranks(edges, nodes)
+    width, height = _place(ranks, nodes, vertical, labelled)
+    # Too wide for the page, and shaped so that wrapping keeps its meaning: lay
+    # it out into the page width instead of shrinking it to reach the page.
+    if (
+        not vertical
+        and width > PAGE_CONTENT_WIDTH
+        and not labelled
+        and _is_linear_chain(nodes, edges)
+    ):
+        width, height = _place_wrapped(chart.order, nodes, PAGE_CONTENT_WIDTH - 2 * MARGIN)
 
     out_degree: dict[str, int] = {node_id: 0 for node_id in nodes}
     in_degree: dict[str, int] = {node_id: 0 for node_id in nodes}
@@ -345,7 +497,7 @@ def render_svg(chart) -> str | None:
         src, dst = nodes[edge.src], nodes[edge.dst]
         parts.append(
             f'<path d="{_edge_path(src, dst, vertical)}" fill="none" '
-            f'stroke="{EDGE_COLOUR}" stroke-width="1.3" '
+            f'stroke="{EDGE_COLOUR}" stroke-width="1.1" '
             f'marker-end="url(#mmdarrow)"/>'
         )
         if edge.lines:
@@ -381,8 +533,8 @@ def render_svg(chart) -> str | None:
     for node in nodes.values():
         parts.append(
             f'<rect x="{node.x:.1f}" y="{node.y:.1f}" width="{node.width:.1f}" '
-            f'height="{node.height:.1f}" rx="4" fill="{node.fill}" '
-            f'stroke="{node.stroke}" stroke-width="1"/>'
+            f'height="{node.height:.1f}" rx="6" fill="{node.fill}" '
+            f'stroke="{node.stroke}" stroke-width="0.9"/>'
         )
         first = node.y + NODE_PADDING_Y + LINE_HEIGHT * 0.78
         for index, line in enumerate(node.lines):
@@ -394,13 +546,19 @@ def render_svg(chart) -> str | None:
 
     parts.append("</svg>")
     # Fitting the page always wins over legibility, because clipping would drop
-    # content outright. When the squeeze takes the text below readable size the
-    # diagram has too many levels for A4 and should be split — recorded as a
-    # comment so a rendered PDF can be traced back to the cause.
+    # content outright. A chain that is too wide now wraps instead of shrinking,
+    # so reaching this point means a *branching* diagram too wide for A4.
+    #
+    # Said on the page rather than in an HTML comment. The comment version was
+    # written to "trace a rendered PDF back to the cause" and did the opposite:
+    # the reader saw 4.7pt text with no explanation, and nobody writing the
+    # report ever saw the comment at all. Same rule as every other guard here —
+    # a check that fires silently is a check nobody acts on.
     note = ""
     if FONT_SIZE * scale < MIN_READABLE_FONT:
         note = (
-            f"<!-- diagram scaled to {scale * 100:.0f}%: "
-            f"{len(ranks)} levels is too wide for the page, split it -->"
+            f'<p class="mmd-note">Sơ đồ đã thu nhỏ còn {scale * 100:.0f}% để vừa '
+            f"khổ giấy, chữ nhỏ hơn mức đọc thoải mái. Sơ đồ có {len(ranks)} tầng "
+            f"và nhiều nhánh — tách thành hai sơ đồ sẽ đọc được.</p>"
         )
-    return f'<div class="mmd mmd-svg">{note}{"".join(parts)}</div>'
+    return f'<div class="mmd mmd-svg">{"".join(parts)}{note}</div>'

@@ -175,6 +175,7 @@ svg{display:block;margin:14px auto}
 .mmd-col .mmd-arrow-labelled::after{left:1px;margin-left:0;top:26px;bottom:auto}
 .mmd-elabel{display:block;font-size:8pt;color:#456;line-height:1.2;
   text-align:center;overflow-wrap:break-word}
+.mmd-note{font-size:8pt;color:#8A6D3B;text-align:center;margin:2px 0 0}
 """
 
 
