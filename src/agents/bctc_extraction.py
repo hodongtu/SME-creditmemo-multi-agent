@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.utils.tax_xml import parse_tax_xml
 from src.agents.structured_extraction import (
     build_extraction_chain,
     resolve_money_multiplier,
@@ -420,16 +421,55 @@ def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def extract_bctc_from_xml(path: str) -> tuple[dict[str, Any] | None, str]:
+    """Read an e-tax XML filing, or say why it could not be read.
+
+    Thin on purpose: the parsing lives in utils.tax_xml, and this is only the
+    seam that lets bctc_extraction own all three input kinds. Returning the note
+    rather than swallowing it keeps the fallback explainable.
+    """
+
+    result = parse_tax_xml(path)
+    if result.error:
+        return None, result.error
+    if result.kind != "bctc":
+        return None, f"XML là {result.kind or 'biểu mẫu khác'}, không phải báo cáo tài chính."
+    return result.bctc_extraction, ""
+
+
 def extract_bctc_structured_data(
     chain: Any,
     filename: str,
     content: str,
+    path: str = "",
 ) -> tuple[dict[str, Any] | None, str]:
-    """Run the extraction chain and validate its shape.
+    """Turn one financial-statement document into the structured record.
+
+    Three kinds of file arrive here and all three leave in the same shape. A PDF
+    or a spreadsheet is text by the time it reaches this point and goes to the
+    model, exactly as before. An e-tax XML does not: it states the figures
+    against the form's own indicator codes, so those are read directly and no
+    model sees the document at all.
+
+    That is worth the branch because of what the model gets wrong on this
+    document in particular. 08e4008 fixed the metrics block reading giá vốn hàng
+    bán as 0.82 tỷ, because the extraction had copied each label's ordinal into
+    the code field and "11. Thu nhập khác" then carried giá vốn's TT200 code. A
+    filing cannot produce that: nothing is being recognised, only read.
 
     Never raises — returns (None, error_message) on any failure so the caller
-    always has a clean signal to fall back to raw OCR text for this document.
+    always has a clean signal to fall back to raw text for this document.
     """
+
+    if (path or filename).lower().endswith(".xml"):
+        record, note = extract_bctc_from_xml(path or filename)
+        if record is not None:
+            return record, ""
+        # Unrecognised form, or one whose own arithmetic did not hold. Fall
+        # through to the model on the flattened text rather than lose the
+        # document — the reason is carried out so a run can be traced.
+        if note:
+            content = f"[XML không đọc trực tiếp được: {note}]\n\n{content}"
 
     result, error = run_extraction(
         chain,

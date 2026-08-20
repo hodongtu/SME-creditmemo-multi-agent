@@ -105,6 +105,11 @@ class ClassifiedDocument:
     is_sitevisit: bool = False
     bctc_extraction: dict[str, Any] | None = None
     bctc_extraction_error: str = ""
+    # Which kind of file the record came from: "xml" for an e-tax filing
+    # read from its own indicator codes, "llm" for a model reading text.
+    # Deliberately beside the record rather than inside it — the JSON shape
+    # is what five agents consume, and this is provenance, not content.
+    bctc_extraction_source: str = ""
     proposal_extraction: dict[str, Any] | None = None
     proposal_extraction_error: str = ""
     cic_s10a_extraction: dict[str, Any] | None = None

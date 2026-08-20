@@ -301,6 +301,42 @@ def extract_pptx_text(pptx_path: str, max_chars: int = 100000) -> str:
     return _join_sheet_blocks(blocks, max_chars)
 
 
+def extract_xml_text(file_path: str, max_chars: int = 120_000) -> str:
+    """Flatten an XML file to readable text.
+
+    The fallback path for XML. A tax filing normally goes through
+    ``utils.tax_xml``, which reads its indicator codes directly; this is what
+    happens when that module does not recognise the form, and what any other XML
+    gets. Element paths are kept because for an unrecognised schema the nesting
+    is most of what tells a reader — or the classifier — what they are holding.
+    """
+
+    import xml.etree.ElementTree as ET
+
+    raw = Path(file_path).read_text(encoding="utf-8-sig", errors="replace")
+    start = raw.find("<?xml")
+    if start > 0:
+        raw = raw[start:]
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        return f"[XML không đọc được: {exc}]\n\n{raw[:max_chars]}"
+
+    lines: list[str] = []
+
+    def walk(node, path: str) -> None:
+        tag = node.tag.split("}")[-1]
+        here = f"{path}/{tag}" if path else tag
+        text = (node.text or "").strip()
+        if text:
+            lines.append(f"{here}: {text}")
+        for child in node:
+            walk(child, here)
+
+    walk(root, "")
+    return "\n".join(lines)[:max_chars]
+
+
 def extract_document_text(
     file_path: str,
     ocr_timeout_seconds: float | None = None,
@@ -317,4 +353,6 @@ def extract_document_text(
         return extract_excel_text(file_path)
     if extension == ".pptx":
         return extract_pptx_text(file_path)
+    if extension == ".xml":
+        return extract_xml_text(file_path)
     raise ValueError(f"Unsupported file extension: {extension}")

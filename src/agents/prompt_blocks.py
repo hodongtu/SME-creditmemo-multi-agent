@@ -38,10 +38,32 @@ from src.agents.industry_knowledge import (
 )
 from src.matrix.document_matrix import get_type
 from src.types import ClassifiedDocument, truncate_text
-from src.agents.vat_revenue import parse_vat_revenue_block
+from src.agents.vat_revenue import merge_vat_series, parse_vat_revenue_block
 from src.utils.charts import build_linechart_block, pick_unit
 from src.utils.source_list import build_source_lines
+from src.utils.tax_xml import parse_tax_xml
 
+
+
+def _vat_revenue_from_xml(
+    documents: list[ClassifiedDocument],
+) -> dict[str, tuple[float, bool]]:
+    """Monthly VAT revenue read straight out of any e-tax XML in the dossier.
+
+    Reads the filings again here rather than carrying the numbers on the
+    document, because this is the only place that wants them and a field on
+    ClassifiedDocument would have to be kept in step with the parser for no
+    other reader's benefit.
+    """
+
+    series: dict[str, tuple[float, bool]] = {}
+    for doc in documents:
+        if not doc.path.lower().endswith(".xml"):
+            continue
+        result = parse_tax_xml(doc.path)
+        if result.kind == "vat" and not result.error:
+            series.update(result.vat_revenue)
+    return series
 
 
 def _format_credit_need_value(value: float | None, unit: str) -> str:
@@ -411,8 +433,14 @@ def _build_debt_chart_block(
     months = [row["thang"] for row in series]
     debt = [row["du_no"] for row in series]
 
-    vat_series = parse_vat_revenue_block(
-        sub_agent_outputs.get("CREDIT_RELATIONSHIP_AGENT", "")
+    # Two readings of the same returns, weakest first: the agent transcribes the
+    # figures out of whatever it was given, while an e-tax XML states them
+    # against the form's own indicator code. merge_vat_series keeps the better
+    # of the two per month — and keeps a real monthly figure over an estimate
+    # whichever file it came from.
+    vat_series = merge_vat_series(
+        parse_vat_revenue_block(sub_agent_outputs.get("CREDIT_RELATIONSHIP_AGENT", "")),
+        _vat_revenue_from_xml(documents),
     )
     revenue = [vat_series.get(month, (None, False))[0] for month in months]
     estimated = any(vat_series.get(month, (None, False))[1] for month in months)

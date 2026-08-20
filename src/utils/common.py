@@ -19,7 +19,7 @@ import unicodedata
 # last dot" would eat the year off "TKT_01.2025", a file with no extension at
 # all — knowing the real set is what makes that safe.
 SUPPORTED_EXTENSIONS = frozenset(
-    {".pdf", ".xlsx", ".xls", ".csv", ".txt", ".md", ".pptx"}
+    {".pdf", ".xlsx", ".xls", ".csv", ".txt", ".md", ".pptx", ".xml"}
 )
 
 

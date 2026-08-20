@@ -1222,7 +1222,10 @@ class Supervisor:
             return
 
         def _run(doc: ClassifiedDocument):
-            result, error = extract(chain, doc.filename, doc.content)
+            # The path goes with the text because one pass needs to know what
+            # kind of file it is holding: an e-tax XML is read from its codes
+            # rather than sent to the model. The other four ignore it.
+            result, error = extract(chain, doc.filename, doc.content, doc.path)
             return doc, result, error
 
         max_workers = max(1, min(len(targets), self.config.max_concurrency))
@@ -1232,9 +1235,18 @@ class Supervisor:
                 doc, result, error = future.result()
                 setattr(doc, result_attr, result)
                 setattr(doc, error_attr, error)
+                if flag_attr == "is_bctc" and result is not None:
+                    doc.bctc_extraction_source = (
+                        "xml" if doc.path.lower().endswith(".xml") and not error else "llm"
+                    )
                 steps.append(
                     f"{label} extraction: {doc.filename} -> "
                     + ("ok" if result is not None else f"failed: {error}")
+                    + (
+                        " (đọc thẳng từ XML khai thuế)"
+                        if getattr(doc, "bctc_extraction_source", "") == "xml"
+                        else ""
+                    )
                 )
 
     def _extract_bctc_documents(

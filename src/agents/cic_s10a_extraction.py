@@ -287,6 +287,10 @@ def extract_cic_s10a_structured_data(
     chain: Any,
     filename: str,
     content: str,
+    # Unused: the shared runner passes it because the BCTC pass needs to
+    # know whether it is holding an e-tax XML. Accepted here so all five
+    # passes keep one signature.
+    path: str = "",
 ) -> tuple[dict[str, Any] | None, str]:
     """Run the extraction chain and validate its shape. Never raises."""
 

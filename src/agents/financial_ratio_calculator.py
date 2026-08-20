@@ -602,6 +602,15 @@ class FinancialRatioCalculator:
     LABEL_TIER = 1
     CODE_ONLY_TIER = 0
 
+    # Ranked above both, because it says where a figure came from rather than
+    # how well it matched. An e-tax filing states its figures against the form's
+    # own indicator codes; a PDF was scanned and then read by a model. Without
+    # this the winner between two documents covering the same year is whichever
+    # line happened to score higher, which on a real pair took total assets from
+    # one source and cost of sales from the other — a single year assembled from
+    # two readings that were never meant to be mixed.
+    SOURCE_RANK = {"xml": 2, "llm": 1, "": 1}
+
     def extract_yearly_metrics(
         self,
         documents: list[dict[str, Any]],
@@ -614,14 +623,17 @@ class FinancialRatioCalculator:
         failed, or no extraction LLM configured) contributes nothing.
         """
         yearly_metrics: dict[str, dict[str, float]] = {}
-        # (year, metric_key) -> (tier, score). Keeping the best-ranked row instead
+        # (year, metric_key) -> (source, tier, score). Keeping the best-ranked row
         # of the first one makes the result independent of line-item order.
-        best_score: dict[tuple[str, str], tuple[int, int]] = {}
+        best_score: dict[tuple[str, str], tuple[int, int, int]] = {}
 
         for document in documents:
             extraction = document.get("bctc_extraction")
             if not isinstance(extraction, dict):
                 continue
+            source_rank = self.SOURCE_RANK.get(
+                document.get("bctc_extraction_source") or "", 1
+            )
             # Columns named by position ("Số cuối kỳ") only mean something
             # relative to the statement they came from, so the anchor is read
             # per document rather than once for the whole set.
@@ -662,10 +674,10 @@ class FinancialRatioCalculator:
                             year, current_year, previous_year
                         )
                         slot = (year_key, metric.key)
-                        # Tier first, score only to order rows within a tier —
-                        # see match_metric for the line this stops from winning.
-                        rank = (tier, score)
-                        if rank <= best_score.get(slot, (-1, -1)):
+                        # Source first, then tier, then score. See SOURCE_RANK
+                        # and match_metric for what each one stops from winning.
+                        rank = (source_rank, tier, score)
+                        if rank <= best_score.get(slot, (-1, -1, -1)):
                             continue
                         yearly_metrics.setdefault(year_key, {})
                         yearly_metrics[year_key][metric.key] = value

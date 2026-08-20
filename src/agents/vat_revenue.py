@@ -113,3 +113,33 @@ def strip_vat_revenue_block(text: str) -> str:
     if not text or "```vat-doanh-thu" not in text:
         return text
     return _BLOCK.sub("", text)
+
+
+def merge_vat_series(
+    *sources: dict[str, tuple[float, bool]],
+) -> dict[str, tuple[float, bool]]:
+    """Combine monthly VAT revenue from several readings, best evidence first.
+
+    Sources are given in increasing order of trust, so the last one to claim a
+    month keeps it. Two rules decide what "better" means, and they compose:
+
+    - A figure the taxpayer filed for that month beats one divided out of a
+      quarter, which is the rule ``parse_vat_revenue_block`` already applies
+      within a single block.
+    - A figure read from an e-tax XML beats one the credit-relationship agent
+      transcribed out of the same return, because one is read from an indicator
+      code and the other is retyped by a model.
+
+    A real monthly figure is never displaced by an estimate, whatever its
+    source: an exact number for the month is the better evidence even when the
+    estimate came from a more trustworthy file.
+    """
+
+    merged: dict[str, tuple[float, bool]] = {}
+    for source in sources:
+        for month, (revenue, estimated) in source.items():
+            previous = merged.get(month)
+            if previous is not None and not previous[1] and estimated:
+                continue
+            merged[month] = (revenue, estimated)
+    return merged

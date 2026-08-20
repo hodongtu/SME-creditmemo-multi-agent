@@ -60,17 +60,40 @@ def resolve_input_path(raw_path: str) -> Path:
 
 
 def discover_documents(input_paths: list[str], max_files: int = 50) -> list[str]:
-    """Find supported documents from files or folders."""
+    """Find supported documents from files or folders.
+
+    Files with an extension the pipeline cannot read are named on the way past.
+    They used to be filtered out in silence, which is the worst way to lose a
+    document: a folder of twelve XML tax returns produced a report built on
+    nothing at all, with no line anywhere saying so. Being unable to read a file
+    is fine; not saying which one is not.
+    """
 
     files = []
+    unreadable: list[str] = []
+
+    def consider(item) -> None:
+        if item.suffix.lower() in SUPPORTED_EXTENSIONS:
+            files.append(str(item))
+        elif not item.name.startswith("."):
+            unreadable.append(item.name)
+
     for raw_path in input_paths:
         path = resolve_input_path(raw_path)
-        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            files.append(str(path))
+        if path.is_file():
+            consider(path)
         elif path.is_dir():
             for item in sorted(path.rglob("*")):
-                if item.is_file() and item.suffix.lower() in SUPPORTED_EXTENSIONS:
-                    files.append(str(item))
+                if item.is_file():
+                    consider(item)
+
+    if unreadable:
+        print(
+            f"[discover_documents] WARNING: skipped {len(unreadable)} file(s) with "
+            f"an unsupported extension: {', '.join(sorted(unreadable)[:10])}"
+            f"{' …' if len(unreadable) > 10 else ''}. "
+            f"Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}."
+        )
 
     seen = set()
     deduped = []
