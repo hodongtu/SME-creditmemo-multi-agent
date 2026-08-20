@@ -17,6 +17,12 @@ CÁCH DÙNG BỐ CỤC:
 SƠ ĐỒ (mục 1, 3):
 - Bắt buộc dùng Mermaid, KHÔNG vẽ bằng ký tự ASCII.
 - Mục 3: tối đa 5 khối; nhãn ngắn, dùng <br/> để xuống dòng trong khối.
+- Nhãn trên MŨI TÊN (dạng `-->|nhãn|`) TỐI ĐA 10 TỪ. Nó chú thích một mũi tên;
+  dài hơn thì nhãn cao hơn cả sợi dây và át mất sơ đồ. Viết "trả chậm 30 ngày",
+  không viết "thanh toán trong vòng 30 ngày kể từ ngày nghiệm thu". Chi tiết đầy
+  đủ để ở bảng hoặc phần Nhận định.
+- Hệ thống vẽ ĐẦY ĐỦ nhãn bạn viết, không cắt bớt chữ nào — nên nhãn dài sẽ làm
+  sơ đồ xấu chứ không bị giấu đi. Giữ ngắn là việc của bạn.
 - Luôn dùng `flowchart LR` cho mọi sơ đồ trong Business Activity — KHÔNG dùng
   `flowchart TD`, kể cả cho quy trình tuần tự ở mục 3.
 - Chỉ đưa vào sơ đồ những khâu có căn cứ; kèm số liệu thật khi có (công suất, giá trị

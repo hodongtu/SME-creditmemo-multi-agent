@@ -120,6 +120,121 @@ print("\n7. Bảng màu theo báo cáo, không phải mặc định mermaid")
 check("bỏ tím #9370DB", "#9370DB" not in one["svg"])
 check("dùng xanh của báo cáo #2f6f9f", "#2f6f9f" in one["svg"])
 
+print("\n8. Phong cách: màu theo tầng, bóng vẽ tay")
+import re as _re  # noqa: E402
+pairs = _re.findall(r'fill="(#[0-9a-f]{6})" stroke="(#[0-9a-f]{6})"', one["svg"])
+check("mỗi tầng một màu khác nhau", len({p for p in pairs}) >= 4, f"{len(set(pairs))} tổ hợp")
+check("dùng đúng bảng LEVEL_COLOURS",
+      all(p in G.LEVEL_COLOURS for p in pairs), str([p for p in pairs if p not in G.LEVEL_COLOURS][:2]))
+
+shadows = _re.findall(r'fill="' + G.SHADOW_COLOUR + r'" opacity="([\d.]+)"', one["svg"])
+check("mỗi khối có một bóng vẽ tay", len(shadows) == len(pairs), f"{len(shadows)} bóng / {len(pairs)} khối")
+check("bóng mờ, không đặc", all(0 < float(o) < 0.3 for o in shadows), str(set(shadows)))
+check("KHÔNG dùng feDropShadow (WeasyPrint bỏ qua không báo)",
+      "feDropShadow" not in one["svg"])
+
+print("\n9. Style do sơ đồ tự khai vẫn thắng bảng màu theo tầng")
+warn = measure("flowchart LR\n  A[Khách A] --> B[Doanh nghiệp]\n  style A fill:#FFC000,stroke:#333")
+check("giữ nguyên màu cảnh báo tập trung", "#FFC000" in warn["svg"])
+
+print("\n10. Lề quanh chữ đồng đều ở MỌI khối, kể cả nhãn dài")
+import re as _r  # noqa: E402
+src10 = ("flowchart LR\n  A[Gỗ MDF phủ Melamine] --> B[Đầu ra] --> C[Công ty TNHH Gỗ An Cường] "
+         "--> D[Thu tiền]")
+svg10 = G.render_svg(_parse(src10))
+chart10 = _parse(src10)
+pads = []
+for nid, lab in chart10.labels.items():
+    lines = G._text_lines(lab)
+    tw = max(G.text_width(l, G.FONT_SIZE) for l in lines)
+    w = min(G.NODE_MAX_WIDTH, max(G.NODE_MIN_WIDTH, tw + 2 * G.NODE_PADDING_X))
+    pads.append(round((w - tw) / 2, 1))
+check("lề mỗi bên như nhau ở mọi khối", len(set(pads)) == 1, f"{sorted(set(pads))}px")
+check("lề đúng bằng NODE_PADDING_X", pads[0] == G.NODE_PADDING_X, f"{pads[0]} vs {G.NODE_PADDING_X}")
+check("đo bằng font thật, không đếm ký tự", G._measure_font() is not None)
+
+print("\n11. Dây nối vào cùng một tầng thì dừng ở cùng một mép")
+svg11 = G.render_svg(_parse(
+    "flowchart LR\n  A[Nhà cung cấp A] --> M[Nhà máy]\n  B[Nhà cung cấp B] --> M\n"
+    "  M --> C[Khách hàng lớn 78%]\n  M --> D[Khách hàng khác]"))
+lefts = {round(float(x)) for x, y in
+         _r.findall(r'<rect x="([\d.]+)" y="([\d.]+)"', svg11)[1::2]}
+check("3 tầng -> đúng 3 mép trái", len(lefts) == 3, str(sorted(lefts)))
+ends = {round([(float(a), float(b)) for a, b in
+               _r.findall(r"[ML]([\d.-]+) ([\d.-]+)", d)][-1][0])
+        for d in _r.findall(r'<path d="([^"]+)"', svg11)}
+check("dây nối kết thúc ở đúng các mép đó", ends <= lefts, f"{sorted(ends)} vs {sorted(lefts)}")
+
+print("\n12. Dây nối dài ngắn theo nhãn, và chừa chỗ cho mũi tên")
+for name, source, label in (
+    ("ngắn", "flowchart LR\n  A[Đầu vào] -->|giao hàng| B[Sản xuất]", "giao hàng"),
+    ("vừa", "flowchart LR\n  A[Đầu vào] -->|thanh toán 30 ngày| B[Sản xuất]", "thanh toán 30 ngày"),
+    ("dài", "flowchart LR\n  A[X] -->|thanh toán trong vòng 45 ngày kể từ ngày nghiệm thu| B[Y]",
+     "thanh toán trong vòng 45 ngày kể từ ngày nghiệm thu"),
+):
+    svg12 = G.render_svg(_parse(source))
+    boxes12 = sorted({(float(x), float(x) + float(w)) for x, w in
+                      re.findall(r'<rect x="([\d.]+)" y="[\d.]+" width="([\d.]+)"', svg12)})[1::2]
+    widest12 = max(G.text_width(l, G.EDGE_FONT_SIZE)
+                   for l in G._text_lines(label))
+    gap12 = boxes12[1][0] - boxes12[0][1]
+    side = (gap12 - widest12 - G.ARROW_LENGTH) / 2
+    check(f"nhãn {name}: chừa đúng {G.EDGE_LABEL_CLEARANCE}px mỗi bên",
+          abs(side - G.EDGE_LABEL_CLEARANCE) < 0.5, f"{side:.1f}px")
+
+# nhãn phải nằm gọn giữa hộp nguồn và đầu mũi tên
+svg12 = G.render_svg(_parse("flowchart LR\n  A[Đầu vào] -->|thanh toán 30 ngày| B[Sản xuất]"))
+lx = float(re.search(r'<text x="([\d.]+)"[^>]*font-size="' + str(G.EDGE_FONT_SIZE), svg12).group(1))
+boxes12 = sorted({(float(x), float(x) + float(w)) for x, w in
+                  re.findall(r'<rect x="([\d.]+)" y="[\d.]+" width="([\d.]+)"', svg12)})[1::2]
+half = G.text_width("thanh toán 30 ngày", G.EDGE_FONT_SIZE) / 2
+check("nhãn không chạm hộp nguồn", lx - half > boxes12[0][1], f"{lx - half:.1f} > {boxes12[0][1]:.1f}")
+check("nhãn không chạm đầu mũi tên",
+      lx + half < boxes12[1][0] - G.ARROW_LENGTH,
+      f"{lx + half:.1f} < {boxes12[1][0] - G.ARROW_LENGTH:.1f}")
+
+print("\n13. Nhãn dài được vẽ ĐẦY ĐỦ, không cắt, không dấu …")
+long_label = "thanh toán trong vòng 45 ngày kể từ ngày nghiệm thu"
+svg_long = G.render_svg(_parse(f"flowchart LR\n  X[Ký hợp đồng] -->|{long_label}| Y[Nghiệm thu]"))
+lines_long = re.findall(
+    r'<text x="[\d.]+" y="[\d.-]+" font-size="' + str(G.EDGE_FONT_SIZE) + r'"[^>]*>([^<]*)</text>',
+    svg_long)
+check("ghép các dòng lại đúng bằng nhãn gốc",
+      " ".join(lines_long) == long_label, " ".join(lines_long))
+check("không có dấu … ở bất kỳ dòng nào",
+      not any("…" in line for line in lines_long), str(lines_long))
+guidance = (REPO / "src/templates/business-activity-guidance.md").read_text(encoding="utf-8")
+check("guidance đặt trần 10 từ cho nhãn mũi tên", "TỐI ĐA 10 TỪ" in guidance)
+check("guidance nói rõ hệ thống vẽ đầy đủ", "vẽ ĐẦY ĐỦ nhãn" in guidance)
+
+print("\n14. Nhãn nhiều dòng nằm gọn trong khung")
+for label13 in ("giao hàng", "thanh toán trong vòng 45 ngày kể từ ngày nghiệm thu"):
+    svg13 = G.render_svg(_parse(f"flowchart LR\n  X[Ký hợp đồng] -->|{label13}| Y[Nghiệm thu]"))
+    h13 = int(re.search(r'viewBox="0 0 \d+ (\d+)"', svg13).group(1))
+    ys13 = [float(m.group(1)) for m in
+            re.finditer(r'<text x="[\d.]+" y="([\d.-]+)" font-size="'
+                        + str(G.EDGE_FONT_SIZE), svg13)]
+    top13 = min(ys13) - G.EDGE_FONT_SIZE
+    check(f"{len(G._text_lines(label13))} dòng: không tràn trên",
+          top13 >= 0, f"đỉnh chữ y={top13:.1f}")
+    check(f"{len(G._text_lines(label13))} dòng: không tràn dưới",
+          max(ys13) <= h13, f"đáy y={max(ys13):.1f} / khung {h13}")
+
+print("\n15. Nhãn KHÔNG đè lên dây — có margin thật")
+for label15 in ("giao hàng", "trả chậm 30 ngày",
+                "thanh toán trong vòng 45 ngày kể từ ngày nghiệm thu"):
+    svg15 = G.render_svg(_parse(f"flowchart LR\n  A[Đầu vào] -->|{label15}| B[Sản xuất]"))
+    wire = float(re.findall(r"[ML][\d.-]+ ([\d.-]+)",
+                            re.search(r'<path d="([^"]+)"', svg15).group(1))[0])
+    ys15 = [float(m.group(1)) for m in re.finditer(
+        r'<text x="[\d.]+" y="([\d.-]+)" font-size="' + str(G.EDGE_FONT_SIZE), svg15)]
+    bottom = max(ys15) + G.EDGE_FONT_SIZE * G.DESCENDER_RATIO
+    n = len(ys15)
+    check(f"{n} dòng: đáy chữ cách dây ≥ {G.EDGE_LABEL_MARGIN}px",
+          wire - bottom >= G.EDGE_LABEL_MARGIN - 0.1, f"{wire - bottom:.1f}px")
+    check(f"{n} dòng: mọi dòng nằm TRÊN dây", max(ys15) < wire,
+          f"đáy baseline {max(ys15):.1f} < dây {wire:.1f}")
+
 print("\n" + "=" * 66)
 if fails:
     print("❌ HỎNG:", *fails, sep="\n   - ")
