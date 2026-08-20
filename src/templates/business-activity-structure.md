@@ -11,10 +11,9 @@
  
 ## 1. Mô hình sản xuất kinh doanh
  
-```
-mermaid
+```mermaid
 flowchart LR
-  P1[{{SanPhamDauVao}}] --> KV[{{KhachHangDauVao}}] --> C[{{KhachHang}}] --> KCR[{{KhachHangDauRa}}] --> P2[{{SanPhamDauRa}}]
+  P1[SanPhamDauVao] --> KV[KhachHangDauVao] --> C[KhachHang] --> KCR[KhachHangDauRa] --> P2[SanPhamDauRa]
 ```
  
 *Nhận định*:
@@ -48,8 +47,7 @@ flowchart LR
  
 ## 5. Quy trình vận hành
  
-```
-mermaid
+```mermaid
 flowchart LR
   A[Nhận đơn hàng] --> B[Ký hợp đồng] --> C[Sản xuất] --> D[Giao hàng & thanh toán]
 ```
