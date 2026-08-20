@@ -365,11 +365,20 @@ def _auto_color_concentration(chart: Flowchart) -> Flowchart:
     rule the model sometimes skips gets a code-level fallback so the reader
     sees it every time, not on a coin flip.
 
-    Only fills a GAP: a node the model already styled (via classDef/class/:::
-    or a bare `style` line) keeps that styling untouched. The "hub" side of a
-    fan (out-degree/in-degree > 1) is never coloured by this — only the
-    single-degree partner at the other end of the qualifying edge, which is
-    the shape mục 4/5's fan diagrams always have.
+    Overrides whatever the node already carried. It used to fill a gap only,
+    leaving a model-styled node alone, and the report above is why that was
+    wrong: the model wrote `classDef warn fill:#FFC000` and applied it to the
+    55% customer, then forgot the 68% supplier in the next diagram. One
+    concentration finding came out amber and the other rose, in the same
+    report, for the same reason — and a reader has no way to know the two
+    marks mean the same thing. The house style wins so that they match.
+
+    A node the model marked but that does not clear the threshold is left
+    alone; this function only speaks for the rule it enforces.
+
+    The "hub" side of a fan (out-degree/in-degree > 1) is never coloured by
+    this — only the single-degree partner at the other end of the qualifying
+    edge, which is the shape mục 4/5's fan diagrams always have.
     """
 
     degree: dict[str, int] = {}
@@ -392,11 +401,68 @@ def _auto_color_concentration(chart: Flowchart) -> Flowchart:
             partner = src
         else:
             continue
-        if partner not in node_style:
+        if node_style.get(partner) != _AUTO_WARN_STYLE:
             node_style[partner] = dict(_AUTO_WARN_STYLE)
             changed = True
 
     return replace(chart, node_style=node_style) if changed else chart
+
+
+# The same <br/> spelling _label_html and graph_svg._text_lines both accept:
+# mermaid writes <br>, <br/> and <br /> interchangeably.
+_BR = re.compile(r"<br\s*/?>")
+# "3,65 tỷ", "1.850 triệu đồng", "2,48 tỉ VNĐ" — a bare money amount carrying no
+# percent sign of its own. A magnitude word may be followed by a currency word,
+# which is what "3.650 triệu đồng" is and what an earlier version of this missed:
+# it required the line to end at "triệu".
+#
+# One of the two words has to be there. Digits alone are left alone — a bare "45"
+# beside a percentage is not necessarily money, and this only removes what it can
+# name.
+_MONEY_UNIT = r"(?:tỷ|tỉ|triệu|nghìn|ngàn|tr)"
+_MONEY_CUR = r"(?:đồng|đ|vnđ|vnd)"
+_MONEY_BODY = (
+    rf"\d[\d.,\s]*(?:{_MONEY_UNIT}\s*{_MONEY_CUR}?|{_MONEY_CUR})"
+)
+_MONEY_ONLY = re.compile(rf"^[\s(]*{_MONEY_BODY}[\s.,)]*$", re.IGNORECASE)
+_MONEY_PAREN = re.compile(rf"\s*\(\s*{_MONEY_BODY}\s*\)", re.IGNORECASE)
+
+
+def _percent_only_edge_labels(chart: Flowchart) -> Flowchart:
+    """Drop the absolute figure from an edge label that already carries a %.
+
+    A share of revenue is what a connector in mục 1 is annotating, and the
+    percentage says it. Adding "3,65 tỷ" underneath says the same thing twice in
+    a place with no room for it: the label is the widest thing in the gap between
+    two boxes, and the gap is sized from it, so the second line pushes the whole
+    diagram wider and then gets scaled back down — every box on the page loses
+    text size to a number the table beside it already gives.
+
+    Narrow on purpose. Only a line that is nothing but an amount goes, and only
+    when another line in the same label carries a percent sign. "45 ngày" on the
+    inventory connector has no percentage next to it and survives; so does
+    "trả chậm 30 ngày", and so does a lone "3,65 tỷ" on a diagram that quotes no
+    shares at all.
+    """
+
+    edges = []
+    changed = False
+    for src, label, dst in chart.edges:
+        lines = _BR.split(label) if label else []
+        if len(lines) > 1 and any("%" in line for line in lines):
+            kept = [line for line in lines
+                    if "%" in line or not _MONEY_ONLY.match(line.strip())]
+            if kept and kept != lines:
+                label = "<br/>".join(kept)
+                changed = True
+        if "%" in label:
+            stripped = _MONEY_PAREN.sub("", label)
+            if stripped.strip() and stripped != label:
+                label = stripped
+                changed = True
+        edges.append((src, label, dst))
+
+    return replace(chart, edges=edges) if changed else chart
 
 
 def _node_html(label: str) -> str:
@@ -428,6 +494,7 @@ def _render(source: str) -> str | None:
     chart = _parse(source)
     if not chart.labels:
         return None
+    chart = _percent_only_edge_labels(chart)
     chart = _auto_color_concentration(chart)
     order, labels, edges = chart.order, chart.labels, chart.edges
     if not edges:

@@ -16,7 +16,8 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 import src.utils.graph_svg as G  # noqa: E402
-from src.utils.diagrams import _parse, mermaid_to_html  # noqa: E402
+from src.utils.diagrams import (  # noqa: E402
+    _parse, _percent_only_edge_labels, mermaid_to_html)
 
 fails = []
 
@@ -296,6 +297,136 @@ check("hộp Nhà Xinh giữ màu cảnh báo", styled["Nhà Xinh"][0] == WARN, 
 for quiet in ("18%", "8%", "Hoà Phát", "Khác", "Nhà máy"):
     check(f"{quiet!r} không bị kéo theo",
           styled[quiet][0] != WARN and not styled[quiet][1], str(styled[quiet]))
+
+print("\n19e. Nhãn cạnh không bao giờ bị hộp nuốt")
+# Boxes are painted after the edges, so a label that runs back over one does not
+# overlap it — it vanishes. That is what happened in a real report: the gap
+# between two ranks was sized as though the label sat in the middle of it, but a
+# fan's label sits on one side of the shared trunk and so has only half the gap.
+REAL = ("flowchart LR\n"
+        "  S1[CÔNG TY CỔ PHẦN TÔN ĐÔNG Á] -->|6,03%<br/>3,65 tỷ| NM[CƠ KHÍ QUY NHƠN]\n"
+        "  S2[CÔNG TY TNHH 2TV THƯƠNG MẠI DỊCH VỤ PHÚ THỊNH] -->|5,75%<br/>4,33 tỷ| NM")
+WIDE = ("flowchart LR\n"
+        "  S1[Nhà cung cấp A] -->|16,03% doanh thu<br/>3.650 triệu đồng| NM[Nhà máy]\n"
+        "  S2[Nhà cung cấp B] -->|5,75%<br/>4,33 tỷ| NM")
+OUTWARD = ("flowchart LR\n  NM[Nhà máy] -->|8%<br/>2,48 tỷ| O1[Sắt thép, tôn, inox]\n"
+           "  NM -->|6%<br/>1,85 tỷ| O2[Sắt thép, tôn, inox]")
+CHAIN = "flowchart LR\n  A[Đầu vào] -->|trả chậm 30 ngày| B[Sản xuất] -->|45 ngày| C[Tồn kho]"
+
+
+def label_clearance(mermaid_src):
+    """Smallest horizontal gap between an edge label and any box, in px.
+
+    Negative means the label is inside a box's footprint. Measured on the SVG
+    the renderer emits, not on the gap constants, because the constants are what
+    were wrong.
+    """
+
+    svg = G.render_svg(_parse(mermaid_src))
+    boxes = [(float(x), float(x) + float(w)) for x, w in re.findall(
+        r'<rect x="([\d.]+)" y="[\d.]+" width="([\d.]+)"[^>]*rx="3" '
+        r'fill="#[0-9a-fA-F]{3,6}" stroke=', svg)]
+    worst = float("inf")
+    for x, text in re.findall(
+        r'<text x="([\d.]+)" y="[\d.-]+" font-size="' + str(G.EDGE_FONT_SIZE)
+        + r'"[^>]*>([^<]*)<', svg
+    ):
+        half = G.text_width(text, G.EDGE_FONT_SIZE) / 2
+        left, right = float(x) - half, float(x) + half
+        for bx, br in boxes:
+            # Distance from the label to the box, positive when they are apart.
+            # Written the other way round the first time — br - left for a box
+            # sitting to the LEFT — which reported every diagram as broken,
+            # including ones a separate measurement had just shown to be clean.
+            worst = min(worst, left - br if br <= left else
+                        bx - right if bx >= right else
+                        -min(br - left, right - bx))
+    return worst
+
+
+for case_name, case_src in (("hồ sơ thật", REAL), ("nhãn rộng hơn", WIDE),
+                            ("quạt ra", OUTWARD), ("chuỗi thẳng", CHAIN)):
+    gap = label_clearance(case_src)
+    check(f"{case_name}: nhãn nằm ngoài mọi hộp", gap > 0, f"hở {gap:.1f}px")
+
+print("\n19f. Nhãn tỷ trọng chỉ còn phần trăm")
+for raw, want in (
+    ("6,03%<br/>3,65 tỷ", "6,03%"),
+    ("16,03% doanh thu<br/>3.650 triệu đồng", "16,03% doanh thu"),
+    ("5,75%<br/>2,48 tỉ VNĐ", "5,75%"),
+    ("12%<br/>1.850.000 đồng", "12%"),
+    ("6,03% (3,65 tỷ)", "6,03%"),
+    # Nothing to do with a share of revenue: these must survive untouched.
+    ("45 ngày", "45 ngày"),
+    ("trả chậm 30 ngày", "trả chậm 30 ngày"),
+    ("3,65 tỷ", "3,65 tỷ"),
+    ("6,03%<br/>tồn kho 45 ngày", "6,03%<br/>tồn kho 45 ngày"),
+    ("2,48 tỷ<br/>1,85 tỷ", "2,48 tỷ<br/>1,85 tỷ"),
+    ("6,03%<br/>45", "6,03%<br/>45"),
+):
+    got = _percent_only_edge_labels(
+        _parse(f"flowchart LR\n  A[X] -->|{raw}| B[Y]")).edges[0][1]
+    check(f"{raw!r} -> {want!r}", got == want, repr(got))
+
+print("\n19d. Style nhà thắng style của model ở đúng ca cảnh báo")
+_HEX = r"#[0-9a-fA-F]{3,6}"
+
+
+def box_fills(mermaid_src):
+    """{nhãn hộp: (nền, viền)} đọc theo thứ tự tài liệu của SVG.
+
+    Chấp cả #333 lẫn #333333: model viết mã 3 ký tự, và một regex đòi đủ 6 đã
+    lặng lẽ bỏ qua đúng những hộp cần kiểm — chúng biến mất khỏi kết quả trông
+    y như thể chúng không được tô.
+    """
+
+    svg = mermaid_to_html(mermaid_src)
+    out, pending = {}, None
+    for m in re.finditer(
+        rf'<rect [^>]*fill="({_HEX})" stroke="({_HEX})"[^>]*/>'
+        r'|<text [^>]*font-size="13\.5"[^>]*>([^<]*)</text>', svg
+    ):
+        if m.group(1):
+            pending = (m.group(1), m.group(2))
+        elif pending:
+            out[m.group(3)] = pending
+            pending = None
+    return out
+
+
+WARN_FILL, WARN_STROKE, MODEL_AMBER = "#f7e2e5", "#c1616f", "#FFC000"
+CLASSDEF = "  classDef warn fill:#FFC000,stroke:#333\n"
+
+# The two diagrams from one real specialist run: the model marked the 55%
+# customer itself and forgot the 68% supplier, so the report carried two
+# different colours for one finding.
+hit = box_fills("```mermaid\nflowchart LR\n" + CLASSDEF
+                + "  KH[Nhà máy] -->|55%| R1[Đối tác A]:::warn\n"
+                  "  KH -->|25%| R2[Đối tác B]\n  KH -->|20%| R3[Đối tác C]\n```")
+miss = box_fills("```mermaid\nflowchart LR\n" + CLASSDEF
+                 + "  V1[NCC A] -->|68%| KH[Nhà máy]\n  V2[NCC B] -->|32%| KH\n```")
+check("hộp model tự tô :::warn đổi sang style nhà",
+      hit["Đối tác A"] == (WARN_FILL, WARN_STROKE), str(hit["Đối tác A"]))
+check("hộp model bỏ sót cũng ra đúng style ấy",
+      miss["NCC A"] == (WARN_FILL, WARN_STROKE), str(miss["NCC A"]))
+check("hai sơ đồ cùng một màu cảnh báo",
+      hit["Đối tác A"] == miss["NCC A"])
+check("không còn màu hổ phách của model",
+      MODEL_AMBER not in {f for f, _ in list(hit.values()) + list(miss.values())})
+check("trục hub không bị tô dù dây 68% chạm ngưỡng",
+      miss["Nhà máy"][0] != WARN_FILL, miss["Nhà máy"][0])
+
+# Below the threshold this function has nothing to say, and it says nothing.
+low = box_fills("```mermaid\nflowchart LR\n" + CLASSDEF
+                + "  KH[Nhà máy] -->|30%| R1[Đối tác A]:::warn\n"
+                  "  KH -->|25%| R2[Đối tác B]\n  KH -->|20%| R3[Đối tác C]\n```")
+check("dưới ngưỡng thì giữ nguyên style của model",
+      low["Đối tác A"] == (MODEL_AMBER, "#333"), str(low["Đối tác A"]))
+other = box_fills("```mermaid\nflowchart LR\n  classDef hub fill:#BDD7EE,stroke:#333\n"
+                  "  KH[Nhà máy]:::hub -->|30%| R1[Đối tác A]\n"
+                  "  KH -->|25%| R2[Đối tác B]\n  KH -->|20%| R3[Đối tác C]\n```")
+check("style model không phải cảnh báo thì không đụng tới",
+      other["Nhà máy"] == ("#BDD7EE", "#333"), str(other["Nhà máy"]))
 
 print("\n19b. Nhãn căn giữa và cách đều — cả quạt ra lẫn quạt vào")
 for fan_name, fan_src in (

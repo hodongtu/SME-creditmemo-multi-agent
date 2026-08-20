@@ -376,16 +376,30 @@ def _label_gaps(
     how much it needs depends on what it is holding.
     """
 
+    out_degree: dict[str, int] = {}
+    in_degree: dict[str, int] = {}
+    for edge in edges:
+        out_degree[edge.src] = out_degree.get(edge.src, 0) + 1
+        in_degree[edge.dst] = in_degree.get(edge.dst, 0) + 1
+
     needed: dict[int, float] = {}
     for edge in edges:
         if not edge.lines or edge.src not in nodes:
             continue
         widest = max(text_width(line, EDGE_FONT_SIZE) for line in edge.lines)
+        room = widest + 2 * EDGE_LABEL_CLEARANCE + ARROW_LENGTH
+        # A fan's label does not get the whole gap. Its connector doglegs across
+        # a shared trunk halfway along, and the label sits on the horizontal run
+        # to one side of that trunk — so it has half the gap to fit in, and the
+        # gap has to be twice as wide for the same label. Sizing it as though the
+        # label were centred in the whole gap is what put "6,03% / 3,65 tỷ"
+        # underneath a supplier box in a real report: from about 50px of label
+        # the text runs back over the box, and boxes are painted after edges, so
+        # it does not overlap — it disappears.
+        if out_degree.get(edge.src, 0) > 1 or in_degree.get(edge.dst, 0) > 1:
+            room = 2 * (widest + EDGE_LABEL_CLEARANCE) + ARROW_LENGTH
         rank = nodes[edge.src].rank
-        needed[rank] = max(
-            needed.get(rank, 0.0),
-            widest + 2 * EDGE_LABEL_CLEARANCE + ARROW_LENGTH,
-        )
+        needed[rank] = max(needed.get(rank, 0.0), room)
     return needed
 
 
