@@ -2,18 +2,17 @@
 name: credit-relationship
 description: >-
   Hướng dẫn phân tích quan hệ tín dụng: dư nợ và hạn mức hiện tại, tình trạng trả nợ và nhóm nợ, đối chiếu dữ liệu nội bộ T24 với CIC/bureau, và các dấu hiệu cảnh báo.
-  Dùng khi lập phần quan hệ tín dụng của báo cáo thẩm định tín dụng.
+  Dùng khi tạo báo cáo quan hệ tín dụng của báo cáo thẩm định tín dụng.
 ---
-
-Hướng dẫn phân tích quan hệ tín dụng. Đây là chỉ dẫn nội bộ — KHÔNG được chép bất kỳ
-dòng nào của phần này vào báo cáo.
-
-CÁCH DÙNG BỐ CỤC:
-- Bố cục là khung tham khảo. Chỉ điền dòng có căn cứ thật; xoá hẳn dòng trống.
-- Nếu không có dữ liệu T24 hoặc CIC, ghi rõ "Không có dữ liệu trong hồ sơ" và nêu
-  giới hạn này trong phần Nhận định — không suy đoán dư nợ hay nhóm nợ.
-
-TRỌNG TÂM:
+ 
+#### NGUYÊN TẮC CHUNG
+- Bố cục được cung cấp là khung tham khảo, không phải biểu mẫu bắt buộc điền kín.
+- Không lặp giá trị của kỳ này sang kỳ khác để lấp ô trống.
+- Bảng biểu chỉ hiển thị những kỳ/năm có số liệu.
+- Nếu không có dữ liệu T24 hoặc CIC, ghi rõ "Không có dữ liệu" và nêu giới hạn này trong phần Nhận định — không suy đoán dư nợ hay nhóm nợ.
+ 
+#### TRỌNG TÂM PHÂN TÍCH
+ 
 - Dư nợ hiện tại, hạn mức, loại hình cấp tín dụng, kỳ hạn, tình trạng trả nợ, nợ quá
   hạn, mức độ sử dụng hạn mức.
 - Bảng mục 1: hai cột "Hạn mức (tỷ VNĐ)" và "Dư nợ hiện tại (tỷ VNĐ)" đã ghi đơn vị
@@ -30,21 +29,22 @@ TRỌNG TÂM:
     KHÔNG suy diễn giá trị cho tháng đó.
   - Chỉ nhận xét trong phạm vi các tháng có trong dữ liệu, không mở rộng ra ngoài.
   - Doanh thu VAT trên biểu đồ nay lấy từ tờ khai thuế GTGT thật trong hồ sơ (xem
-    khối ```vat-doanh-thu``` bên dưới) — dùng được làm căn cứ đối chiếu dư nợ/doanh
+    khối 
+vat-doanh-thu``` bên dưới) — dùng được làm căn cứ đối chiếu dư nợ/doanh
     thu như bình thường. Hồ sơ không có tờ khai GTGT thì biểu đồ chỉ còn dư nợ,
     không suy diễn doanh thu. Tháng lấy từ tờ khai QUÝ (chia đều cho 3 tháng) là số
     ƯỚC LƯỢNG — khi nhận xét về tháng đó phải nói rõ.
-
-KHỐI DỮ LIỆU VAT (```vat-doanh-thu```):
+ 
+#### KHỐI DỮ LIỆU VAT (```vat-doanh-thu```):
 - Hồ sơ có tài liệu tờ khai thuế GTGT (`to_khai_thue_gtgt`) thì NGAY SAU phần Nhận
   định của mục "Diễn biến dư nợ 12 tháng", xuất thêm một khối:
   ```vat-doanh-thu
   01/2025: 31400000000
   02/2025: 28750000000
   Q1/2026: 85000000000 (quy)
-  ```
-  Mỗi dòng một kỳ khai: `MM/YYYY: <số đồng>` cho tờ khai THÁNG, hoặc
-  `QN/YYYY: <số đồng> (quy)` cho tờ khai QUÝ — đọc đúng loại kỳ ghi trên tờ khai,
+  
+  Mỗi dòng một kỳ khai: MM/YYYY: <số đồng> cho tờ khai THÁNG, hoặc
+  QN/YYYY: <số đồng> (quy) cho tờ khai QUÝ — đọc đúng loại kỳ ghi trên tờ khai,
   KHÔNG tự quy đổi tháng thành quý hay ngược lại. Nhiều tờ khai trong hồ sơ thì
   liệt kê hết các kỳ đọc được trong cùng một khối.
 - Lấy đúng dòng TỔNG DOANH THU hàng hoá, dịch vụ bán ra chịu thuế GTGT trên tờ khai

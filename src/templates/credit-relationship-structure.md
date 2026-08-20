@@ -1,43 +1,45 @@
-## Báo cáo phân tích quan hệ tín dụng
-
-### Nguồn thông tin
-
-- **Nguồn dữ liệu**:
-    - {{TenNguon}}
-- **Kỳ/Ngày dữ liệu**: {{Ky}}
-- **Mức độ tin cậy**: {{MucDoTinCay}}
-
+# BÁO CÁO PHÂN TÍCH QUAN HỆ TÍN DỤNG
 ---
-
-## 1. Dư nợ và hạn mức hiện tại
-
-| Tổ chức tín dụng | Loại hình cấp tín dụng | Hạn mức (tỷ VNĐ) | Dư nợ hiện tại (tỷ VNĐ) | Tỷ lệ sử dụng | Kỳ hạn |
-|---|---|---:|---:|---:|---|
-
-**Nhận định**:
-
-## 2. Diễn biến dư nợ 12 tháng
-
-**Nhận định**:
-
-## 3. Tình trạng trả nợ và nhóm nợ
-
-| Tổ chức tín dụng | Nhóm nợ | Số ngày quá hạn | Lịch sử cơ cấu lại |
-|---|---|---:|---|
-
-**Nhận định**:
-
-## 4. Đối chiếu T24 và CIC
-
-| Nội dung | Theo T24 | Theo CIC | Chênh lệch |
-|---|---|---|---|
-
-**Nhận định**:
-
-## 5. Dấu hiệu cảnh báo
-
-**Nhận định**:
-
-## 6. Kết luận
-
-**Nhận định**:
+&nbsp;
+ 
+| Thông tin chung | &nbsp; |
+| --------------- | ------ |
+| *Tên khách hàng* | {{TenKhachHang}} |
+| *Nguồn dữ liệu* | - {{TenFile}} |
+| *Mức độ tin cậy* | {{MucDoTinCay}} |
+ 
+## 1. Quan hệ tín dụng của khách hàng tại Techcombank
+ 
+### 1.1 Hạn mức tín dụng đã được cấp
+ 
+### 1.2 Chất lượng quan hệ tín dụng
+ 
+## 2. Quan hệ tín dụng của khách hàng tại các TCTD
+ 
+### 2.1 Chi tiết dư nợ/ nghĩa vụ tín dụng (ngày báo cáo: {{NgayBaoCaoDuLieu}})
+ 
+| Tên TCTD | Dư nợ ngắn hạn | Dư nợ trung dài hạn | Cam kết ngoại bảng | Dư nợ khác | Thẻ tín dụng | Trái phiếu | Tổng dư nợ | Tỷ trọng trên tổng dư nợ (%) | Tỷ lệ TSBĐ / Nghĩa vụ (%) |
+|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|
+| - |  - | - | - | - | - | - | - | -% | -% |
+ 
+(Đơn vị: tỷ VNĐ)
+ 
+### 2.2 Chi tiết tài sản đảm bảo (ngày báo cáo: {{NgayBaoCaoDuLieu}})
+ 
+| Tên TCTD | GTCG/ Ký quỹ/ Vàng | Bất động sản | Phương tiện vận tải/ Máy móc thiết bị | Bảo lãnh bên thứ 3 | Hàng hoá | Quyền tài sản | Tài sản khác | Tổng |
+|-----|-----|-----|-----|-----|-----|-----|-----|-----|
+| - |  - | - | - | - | - | - | - | - | - |
+ 
+(Đơn vị: tỷ VNĐ)
+ 
+### 2.3 Lịch sử tín dụng (ngày báo cáo: {{NgayBaoCaoDuLieu}})
+ 
+| Tên TCTD | Nhóm nợ hiện tại | Nợ quá hạn trong 12 tháng gần nhất | Nợ xấu trong 3-5 năm gần nhất | Nợ đã bán VAMC |
+|-----|-----|-----|-----|-----|
+| - |  - | - | - | - |
+ 
+(Đơn vị: tỷ VNĐ)
+ 
+### 2.4 Diễn biến dư nợ - doanh thu VAT trong 12 tháng gần nhất (ngày báo cáo: {{NgayBaoCaoDuLieu}})
+ 
+*Nhận định*:
