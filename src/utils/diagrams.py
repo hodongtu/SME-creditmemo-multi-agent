@@ -343,7 +343,15 @@ def _parse(source: str) -> Flowchart:
 # logs/ba_diagram_preview/preview.md.
 _CONCENTRATION_THRESHOLD = 40.0
 _PERCENT_LABEL = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
-_AUTO_WARN_STYLE = {"fill": "#FFC000", "stroke": "#333"}
+# Rose, and rose is used nowhere else: graph_svg's level palette runs green,
+# blue, slate, amber, violet precisely so this hue stays free. A flag sharing a
+# colour with an ordinary level stops being a flag.
+#
+# The text colour carries as much of the signal as the fill does. Every other box
+# prints near-black on a pale tint, so a box whose words are themselves coloured
+# reads as marked before its background is even noticed — which matters because
+# these fills all sit at the same lightness and cannot separate by weight.
+_AUTO_WARN_STYLE = {"fill": "#f7e2e5", "stroke": "#c1616f", "color": "#c1616f"}
 
 
 def _auto_color_concentration(chart: Flowchart) -> Flowchart:

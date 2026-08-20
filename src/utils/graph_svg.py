@@ -47,8 +47,8 @@ PX_TO_PT = 0.75
 # it — before that, this constant was multiplied by an 0.45 fit factor and the
 # nine-box supply chain printed at 3.5pt.
 FONT_SIZE = 13.5
-EDGE_FONT_SIZE = 10.5
-RANK_GAP = 74
+EDGE_FONT_SIZE = 11.34
+RANK_GAP = 92
 # Top-down charts need less room between levels: a horizontal gap has to fit an
 # edge label *beside* the connector, a vertical one only above and below it.
 VERTICAL_RANK_GAP = 46
@@ -57,7 +57,7 @@ VERTICAL_RANK_GAP = 46
 # label sitting beside the connector, and on a chain with no labels at all those
 # 74s were 36% of the drawing's width — spent on space for text that does not
 # exist, and paid for by shrinking the text that does.
-BARE_RANK_GAP = 30
+BARE_RANK_GAP = 44
 BARE_VERTICAL_RANK_GAP = 26
 # Clear space either side of an edge label — per side, not shared between them.
 # The earlier constant was the total, which left 7px a side once the label was
@@ -99,6 +99,12 @@ EDGE_CHAR_WIDTH = EDGE_FONT_SIZE * 0.57
 FONT_STACK = ("Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans")
 FONT_MEASURE_CORRECTION = 1.115
 _MEASURE_SIZE = 64
+# Kept for the fallback path only. Wrapping by character count stopped being
+# right when box width started being measured: twenty-one wide characters
+# measured 291px against a 162px limit and ran out of the box, while twenty-one
+# narrow ones used 69px and wasted most of it. Lines are broken on measured
+# width now, so a Vietnamese label — mostly narrow glyphs — fits more per line
+# and needs fewer of them.
 MAX_CHARS_PER_LINE = int((NODE_MAX_WIDTH - 2 * NODE_PADDING_X) / CHAR_WIDTH)
 
 # Usable width of the report page: A4 (210mm) less the 11/9mm margins in
@@ -121,6 +127,11 @@ DEFAULT_TEXT = "#1f2a33"
 # came from: it draws 2px near-black connectors, which read far better on paper
 # than the soft grey that was here.
 EDGE_COLOUR = "#3d4a55"
+EDGE_LABEL_COLOUR = "#445566"
+# "bold", not a numeric weight: 600 asks for a semibold that the report's
+# font stack does not ship, and the fallback is the regular face — the
+# emphasis would silently not happen.
+HIGHLIGHT_WEIGHT = "bold"
 GROUP_STROKE = "#b9c6d1"
 # Hand-drawn depth, because neither CSS box-shadow nor an SVG filter survives
 # WeasyPrint. Small numbers on purpose: a 1.5px offset reads as a lifted card,
@@ -143,8 +154,12 @@ LEVEL_COLOURS = (
     ("#dce7f3", "#2f6f9f"),   # the report's own accent
     ("#e4e9ee", "#5c7285"),   # neutral slate for the middle of a long chain
     ("#f7eeda", "#b5852f"),   # amber, warming toward the output end
-    ("#f7e2e5", "#c1616f"),   # rose — cash in
+    ("#ece4f3", "#7d5ba6"),   # violet — cash in
 )
+# Rose is deliberately absent from the levels above: it belongs to the
+# concentration flag in diagrams.py and nothing else. A flag that shares a hue
+# with an ordinary level is not a flag, and this one has to stand out wherever
+# in the chain it lands.
 
 
 @dataclass
@@ -234,19 +249,34 @@ def _text_lines(label_html: str) -> list[str]:
     """
 
     raw = [html.unescape(part) for part in re.split(r"<br\s*/?>", label_html)]
+    limit = NODE_MAX_WIDTH - 2 * NODE_PADDING_X
     lines: list[str] = []
     for part in raw:
         part = part.strip()
         if not part:
             continue
-        while len(part) > MAX_CHARS_PER_LINE:
-            cut = part.rfind(" ", 0, MAX_CHARS_PER_LINE)
-            if cut <= 0:
-                cut = MAX_CHARS_PER_LINE
-            lines.append(part[:cut].strip())
-            part = part[cut:].strip()
-        if part:
-            lines.append(part)
+        current = ""
+        for word in part.split():
+            # A single token with nothing to break on — a code, a run of capitals
+            # — would otherwise sit wider than its own box. Split it mid-word;
+            # ugly, but visible, where an overflowing line is neither.
+            while text_width(word, FONT_SIZE) > limit:
+                cut = len(word)
+                while cut > 1 and text_width(word[:cut], FONT_SIZE) > limit:
+                    cut -= 1
+                if current:
+                    lines.append(current)
+                    current = ""
+                lines.append(word[:cut])
+                word = word[cut:]
+            candidate = f"{current} {word}".strip()
+            if current and text_width(candidate, FONT_SIZE) > limit:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
 
     return lines or [""]
 
@@ -381,29 +411,18 @@ def _colour_by_level(chart, nodes: dict[str, _Node]) -> None:
 
 
 def _size_nodes(nodes: dict[str, _Node]) -> None:
-    """Give every box its width, and give them all one height.
+    """Size every box to its own text, with the same padding all round.
 
-    Width follows the text: the same padding either side of whatever the label
-    needs, so the margin round the words is the same in every box.
-
-    Height does not. A two-line label would otherwise make its box half as tall
-    again as its neighbours, and a row of boxes that do not line up reads as
-    sloppy however carefully each one was measured on its own. Every box takes
-    the tallest box's height and centres its text inside — one wrapped label
-    lifts the whole row rather than standing out of it.
+    Height follows the number of lines, so a two-line label gets a taller box
+    rather than being squeezed into a one-line one. Boxes of different heights
+    are centred against each other by _place, which is what keeps a level
+    looking level without forcing every box to the same size.
     """
 
     for node in nodes.values():
         width = max(text_width(line, FONT_SIZE) for line in node.lines) + 2 * NODE_PADDING_X
         node.width = min(NODE_MAX_WIDTH, max(NODE_MIN_WIDTH, width))
-
-    tallest = max(
-        (len(node.lines) for node in nodes.values()),
-        default=1,
-    )
-    height = tallest * LINE_HEIGHT + 2 * NODE_PADDING_Y
-    for node in nodes.values():
-        node.height = height
+        node.height = len(node.lines) * LINE_HEIGHT + 2 * NODE_PADDING_Y
 
 
 def _place(
@@ -447,22 +466,24 @@ def _place(
         thickness = max(
             nodes[n].height if vertical else nodes[n].width for n in rank_nodes
         )
+        # Every box on a level takes that level's width. Connectors leave from a
+        # right edge and arrive at a left one, so both have to be straight, and
+        # they cannot both be unless the boxes match: two suppliers whose names
+        # differ in length left their level 62px apart and drew two wires of
+        # different lengths into the same factory.
+        for node_id in rank_nodes:
+            if vertical:
+                nodes[node_id].height = thickness
+            else:
+                nodes[node_id].width = thickness
         across = MARGIN + (widest - spans[key]) / 2
         for node_id in rank_nodes:
             node = nodes[node_id]
             if vertical:
                 node.x = across
-                # Flush with the top of the level, not centred in it. Centring
-                # gave boxes of different heights different top edges, so the
-                # connectors arriving at them were different lengths and their
-                # elbows stopped lining up.
-                node.y = along
+                node.y = along + (thickness - node.height) / 2
                 across += node.width + NODE_GAP
             else:
-                # Flush with the left edge of the level, for the same reason:
-                # two boxes in one level 26px apart in width started 13px apart
-                # in x, and the two connectors into them bent at two different
-                # places. Every arrow into a level should stop at the same line.
                 node.x = along
                 node.y = across
                 across += node.height + NODE_GAP
@@ -704,44 +725,66 @@ def render_svg(chart) -> str | None:
                 label_y = (y1 + y2) / 2
                 anchor = "start"
             elif in_degree[edge.dst] > 1 and out_degree[edge.src] <= 1:
-                # Put the label at whichever end of the connector fans out,
-                # because that is the end where the edges are far apart. Labels
-                # bunched at the shared end land on top of each other and on the
-                # connector bundle: seven suppliers feeding one node share a
-                # bend exactly.
-                label_x, label_y, anchor = x1 + 5, y1 - 4, "start"
+                # A fan. Its connectors dogleg across a shared vertical trunk, so
+                # the true middle of one is *on* that trunk, and its middle height
+                # is between two rows — a label centred there covers the trunk and
+                # floats between the two connectors it might belong to. Centre it
+                # on the horizontal run at the end where the edges fan apart,
+                # which is the stretch this edge has a y to itself.
+                #
+                # Keyed on the fan and not on the dogleg, because the middle spoke
+                # of an odd fan runs straight into the hub: measured from its own
+                # ends it landed 23px left of its neighbours, the ragged look
+                # again. Every label in one fan shares an x.
+                trunk = x1 + (x2 - x1) / 2
+                half = max(text_width(line, EDGE_FONT_SIZE) for line in edge.lines) / 2
+                label_x = min((x1 + trunk) / 2, trunk - EDGE_LABEL_MARGIN - half)
+                label_y = y1
+                anchor = "middle"
             elif out_degree[edge.src] > 1 and in_degree[edge.dst] <= 1:
-                label_x, label_y, anchor = x2 - 5, y2 - 4, "end"
+                trunk = x1 + (x2 - x1) / 2
+                half = max(text_width(line, EDGE_FONT_SIZE) for line in edge.lines) / 2
+                label_x = max((trunk + x2 - ARROW_LENGTH) / 2,
+                              trunk + EDGE_LABEL_MARGIN + half)
+                label_y = y2
+                anchor = "middle"
             else:
-                # Centred between the source box and where the arrowhead
-                # starts, not in the whole gap. Centring in the gap pushed the
-                # label into the arrow, because the arrow eats the last 8px of
-                # it and nothing accounted for that.
+                # Centred between the source box and where the arrowhead starts,
+                # not in the whole gap: the arrow eats the last 8px of it.
                 label_x = x1 + (x2 - ARROW_LENGTH - x1) / 2
-                label_y = (y1 + y2) / 2 if abs(y1 - y2) > 0.5 else y1
+                label_y = y1
                 anchor = "middle"
             # Centre the block on the connector. Shifting it up by a full
             # line per extra line put a three-line label entirely above the
             # wire, and on a one-rank diagram that is above the drawing.
-            # A label beside a sloping connector is centred on it; a label above a
-            # flat one has to sit entirely above the wire. Centring the block on
-            # a horizontal wire put the second line below it — the line drawn
-            # through the words rather than under them.
+            # Every label sits the same distance above its own wire, sloping or
+            # flat. They used to be handled differently — centred on a sloping
+            # connector, lifted above a flat one — and in a fan, where the middle
+            # branch is flat and the rest slope, that put one label in a
+            # different relationship to its wire than its neighbours. Measured on
+            # a five-way fan the gaps between labels came out 53, 45.5, 60.5, 53:
+            # even spacing was never possible while two rules were in play.
             block = (len(edge.lines) - 1) * (EDGE_FONT_SIZE + 1)
-            if abs(y1 - y2) > 0.5:
-                label_y -= block / 2
-            else:
-                label_y -= (
-                    block
-                    + EDGE_LABEL_MARGIN
-                    + EDGE_FONT_SIZE * DESCENDER_RATIO
-                    + EDGE_STROKE_WIDTH / 2
-                )
+            label_y -= (
+                block
+                + EDGE_LABEL_MARGIN
+                + EDGE_FONT_SIZE * DESCENDER_RATIO
+                + EDGE_STROKE_WIDTH / 2
+            )
+            # A concentration warning is a property of the *pair*, not of the
+            # box: "52%" is the finding and the box is who it is about. Drawn in
+            # the default grey it read as ordinary annotation on a red box. Take
+            # the colour from whichever endpoint diagrams.py styled — the hub is
+            # never the styled one, so checking the target then the source picks
+            # out the flagged partner whether it supplies or buys.
+            warned = chart.node_style.get(edge.dst) or chart.node_style.get(edge.src)
+            label_fill = (warned or {}).get("color") or EDGE_LABEL_COLOUR
+            weight = f' font-weight="{HIGHLIGHT_WEIGHT}"' if warned else ""
             for index, line in enumerate(edge.lines):
                 parts.append(
                     f'<text x="{label_x:.1f}" '
                     f'y="{label_y + index * (EDGE_FONT_SIZE + 1):.1f}" '
-                    f'font-size="{EDGE_FONT_SIZE}" fill="#445566" '
+                    f'font-size="{EDGE_FONT_SIZE}" fill="{label_fill}"{weight} '
                     f'text-anchor="{anchor}">{html.escape(line)}</text>'
                 )
 
@@ -767,28 +810,14 @@ def render_svg(chart) -> str | None:
         # is as tall as the tallest label needs.
         block = len(node.lines) * LINE_HEIGHT
         first = node.y + (node.height - block) / 2 + LINE_HEIGHT * 0.78
+        weight = (f' font-weight="{HIGHLIGHT_WEIGHT}"'
+                  if chart.node_style.get(node.node_id) else "")
         for index, line in enumerate(node.lines):
             parts.append(
                 f'<text x="{node.cx:.1f}" y="{first + index * LINE_HEIGHT:.1f}" '
-                f'font-size="{FONT_SIZE}" fill="{node.colour}" '
+                f'font-size="{FONT_SIZE}" fill="{node.colour}"{weight} '
                 f'text-anchor="middle">{html.escape(line)}</text>'
             )
 
     parts.append("</svg>")
-    # Fitting the page always wins over legibility, because clipping would drop
-    # content outright. A chain that is too wide now wraps instead of shrinking,
-    # so reaching this point means a *branching* diagram too wide for A4.
-    #
-    # Said on the page rather than in an HTML comment. The comment version was
-    # written to "trace a rendered PDF back to the cause" and did the opposite:
-    # the reader saw 4.7pt text with no explanation, and nobody writing the
-    # report ever saw the comment at all. Same rule as every other guard here —
-    # a check that fires silently is a check nobody acts on.
-    note = ""
-    if FONT_SIZE * scale < MIN_READABLE_FONT:
-        note = (
-            f'<p class="mmd-note">Sơ đồ đã thu nhỏ còn {scale * 100:.0f}% để vừa '
-            f"khổ giấy, chữ nhỏ hơn mức đọc thoải mái. Sơ đồ có {len(ranks)} tầng "
-            f"và nhiều nhánh — tách thành hai sơ đồ sẽ đọc được.</p>"
-        )
-    return f'<div class="mmd mmd-svg">{"".join(parts)}{note}</div>'
+    return f'<div class="mmd mmd-svg">{"".join(parts)}</div>'

@@ -92,8 +92,10 @@ TÀI LIỆU THAM KHẢO NGÀNH (nếu evidence có khối "Reference Document fi
 TRỌNG TÂM PHÂN TÍCH TỪNG MỤC:
 - Mục 1: sản phẩm, đầu vào, đầu ra, tồn kho, phương thức thanh toán, quy trình tiền hàng.
 - Mục 2: mô tả sản phẩm/dịch vụ theo từng lĩnh vực, tỷ trọng đóng góp doanh thu.
-- Mục 4 và 5: tối đa 3 đối tác lớn nhất theo tỷ trọng doanh thu, kèm phương thức ký hợp
-  đồng, giao hàng, thanh toán.
+- Mục 4 và 5: liệt kê ÍT NHẤT 3 và NHIỀU NHẤT 5 đối tác lớn nhất theo tỷ trọng
+  doanh thu, kèm phương thức ký hợp đồng, giao hàng và thanh toán. Hồ sơ có ít
+  hơn 3 đối tác thì liệt kê đúng số có thật và ghi rõ hồ sơ chỉ nêu bấy nhiêu —
+  KHÔNG bịa thêm cho đủ 3.
 - Mục 6: vị thế sản phẩm/dịch vụ trong thị trường mục tiêu và khả năng duy trì 3-5 năm
   tới; ưu nhược điểm của phương thức mua bán, chính sách tồn kho, vận hành, so với
   thông lệ ngành; sức khoẻ tài chính và nhu cầu tín dụng.

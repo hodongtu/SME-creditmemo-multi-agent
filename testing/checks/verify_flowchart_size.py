@@ -16,7 +16,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 import src.utils.graph_svg as G  # noqa: E402
-from src.utils.diagrams import _parse  # noqa: E402
+from src.utils.diagrams import _parse, mermaid_to_html  # noqa: E402
 
 fails = []
 
@@ -98,23 +98,26 @@ paths = re.findall(r'<path d="([^"]+)"', one["svg"])
 wrap = [p for p in paths if len(re.findall(r"[ML][\d.]+ [\d.]+", p)) == 4
         and float(re.findall(r"[ML]([\d.]+) ([\d.]+)", p)[0][1])
         < float(re.findall(r"[ML]([\d.]+) ([\d.]+)", p)[-1][1])]
-check("có đúng 1 đường nối xuống dòng dưới", len(wrap) == 1, f"{len(wrap)} đường")
+check("số đường nối xuống dòng = số dòng - 1",
+      len(wrap) == one["rows"] - 1, f"{len(wrap)} đường / {one['rows']} dòng")
 if wrap:
     pts = [(float(x), float(y)) for x, y in re.findall(r"[ML]([\d.]+) ([\d.]+)", wrap[0])]
     check("đi xuống rồi sang TRÁI (không đảo chiều chuỗi)",
           pts[-1][0] < pts[0][0] and pts[-1][1] > pts[0][1],
           f"x {pts[0][0]:.0f}->{pts[-1][0]:.0f}, y {pts[0][1]:.0f}->{pts[-1][1]:.0f}")
 
-print("\n6. Sơ đồ vẫn quá rộng thì PHẢI nói ra, không im")
+print("\n6. Sơ đồ quá rộng: vẫn vẽ, không kèm chú thích nào")
 deep = "flowchart LR\n" + "\n".join(
     f"  N{i}[Công đoạn sản xuất số {i}] --> N{i+1}[Công đoạn sản xuất số {i+1}]"
     for i in range(1, 10)) + "\n  N1 --> N5"
-wide = measure(deep)
-check("bị thu nhỏ dưới ngưỡng đọc được", wide["font"] < G.MIN_READABLE_FONT,
-      f"{wide['font']:.1f}px = {wide['font'] * G.PX_TO_PT:.1f}pt")
-check("ghi chú HIỂN THỊ được (không phải HTML comment)",
-      '<p class="mmd-note">' in wide["svg"])
-check("không dùng lại comment ẩn", "<!-- diagram scaled" not in wide["svg"])
+import contextlib as _ctx, io as _io  # noqa: E402
+_buf = _io.StringIO()
+with _ctx.redirect_stdout(_buf):
+    wide = measure(deep)
+check("vẫn vẽ ra sơ đồ", wide["width"] > 0)
+check("KHÔNG in chú thích dưới hình", "mmd-note" not in wide["svg"])
+check("KHÔNG dùng comment ẩn", "<!-- diagram scaled" not in wide["svg"])
+check("KHÔNG in cảnh báo ra stdout", _buf.getvalue() == "", repr(_buf.getvalue()[:60]))
 
 print("\n7. Bảng màu theo báo cáo, không phải mặc định mermaid")
 check("bỏ tím #9370DB", "#9370DB" not in one["svg"])
@@ -179,8 +182,10 @@ for name, source, label in (
                    for l in G._text_lines(label))
     gap12 = boxes12[1][0] - boxes12[0][1]
     side = (gap12 - widest12 - G.ARROW_LENGTH) / 2
-    check(f"nhãn {name}: chừa đúng {G.EDGE_LABEL_CLEARANCE}px mỗi bên",
-          abs(side - G.EDGE_LABEL_CLEARANCE) < 0.5, f"{side:.1f}px")
+    # Ít nhất, không phải đúng bằng: RANK_GAP là sàn, nên nhãn ngắn được rộng
+    # hơn mức tối thiểu. Điều phải giữ là không bao giờ HẸP hơn.
+    check(f"nhãn {name}: chừa ít nhất {G.EDGE_LABEL_CLEARANCE}px mỗi bên",
+          side >= G.EDGE_LABEL_CLEARANCE - 0.5, f"{side:.1f}px")
 
 # nhãn phải nằm gọn giữa hộp nguồn và đầu mũi tên
 svg12 = G.render_svg(_parse("flowchart LR\n  A[Đầu vào] -->|thanh toán 30 ngày| B[Sản xuất]"))
@@ -234,6 +239,118 @@ for label15 in ("giao hàng", "trả chậm 30 ngày",
           wire - bottom >= G.EDGE_LABEL_MARGIN - 0.1, f"{wire - bottom:.1f}px")
     check(f"{n} dòng: mọi dòng nằm TRÊN dây", max(ys15) < wire,
           f"đáy baseline {max(ys15):.1f} < dây {wire:.1f}")
+
+print("\n16. Cùng tầng thì cùng bề rộng — dây thẳng cả hai mép")
+svg16 = G.render_svg(_parse(
+    "flowchart LR\n  A[Công ty TNHH Thương mại Toàn Cầu] --> M[Nhà máy]\n"
+    "  B[Gỗ An Cường] --> M\n  M --> C[Khách hàng lớn 78%]\n  M --> D[Khách hàng khác]"))
+import collections as _c  # noqa: E402
+rects16 = [(float(x), float(y), float(w), float(h)) for x, y, w, h in
+           re.findall(r'<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"',
+                      svg16)][1::2]
+ranks16 = _c.defaultdict(list)
+for x, y, w, h in rects16:
+    ranks16[round(x)].append((w, h))
+check("mỗi tầng đúng một bề rộng",
+      all(len({w for w, _ in v}) == 1 for v in ranks16.values()),
+      str({k: sorted({w for w, _ in v}) for k, v in ranks16.items()}))
+rights = {round(x + w) for x, _, w, _ in rects16 if round(x) == min(ranks16)}
+check("tầng đầu: mép PHẢI thẳng hàng", len(rights) == 1, str(sorted(rights)))
+
+print("\n17. Chiều cao khối theo số dòng thật, và căn giữa theo trục kia")
+heights16 = {h for _, _, _, h in rects16}
+check("khối 1 dòng và 2 dòng cao khác nhau", len(heights16) > 1, str(sorted(heights16)))
+first = [(y, h) for x, y, _, h in rects16 if round(x) == min(ranks16)]
+centres = {round(y + h / 2) for y, h in first}
+check("nhưng vẫn có khối cao khác nhau trong cùng tầng", len({h for _, h in first}) > 1)
+
+print("\n18. Ngắt dòng theo bề rộng đo được, không đếm ký tự")
+limit18 = G.NODE_MAX_WIDTH - 2 * G.NODE_PADDING_X
+for probe in ("Công ty Cổ phần Đầu tư và Phát triển Công nghệ Cao Việt Nam",
+              "WWWWWWWWWWWWWWWWWWWWW", "iiiiiiiiiiiiiiiiiiiiiiiiiiiiii"):
+    over = [l for l in G._text_lines(probe) if G.text_width(l, G.FONT_SIZE) > limit18 + 0.5]
+    check(f"{len(G._text_lines(probe))} dòng, không dòng nào tràn hộp", not over, str(over))
+
+print("\n19. Cỡ chữ nhãn: nhỏ hơn chữ trong khối, vẫn đọc được trên giấy")
+check("nhãn nhỏ hơn chữ trong khối", G.EDGE_FONT_SIZE < G.FONT_SIZE,
+      f"{G.EDGE_FONT_SIZE} < {G.FONT_SIZE}")
+check("in ra giấy ≥ 8pt", G.EDGE_FONT_SIZE * G.PX_TO_PT >= 8.0,
+      f"{G.EDGE_FONT_SIZE * G.PX_TO_PT:.2f}pt")
+check("trên ngưỡng đọc được", G.EDGE_FONT_SIZE >= G.MIN_READABLE_FONT,
+      f"{G.EDGE_FONT_SIZE} >= {G.MIN_READABLE_FONT}")
+
+print("\n19c. Cảnh báo tập trung: hộp VÀ nhãn cạnh của nó, đậm và đổi màu")
+# Through mermaid_to_html, not render_svg(_parse(...)): the warning style is
+# applied by _auto_color_concentration in between, so the shorter path renders a
+# chart nothing has flagged and the assertions below would pass on any code.
+warn_svg = mermaid_to_html(
+    "```mermaid\nflowchart LR\n  NM[Nhà máy] -->|52%| KH1[Nhà Xinh]\n"
+    "  NM -->|18%| KH2[Hoà Phát]\n  NM -->|8%| KH3[Khác]\n```")
+spans = re.findall(r"<text ([^>]*)>([^<]*)</text>", warn_svg)
+styled = {t: (re.search(r'fill="([^"]+)"', a).group(1), "bold" in a) for a, t in spans}
+WARN = "#c1616f"
+check("nhãn 52% đổi sang màu cảnh báo", styled["52%"][0] == WARN, styled["52%"][0])
+check("nhãn 52% in đậm", styled["52%"][1])
+check("hộp Nhà Xinh in đậm", styled["Nhà Xinh"][1])
+check("hộp Nhà Xinh giữ màu cảnh báo", styled["Nhà Xinh"][0] == WARN, styled["Nhà Xinh"][0])
+for quiet in ("18%", "8%", "Hoà Phát", "Khác", "Nhà máy"):
+    check(f"{quiet!r} không bị kéo theo",
+          styled[quiet][0] != WARN and not styled[quiet][1], str(styled[quiet]))
+
+print("\n19b. Nhãn căn giữa và cách đều — cả quạt ra lẫn quạt vào")
+for fan_name, fan_src in (
+    ("quạt ra", "flowchart LR\n  NM[Nhà máy] -->|52%| A[Nhà Xinh]\n"
+                "  NM -->|18%| B[Hoà Phát]\n  NM -->|8%| C[Khác]"),
+    ("quạt vào", "flowchart LR\n  A[Gỗ An Cường] -->|30%| NM[Nhà máy]\n"
+                 "  B[Thép Hoà Phát] -->|25%| NM\n  C[Sơn Nippon] -->|5%| NM"),
+):
+    fan = G.render_svg(_parse(fan_src))
+    rows = re.findall(
+        r'<text x="([\d.]+)" y="([\d.-]+)" font-size="' + str(G.EDGE_FONT_SIZE)
+        + r'"[^>]*text-anchor="(\w+)"', fan)
+    check(f"{fan_name}: mọi nhãn anchor=middle",
+          {a for _, _, a in rows} == {"middle"}, str({a for _, _, a in rows}))
+    check(f"{fan_name}: cùng một x",
+          len({round(float(x)) for x, _, _ in rows}) == 1,
+          str(sorted({round(float(x)) for x, _, _ in rows})))
+    fys = sorted(float(y) for _, y, _ in rows)
+    fgaps = {round(fys[i + 1] - fys[i], 1) for i in range(len(fys) - 1)}
+    check(f"{fan_name}: khoảng cách đều", len(fgaps) == 1, str(sorted(fgaps)))
+    # Centring the labels put them on the shared vertical trunk, which is exactly
+    # where the midpoint of a doglegged connector falls. Nothing here caught that
+    # — the labels were centred, level and evenly spaced, and unreadable.
+    trunk = min(round(float(m))
+                for m in re.findall(r"L([\d.]+) [\d.]+ L\1 ", fan))
+    texts = re.findall(
+        r'<text x="([\d.]+)"[^>]*font-size="' + str(G.EDGE_FONT_SIZE)
+        + r'"[^>]*>([^<]*)<', fan)
+    clear = min(abs(float(x) - trunk) - G.text_width(t, G.EDGE_FONT_SIZE) / 2
+                for x, t in texts)
+    check(f"{fan_name}: nhãn không đè trục dọc", clear > 0, f"cách {clear:.1f}px")
+
+print("\n20. Highlight tập trung: hồng, và KHÔNG trùng màu tầng nào")
+from src.utils.diagrams import _auto_color_concentration, _AUTO_WARN_STYLE  # noqa: E402
+flagged = _auto_color_concentration(_parse(
+    "flowchart LR\n  NM[Nhà máy] -->|52%| KH1[Nhà Xinh]\n  NM -->|18%| KH2[Hoà Phát]"))
+check("khối vượt ngưỡng được gán style", "KH1" in flagged.node_style)
+check("khối dưới ngưỡng thì không", "KH2" not in flagged.node_style)
+warn_pair = (_AUTO_WARN_STYLE["fill"], _AUTO_WARN_STYLE["stroke"])
+check("màu highlight KHÔNG nằm trong bảng màu tầng",
+      warn_pair not in G.LEVEL_COLOURS, str(warn_pair))
+check("chữ trong khối cũng đổi màu",
+      _AUTO_WARN_STYLE.get("color") == _AUTO_WARN_STYLE["stroke"],
+      str(_AUTO_WARN_STYLE.get("color")))
+svg20 = G.render_svg(flagged)
+check("SVG vẽ chữ bằng màu đó",
+      f'fill="{_AUTO_WARN_STYLE["color"]}"' in
+      "".join(re.findall(r"<text[^>]*>", svg20)))
+check("5 màu tầng vẫn khác nhau đôi một", len(set(G.LEVEL_COLOURS)) == 5)
+
+print("\n21. Guidance: đối tác đầu vào/đầu ra từ 3 đến 5")
+ba = (REPO / "src/templates/business-activity-guidance.md").read_text(encoding="utf-8")
+check("nêu ÍT NHẤT 3", "ÍT NHẤT 3" in ba)
+check("nêu NHIỀU NHẤT 5", "NHIỀU NHẤT 5" in ba)
+check("vẫn cấm bịa cho đủ", "KHÔNG bịa thêm cho đủ 3" in ba)
 
 print("\n" + "=" * 66)
 if fails:
