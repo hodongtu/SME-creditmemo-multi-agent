@@ -60,39 +60,37 @@ flowchart LR
 ```
 
 #### TRỌNG TÂM PHÂN TÍCH
-- Mục 1: Vẽ sơ đồ mô hình sản xuất kinh doanh theo đúng khung 5 khối của bố cục —
-MỘT đầu vào lớn nhất và MỘT đầu ra lớn nhất, không phải cả top 5. Danh sách top 5
-đã nằm ở bảng mục 3 và mục 4; sơ đồ này nói CHIỀU đi của hàng và tiền, không lặp
-lại bảng.
-  - Đầu vào lớn nhất: đối tác đứng đầu tỷ trọng theo chi tiết phát sinh CÓ của sổ
-  chi tiết phải trả người bán (331) năm gần nhất; mặt hàng lấy theo hợp đồng đầu
-  vào (nếu có).
-  - Đầu ra lớn nhất: đối tác đứng đầu tỷ trọng theo chi tiết phát sinh NỢ của sổ
-  chi tiết phải thu khách hàng (131) năm gần nhất; mặt hàng lấy theo hợp đồng.
-  - Khung mẫu mục 1 có sẵn 5 khối theo đúng thứ tự cố định — ĐỌC KỸ chiều của từng
-  khối, đây là lỗi hay bị nhầm nhất (mô hình hay tự đảo ngược 2 vai trò dưới đây):
+- Mục 1: Vẽ sơ đồ mô hình sản xuất kinh doanh theo đúng khung hình quạt của bố cục:
+NHIỀU NHẤT 5 đầu vào ở bên trái, doanh nghiệp ở giữa, NHIỀU NHẤT 5 đầu ra ở bên phải.
+  - Đầu vào: xếp theo tỷ trọng phát sinh CÓ của sổ chi tiết phải trả người bán (331)
+  năm gần nhất, lấy từ trên xuống cho tới hết 5 dòng.
+  - Đầu ra: xếp theo tỷ trọng phát sinh NỢ của sổ chi tiết phải thu khách hàng (131)
+  năm gần nhất, lấy từ trên xuống cho tới hết 5 dòng.
+  - Hồ sơ có ít hơn 5 đối tác một bên thì XOÁ HẲN các dòng thừa trong khung — liệt kê
+  đúng số có thật, KHÔNG bịa tên và KHÔNG gộp phần còn lại thành một khối "khác" nếu
+  hồ sơ không nêu như vậy.
+  - Tên đối tác và tỷ trọng phải TRÙNG KHỚP bảng mục 3 và mục 4. Sơ đồ là hình vẽ của
+  hai bảng đó, lệch nhau là mâu thuẫn nội bộ trong cùng một trang.
+  - CHIỀU của sơ đồ là lỗi hay bị nhầm nhất — đọc kỹ hai vai trò dưới đây:
+    - Bên TRÁI, mũi tên ĐI VÀO doanh nghiệp, LÀ NHÀ CUNG CẤP (bên BÁN nguyên liệu CHO
+    công ty) — lấy đúng tên ở bảng MỤC 4 "Đầu vào".
+    - Bên PHẢI, mũi tên ĐI RA từ doanh nghiệp, LÀ KHÁCH MUA (bên MUA hàng TỪ công ty)
+    — lấy đúng tên ở bảng MỤC 3 "Đầu ra".
+    - TUYỆT ĐỐI không đảo ngược: nhà cung cấp (mục 4) luôn ở bên trái, khách mua
+    (mục 3) luôn ở bên phải. Đối chiếu lại với hai bảng trước khi chốt.
+  - KHÔNG thêm khối mặt hàng/sản phẩm vào sơ đồ này. Mặt hàng đã có cột riêng ở bảng
+  mục 3 và mục 4; thêm vào đây sẽ đẩy sơ đồ rộng quá khổ trang và mọi khối bị thu nhỏ
+  chữ lại.
  
-    {{SanPhamDauVao}} -> {{KhachHangDauVao}} -> {{KhachHang}} -> {{KhachHangDauRa}} -> {{SanPhamDauRa}}
+- Mục 2: Liệt kê NHIỀU NHẤT 5 sản phẩm/dịch vụ chính của khách hàng và tỷ trọng của các sản phẩm này trong 2 năm gần nhất.
  
-  - {{KhachHangDauVao}} LÀ NHÀ CUNG CẤP (bên BÁN nguyên liệu CHO công ty) — lấy
-    đúng tên ở bảng MỤC 4 "Đầu vào", đối tác đứng đầu cột Tỷ trọng.
-    {{SanPhamDauVao}} lấy từ cột "Mặt hàng" cùng dòng đó.
-  - {{KhachHangDauRa}} LÀ KHÁCH MUA (bên MUA hàng TỪ công ty) — lấy đúng tên ở
-    bảng MỤC 3 "Đầu ra", đối tác đứng đầu cột Tỷ trọng. {{SanPhamDauRa}}
-    lấy từ cột "Mặt hàng" cùng dòng đó.
-  - TUYỆT ĐỐI không đảo ngược hai vai trò này: nhà cung cấp (mục 4) luôn đứng ở
-    nửa ĐẦU chuỗi; khách mua (mục 3) luôn đứng ở nửa CUỐI chuỗi. Đối chiếu lại với
-    đúng dòng đầu bảng mục 3 và mục 4 trước khi chốt.
- 
-- Mục 2: Liệt kê top 5 sản phẩm/dịch vụ chính của khách hàng và tỷ trọng của các sản phẩm này trong 2 năm gần nhất.
- 
-- Mục 3: Liệt top 3 khách hàng đầu ra lớn nhất theo chi tiết phát sinh nợ của sổ chi tiết phải 
+- Mục 3: Liệt kê NHIỀU NHẤT 5 khách hàng đầu ra lớn nhất theo chi tiết phát sinh nợ của sổ chi tiết phải 
 thu khách hàng (sổ 131) năm gần nhất. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu ra này
 NẾU hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo khảo sát, CIC, báo cáo ngành).
 Không có thì ghi "Không có dữ liệu" — KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com
 hay GSO theo trí nhớ.
  
-- Mục 4: Liệt kê top 3 khách hàng đầu vào lớn nhất theo chi tiết phát sinh có của sổ chi tiết phải 
+- Mục 4: Liệt kê NHIỀU NHẤT 5 khách hàng đầu vào lớn nhất theo chi tiết phát sinh có của sổ chi tiết phải 
 trả người bán (sổ 331) năm gần nhất. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu vào này
 NẾU hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo khảo sát, CIC, báo cáo ngành).
 Không có thì ghi "Không có dữ liệu" — KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com

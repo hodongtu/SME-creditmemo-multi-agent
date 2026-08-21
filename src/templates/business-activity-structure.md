@@ -13,7 +13,16 @@
  
 ```mermaid
 flowchart LR
-  P1[SanPhamDauVao] --> KV[KhachHangDauVao] --> C[KhachHang] --> KCR[KhachHangDauRa] --> P2[SanPhamDauRa]
+  V1[{{DauVao1}}] -->|{{TyTrong}}| KH[{{TenKhachHang}}]
+  V2[{{DauVao2}}] -->|{{TyTrong}}| KH
+  V3[{{DauVao3}}] -->|{{TyTrong}}| KH
+  V4[{{DauVao4}}] -->|{{TyTrong}}| KH
+  V5[{{DauVao5}}] -->|{{TyTrong}}| KH
+  KH -->|{{TyTrong}}| R1[{{DauRa1}}]
+  KH -->|{{TyTrong}}| R2[{{DauRa2}}]
+  KH -->|{{TyTrong}}| R3[{{DauRa3}}]
+  KH -->|{{TyTrong}}| R4[{{DauRa4}}]
+  KH -->|{{TyTrong}}| R5[{{DauRa5}}]
 ```
  
 *Nhận định*:
