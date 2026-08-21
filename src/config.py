@@ -160,7 +160,16 @@ class Config:
         if self.agent_input_char_budgets is None:
             self.agent_input_char_budgets = {
                 "FINANCIAL_ANALYSIS_AGENT": 60_000,
-                "BUSINESS_ACTIVITY_AGENT": 20_000,
+                # 30_000, not the 20_000 it shared with the two smallest
+                # specialists. Business activity now takes the detail ledgers as
+                # well, because its guidance asks for the top partners by
+                # turnover on accounts 131 and 331. A real one measured 7,630
+                # characters (testing/samples/case_1/VIMID_so_chi_tiet.xlsx) —
+                # 38% of the old budget for a single document, against the ten
+                # other types the matrix routes here. The per-document share is
+                # budget/weight_sum, so without the raise the ledger and the
+                # contracts would have squeezed each other.
+                "BUSINESS_ACTIVITY_AGENT": 30_000,
                 "CREDIT_RELATIONSHIP_AGENT": 20_000,
                 # The routing matrix routes every one of its document types to
                 # the risk agent, so it sees more evidence than any other

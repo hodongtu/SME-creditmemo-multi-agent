@@ -318,7 +318,12 @@ groups:
         requirement:
           cap_moi: "Khuyến khích"
           tai_cap: "Khuyến khích"
+        # Business activity was added after its guidance began asking for the top
+        # partners by turnover on accounts 131 and 331 — the very ledgers this
+        # type collects. Without the route it was being told to read a document
+        # it never received.
         agents:
+          BUSINESS_ACTIVITY_AGENT: O
           FINANCIAL_ANALYSIS_AGENT: O
           RISK_ASSESSMENT_AGENT: O
         keywords:
