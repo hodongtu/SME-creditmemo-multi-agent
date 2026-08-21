@@ -7,8 +7,8 @@ description: >-
  
 #### NGUYÊN TẮC CHUNG
 - Tuân thủ TUYỆT ĐỐI cấu trúc theo BỐ CỤC BÁO CÁO.
-- Mọi số liệu tính toán ở Mục 1.2 đã được cung cấp sẵn trong khối 
-[PRE-COMPUTED CREDIT PROPOSAL METRICS]. KHÔNG tự tính lại — chỉ ĐIỀN vào bảng.
+- Mọi số liệu tính toán ở Mục 1.2 đã được cung cấp sẵn trong khối
+  [BẢNG TÍNH NHU CẦU TÍN DỤNG] ở phần evidence. KHÔNG tự tính lại — chỉ ĐIỀN vào bảng.
 - Nếu một giá trị trong khối = null → ghi "Không có dữ liệu".
 - CHỈ thay đổi giá trị khi hồ sơ cung cấp số khác biệt rõ ràng (ghi rõ cơ sở).
  
@@ -42,7 +42,7 @@ description: >-
         - Cột "Cơ sở tính toán": ghi nguồn dữ liệu thực tế cho mỗi dòng:
             + Doanh thu, Giá vốn: "BCTC năm [năm]" hoặc "Đề nghị vay vốn"
             + CCC, số ngày phải thu/tồn kho/phải trả: "BCTC năm [năm]"
-            + Vốn lưu động ròng: "BCTC năm [năm]" 😊 TSNH - Nợ ngắn hạn)
+            + Vốn lưu động ròng: "BCTC năm [năm]" (TSNH - Nợ ngắn hạn)
             + Nguồn vốn khác: "CIC" hoặc "Đề nghị vay vốn" (dư nợ tại TCTD khác)
             + Nhu cầu VLĐ: "GVHB / (365/CCC)"
             + Nhu cầu vốn vay: "Nhu cầu VLĐ - VCSH - Nguồn khác"

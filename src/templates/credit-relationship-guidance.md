@@ -29,12 +29,17 @@ description: >-
     KHÔNG suy diễn giá trị cho tháng đó.
   - Chỉ nhận xét trong phạm vi các tháng có trong dữ liệu, không mở rộng ra ngoài.
   - Doanh thu VAT trên biểu đồ nay lấy từ tờ khai thuế GTGT thật trong hồ sơ (xem
-    khối 
-vat-doanh-thu``` bên dưới) — dùng được làm căn cứ đối chiếu dư nợ/doanh
+    khối ```vat-doanh-thu``` bên dưới) — dùng được làm căn cứ đối chiếu dư nợ/doanh
     thu như bình thường. Hồ sơ không có tờ khai GTGT thì biểu đồ chỉ còn dư nợ,
     không suy diễn doanh thu. Tháng lấy từ tờ khai QUÝ (chia đều cho 3 tháng) là số
     ƯỚC LƯỢNG — khi nhận xét về tháng đó phải nói rõ.
  
+- Đối chiếu thông tin nội bộ (T24) với thông tin từ CIC/bureau; nêu rõ mọi chênh lệch.
+- Dấu hiệu cảnh báo: nợ quá hạn, đòn bẩy cao trên nhiều ngân hàng, nhiều khoản vay
+  song song, cơ cấu lại nợ, hoặc bản ghi bureau không nhất quán.
+- Chỉ nhận xét và đánh giá trên dữ liệu được cung cấp. KHÔNG tự tạo ra số liệu quan hệ
+  tín dụng.
+
 #### KHỐI DỮ LIỆU VAT (```vat-doanh-thu```):
 - Hồ sơ có tài liệu tờ khai thuế GTGT (`to_khai_thue_gtgt`) thì NGAY SAU phần Nhận
   định của mục "Diễn biến dư nợ 12 tháng", xuất thêm một khối:
@@ -42,6 +47,7 @@ vat-doanh-thu``` bên dưới) — dùng được làm căn cứ đối chiếu 
   01/2025: 31400000000
   02/2025: 28750000000
   Q1/2026: 85000000000 (quy)
+  ```
   
   Mỗi dòng một kỳ khai: MM/YYYY: <số đồng> cho tờ khai THÁNG, hoặc
   QN/YYYY: <số đồng> (quy) cho tờ khai QUÝ — đọc đúng loại kỳ ghi trên tờ khai,
@@ -56,8 +62,3 @@ vat-doanh-thu``` bên dưới) — dùng được làm căn cứ đối chiếu 
   như citation bình thường).
 - Không có tài liệu tờ khai GTGT nào trong hồ sơ thì KHÔNG xuất khối này — không
   bịa số, không để khối rỗng.
-- Đối chiếu thông tin nội bộ (T24) với thông tin từ CIC/bureau; nêu rõ mọi chênh lệch.
-- Dấu hiệu cảnh báo: nợ quá hạn, đòn bẩy cao trên nhiều ngân hàng, nhiều khoản vay
-  song song, cơ cấu lại nợ, hoặc bản ghi bureau không nhất quán.
-- Chỉ nhận xét và đánh giá trên dữ liệu được cung cấp. KHÔNG tự tạo ra số liệu quan hệ
-  tín dụng.

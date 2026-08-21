@@ -395,9 +395,17 @@ def _auto_color_concentration(chart: Flowchart) -> Flowchart:
         value = float(match.group(1).replace(",", "."))
         if value < _CONCENTRATION_THRESHOLD:
             continue
-        if degree.get(src, 0) > 1 and degree.get(dst, 0) <= 1:
+        # The hub is whichever end has more connections; the other end is the
+        # partner this edge is about. Compared, not tested against 1: the old
+        # rule demanded the partner be a leaf, and in the shape mục 1 actually
+        # draws — product -> partner -> company — a supplier carries its own
+        # product edge, so a 45% supplier scored degree 2 and was passed over
+        # while a 40% customer with no product box was flagged. Same finding,
+        # different topology, opposite outcome.
+        src_degree, dst_degree = degree.get(src, 0), degree.get(dst, 0)
+        if src_degree > dst_degree:
             partner = dst
-        elif degree.get(dst, 0) > 1 and degree.get(src, 0) <= 1:
+        elif dst_degree > src_degree:
             partner = src
         else:
             continue

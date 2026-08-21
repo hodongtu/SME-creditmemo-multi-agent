@@ -34,63 +34,69 @@ description: >-
     - Số trên dây nối PHẢI khớp cột "Tỷ trọng" của bảng ngay bên trên. Hai chỗ lệch nhau là mâu thuẫn nội bộ trong cùng một trang báo cáo.
     - Không có số thật thì bỏ hẳn sơ đồ, tuyệt đối không vẽ sơ đồ với tỷ trọng ước lượng.
   
-  - TÔ MÀU BOX THEO MỨC ĐỘ TẬP TRUNG
-    - BẮT BUỘC xét tô màu mỗi khi có một đối tác chiếm từ ~30% tỷ trọng doanh số/giá trị nhập trở lên ở mục 4 hoặc mục 5 — đây LÀ lý do nghiệp vụ, không cần tìm thêm căn cứ nào khác.
-    - Tô màu nhóm bằng classDef. Dùng đúng bộ màu này:
-      classDef hub fill:#BDD7EE,stroke:#333 cho khối doanh nghiệp/đầu mối,
-      classDef org fill:#D9D9D9,stroke:#333 cho khối thông tin pháp nhân,
-      classDef hi fill:#C6E0B4,stroke:#333 cho đối tác trọng yếu cần nhấn mạnh,
-      classDef warn fill:#FFC000,stroke:#333 cho đối tác tập trung rủi ro cao (~40%+).
-      Gán bằng A[Tên]:::hub hoặc class A,B hub.
-    - Ví dụ ĐÚNG như sau:
-      
-    ```mermaid
-      flowchart LR
-        classDef warn fill:#FFC000,stroke:#333
-        P1[Sản phẩm đầu vào A] --> R1
-        P2[Sản phẩm đầu vào B] --> R2
-        P3[Sản phẩm đầu vào C] --> R3
-        R1[Đối tác đầu vào A]:::warn -->|45%| KH
-        R2[Đối tác đầu vào B] -->|20%| KH
-        R3[Đối tác đầu vào C]:::warn -->|35%| KH
-        KH[Công ty ABC] -->|35%| P4:::warn
-        KH -->|25%| P5
-        KH -->|20%| P6
-        P4[Sản phẩm đầu ra X] -->|30%| R4[Đối tác đầu ra X]
-        P5[Sản phẩm đầu ra Y] -->|30%| R5[Đối tác đầu ra Y]
-        P6[Sản phẩm đầu ra Z] -->|40%| R6[Đối tác đầu ra Z]
-    ```  
-    - Không tô màu để trang trí những khối không có lý do nghiệp vụ (đối tác tỷ trọng thấp, khối trung gian trong quy trình mục 1/3).
- 
+  - ĐỐI TÁC TẬP TRUNG
+    - KHÔNG tự chọn màu, KHÔNG viết classDef, KHÔNG gắn `:::`. Hệ thống tự tô đối
+  tác nào chiếm từ 40% tỷ trọng trở lên, đọc thẳng con số trên dây nối, và tô bằng
+  đúng một bộ màu cho cả báo cáo. Bạn tự tô thì khối đó thoát khỏi bảng màu theo
+  tầng của hệ thống và trang báo cáo sẽ có hai ba bộ màu lẫn lộn.
+    - Việc của bạn là ghi ĐÚNG tỷ trọng lên dây nối. Có số đúng thì phần tô màu tự
+  xảy ra.
+    - Ví dụ ĐÚNG — không một dòng màu nào, hàng rào ```mermaid KHÔNG thụt đầu dòng:
+
+```mermaid
+flowchart LR
+  P1[Sản phẩm đầu vào A] --> R1
+  P2[Sản phẩm đầu vào B] --> R2
+  P3[Sản phẩm đầu vào C] --> R3
+  R1[Đối tác đầu vào A] -->|45%| KH
+  R2[Đối tác đầu vào B] -->|20%| KH
+  R3[Đối tác đầu vào C] -->|35%| KH
+  KH[Công ty ABC] -->|35%| P4
+  KH -->|25%| P5
+  KH -->|20%| P6
+  P4[Sản phẩm đầu ra X] -->|30%| R4[Đối tác đầu ra X]
+  P5[Sản phẩm đầu ra Y] -->|30%| R5[Đối tác đầu ra Y]
+  P6[Sản phẩm đầu ra Z] -->|40%| R6[Đối tác đầu ra Z]
+```
+
 #### TRỌNG TÂM PHÂN TÍCH
-- Mục 1: Vẽ sơ đồ mô hình sản xuất kinh doanh gồm: top 5 đầu vào lớn nhất gồm tên đầu vào và 
-tỷ trọng theo chi tiết phát sinh có sổ chi tiết phải trả người bán (331) năm gần nhất, 
-sản phẩm/mặt hàng của đầu vào đó theo hợp đồng đầu vào (nếu có), top 5 đầu ra lớn nhất 
-gồm tên đầu ra và tỷ trọng theo chi tiết phát sinh nợ của sổ chi tiết phải thu khách hàng 
-(131) năm gần nhất, sản phẩm/mặt hàng bán cho đầu ra đó theo hợp đồng.
+- Mục 1: Vẽ sơ đồ mô hình sản xuất kinh doanh theo đúng khung 5 khối của bố cục —
+MỘT đầu vào lớn nhất và MỘT đầu ra lớn nhất, không phải cả top 5. Danh sách top 5
+đã nằm ở bảng mục 3 và mục 4; sơ đồ này nói CHIỀU đi của hàng và tiền, không lặp
+lại bảng.
+  - Đầu vào lớn nhất: đối tác đứng đầu tỷ trọng theo chi tiết phát sinh CÓ của sổ
+  chi tiết phải trả người bán (331) năm gần nhất; mặt hàng lấy theo hợp đồng đầu
+  vào (nếu có).
+  - Đầu ra lớn nhất: đối tác đứng đầu tỷ trọng theo chi tiết phát sinh NỢ của sổ
+  chi tiết phải thu khách hàng (131) năm gần nhất; mặt hàng lấy theo hợp đồng.
   - Khung mẫu mục 1 có sẵn 5 khối theo đúng thứ tự cố định — ĐỌC KỸ chiều của từng
   khối, đây là lỗi hay bị nhầm nhất (mô hình hay tự đảo ngược 2 vai trò dưới đây):
  
     {{SanPhamDauVao}} -> {{KhachHangDauVao}} -> {{KhachHang}} -> {{KhachHangDauRa}} -> {{SanPhamDauRa}}
  
   - {{KhachHangDauVao}} LÀ NHÀ CUNG CẤP (bên BÁN nguyên liệu CHO công ty) — lấy
-    đúng tên ở bảng mục 5 "Đầu vào chính", đối tác đứng đầu cột Tỷ trọng.
+    đúng tên ở bảng MỤC 4 "Đầu vào", đối tác đứng đầu cột Tỷ trọng.
     {{SanPhamDauVao}} lấy từ cột "Mặt hàng" cùng dòng đó.
   - {{KhachHangDauRa}} LÀ KHÁCH MUA (bên MUA hàng TỪ công ty) — lấy đúng tên ở
-    bảng mục 4 "Đầu ra chính", đối tác đứng đầu cột Tỷ trọng. {{SanPhamDauRa}}
+    bảng MỤC 3 "Đầu ra", đối tác đứng đầu cột Tỷ trọng. {{SanPhamDauRa}}
     lấy từ cột "Mặt hàng" cùng dòng đó.
-  - TUYỆT ĐỐI không đảo ngược hai vai trò này: nhà cung cấp (mục 5) luôn đứng ở
-    nửa ĐẦU chuỗi; khách mua (mục 4) luôn đứng ở nửa CUỐI chuỗi. Đối chiếu lại với đúng dòng đầu bảng mục 4/5 trước khi chốt.
+  - TUYỆT ĐỐI không đảo ngược hai vai trò này: nhà cung cấp (mục 4) luôn đứng ở
+    nửa ĐẦU chuỗi; khách mua (mục 3) luôn đứng ở nửa CUỐI chuỗi. Đối chiếu lại với
+    đúng dòng đầu bảng mục 3 và mục 4 trước khi chốt.
  
 - Mục 2: Liệt kê top 5 sản phẩm/dịch vụ chính của khách hàng và tỷ trọng của các sản phẩm này trong 2 năm gần nhất.
  
 - Mục 3: Liệt top 3 khách hàng đầu ra lớn nhất theo chi tiết phát sinh nợ của sổ chi tiết phải 
-thu khách hàng (sổ 131) năm gần nhất. Xác định trạng thái hoạt động của các đầu ra này trên 
-masothue.com, doanh thu, vốn chủ sở hữu theo GSO, CIC (nếu có).
+thu khách hàng (sổ 131) năm gần nhất. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu ra này
+NẾU hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo khảo sát, CIC, báo cáo ngành).
+Không có thì ghi "Không có dữ liệu" — KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com
+hay GSO theo trí nhớ.
  
 - Mục 4: Liệt kê top 3 khách hàng đầu vào lớn nhất theo chi tiết phát sinh có của sổ chi tiết phải 
-trả người bán (sổ 331) năm gần nhất. Xác định trạng thái hoạt động của các đầu vào này trên 
-masothue.com, doanh thu, vốn chủ sở hữu theo GSO, CIC (nếu có).
+trả người bán (sổ 331) năm gần nhất. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu vào này
+NẾU hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo khảo sát, CIC, báo cáo ngành).
+Không có thì ghi "Không có dữ liệu" — KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com
+hay GSO theo trí nhớ.
  
 - Mục 5: Vẽ sơ đồ quy trình sản xuất, quy trình ký kết hợp đồng theo báo cáo am hiểu ngành (nếu có).
  

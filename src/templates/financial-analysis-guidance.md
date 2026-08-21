@@ -47,9 +47,11 @@ description: >-
       - Nếu khách hàng thuộc lĩnh vực Sản xuất: ưu tiên sổ/tài khoản 155, 156
       - Nếu khách hàng thuộc lĩnh vực Xây dựng/dịch vụ xây lắp: ưu tiên sổ/tài khoản 154, 156
       - Nếu khách hàng thuộc lĩnh vực Thương mại/Dịch vụ: ưu tiên sổ/tài khoản 156, 155
-      - Cảnh báo dấu hiệu tồn đọng, chậm luân chuyển hàng tốn kho nếu có các signals sau:
+      - Cảnh báo dấu hiệu tồn đọng, chậm luân chuyển hàng tồn kho nếu có các signals sau:
         - Giá trị luân chuyển/bán hàng < Số dư hàng tồn kho đầu kỳ.
         - Hàng tồn kho cảnh báo = Số dư hàng tồn kho đầu kỳ − Giá trị xuất bán/phát sinh bán hàng.
+    - d. Tài sản cố định và tài sản dở dang dài hạn: nêu quy mô, mức khấu hao, các
+      khoản đầu tư/xây dựng cơ bản dở dang lớn và tiến độ (nếu hồ sơ có).
     - e. Liệt kê các khoản mục tài sản >10% tổng tài sản, tập trung vào các khoản mục lớn và có mức độ biến động vượt quá 20% kỳ trước. Lưu ý: các khoản mục này không bao gồm các mục a, b, c, d ở trên
 - Mục 2.2.2:
     - a. Dựa trên sổ/tài khoản 131, liệt kê top 5 khách hàng có *dư có cuối kỳ* lớn nhất trong năm báo cáo.

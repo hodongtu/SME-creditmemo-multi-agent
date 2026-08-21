@@ -477,11 +477,42 @@ check("SVG vẽ chữ bằng màu đó",
       "".join(re.findall(r"<text[^>]*>", svg20)))
 check("5 màu tầng vẫn khác nhau đôi một", len(set(G.LEVEL_COLOURS)) == 5)
 
-print("\n21. Guidance: đối tác đầu vào/đầu ra từ 3 đến 5")
+print("\n21. Guidance khớp với bố cục và với bộ vẽ")
+# The 3-to-5 partner rule this section used to guard was dropped from the
+# guidance on purpose. What replaced it are the defects the same rewrite
+# introduced, each of which shipped and each of which is invisible until a
+# report is generated.
 ba = (REPO / "src/templates/business-activity-guidance.md").read_text(encoding="utf-8")
-check("nêu ÍT NHẤT 3", "ÍT NHẤT 3" in ba)
-check("nêu NHIỀU NHẤT 5", "NHIỀU NHẤT 5" in ba)
-check("vẫn cấm bịa cho đủ", "KHÔNG bịa thêm cho đủ 3" in ba)
+ba_layout = (REPO / "src/templates/business-activity-structure.md").read_text(encoding="utf-8")
+
+# Which section number holds which partner table, read from the layout itself so
+# that renumbering the layout again cannot silently desync the guidance. The
+# guidance pointed at the old numbers after the sections moved, and told the
+# model to read "Đầu vào" from a section that is now a process diagram — the
+# exact role inversion the same paragraph warns is the most common mistake.
+sections = dict(
+    (title.strip(), number)
+    for number, title in re.findall(r"^## (\d+)\. (.+)$", ba_layout, re.M)
+)
+for role, heading in (("Đầu vào", "Đầu vào"), ("Đầu ra", "Đầu ra")):
+    number = sections.get(heading)
+    check(f"bố cục có mục {heading!r}", number is not None, str(sorted(sections)))
+    if number:
+        check(f"guidance trỏ đúng MỤC {number} cho {heading!r}",
+              f'MỤC {number} "{heading}"' in ba)
+
+# Colour is the renderer's job: _colour_by_level skips any node the model styled,
+# so a classDef in the model's output silently opts that box out of the palette.
+check("guidance không dạy model viết classDef",
+      not re.search(r"classDef\s+\w+\s+fill:", ba))
+check("guidance nói rõ hệ thống tự tô", "Hệ thống tự tô" in ba)
+
+# An indented fence is not a fence: markdown reads four spaces as a code block
+# and mermaid_to_html never sees the language tag.
+for name in ("business-activity-guidance", "business-activity-structure"):
+    body = (REPO / f"src/templates/{name}.md").read_text(encoding="utf-8")
+    check(f"{name}: không có hàng rào ```mermaid bị thụt",
+          not re.search(r"^[ \t]+```mermaid", body, re.M))
 
 print("\n" + "=" * 66)
 if fails:
