@@ -94,6 +94,7 @@ groups:
           cap_moi: "Bắt buộc"
           tai_cap: "Nếu có thông tin cập nhật"
         agents:
+          FINANCIAL_ANALYSIS_AGENT: R
           RISK_ASSESSMENT_AGENT: R
         keywords:
           - "giay chung nhan dang ky kinh doanh"
@@ -185,6 +186,7 @@ groups:
           FINANCIAL_ANALYSIS_AGENT: R
           RISK_ASSESSMENT_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
+          CREDIT_RELATIONSHIP_AGENT: R
         keywords:
           - "bctc"
           - "bao cao tai chinh"
@@ -194,8 +196,6 @@ groups:
           - "luu chuyen tien te"
           - "lctt"
           - "bao cao kiem toan"
-          - "financial statement"
-          - "audit report"
 
       - id: bang_can_doi_ke_toan
         label: "Bảng cân đối kế toán"
@@ -206,6 +206,8 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           RISK_ASSESSMENT_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
+          CREDIT_RELATIONSHIP_AGENT: R
         keywords:
           - "bang can doi ke toan"
           - "can doi ke toan"
@@ -224,6 +226,7 @@ groups:
           FINANCIAL_ANALYSIS_AGENT: R
           RISK_ASSESSMENT_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
+          CREDIT_RELATIONSHIP_AGENT: R
         keywords:
           - "bao cao ket qua hoat dong kinh doanh"
           - "bao cao ket qua kinh doanh"
@@ -294,6 +297,7 @@ groups:
           BUSINESS_ACTIVITY_AGENT:  {B1CP: O, MISA: O, PLPP: O, PLO: R}
           FINANCIAL_ANALYSIS_AGENT: {B1CP: O, MISA: O, PLPP: O, PLO: R}
           RISK_ASSESSMENT_AGENT:    {B1CP: O, MISA: O, PLPP: O, PLO: R}
+          CREDIT_RELATIONSHIP_AGENT: {B1CP: O, MISA: O, PLPP: O, PLO: R}
         keywords:
           - "xuat nhap ton"
           - "bang tong hop xuat nhap ton"
@@ -306,12 +310,9 @@ groups:
           - "cong no nguoi mua"
           - "cong no nguoi ban"
           - "hang ton kho"
-          # "so du dau ky"/"so du cuoi ky" removed: they appear in every set
-          # of accounting records — the general ledger, the detail ledgers, the
-          # balance sheet — so they say nothing about which type a document is.
-          # They were enough to tie "SỔ CHI TIẾT TÀI KHOẢN 331" 2-2 with this
-          # type, and matrix order then handed it the win: wrong type, wrong
-          # routing, and nothing to signal it.
+          - "so du dau ky"
+          - "so du cuoi ky"
+          - "nxt"
 
       - id: so_chi_tiet_khoan_muc_khac
         label: "Các sổ chi tiết khoản mục khác (nếu có)"
@@ -323,8 +324,8 @@ groups:
         # type collects. Without the route it was being told to read a document
         # it never received.
         agents:
-          BUSINESS_ACTIVITY_AGENT: O
-          FINANCIAL_ANALYSIS_AGENT: O
+          FINANCIAL_ANALYSIS_AGENT: R
+          BUSINESS_ACTIVITY_AGENT: R
           RISK_ASSESSMENT_AGENT: O
         keywords:
           - "so chi tiet tai khoan"
@@ -332,8 +333,17 @@ groups:
           - "so cai"
           - "so nhat ky chung"
           - "bang can doi so phat sinh"
-          - "general ledger"
-
+          - "so 131"
+          - "so 154"
+          - "so 156"
+          - "so 211"
+          - "so 214"
+          - "so 331"
+          - "so 341"
+          - "so phu"
+          - "tai khoan 331"
+          - "so chi tiet cong no"
+          
   # ===========================================================================
   - id: ho_so_vay_von
     label: "Hồ sơ vay vốn"
@@ -356,6 +366,7 @@ groups:
           BUSINESS_ACTIVITY_AGENT: R
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
+          CREDIT_RELATIONSHIP_AGENT: R
           RISK_ASSESSMENT_AGENT: R
         keywords:
           - "de nghi cap tin dung"
@@ -382,7 +393,6 @@ groups:
           tai_cap: "Bắt buộc"
         agents:
           BUSINESS_ACTIVITY_AGENT: R
-          CREDIT_PROPOSAL_AGENT: R
           RISK_ASSESSMENT_AGENT: R
         keywords:
           - "hop dong dau ra"
@@ -395,6 +405,8 @@ groups:
           - "don dat hang"
           - "nha cung cap"
           - "hoa don"
+          - "HDDR"
+          - "HDDV"
 
       - id: ho_so_tien_do_nang_luc_hop_dong
         label: >-
@@ -408,7 +420,6 @@ groups:
         agents:
           BUSINESS_ACTIVITY_AGENT: R
           FINANCIAL_ANALYSIS_AGENT: R
-          CREDIT_PROPOSAL_AGENT: R
           RISK_ASSESSMENT_AGENT: R
         keywords:
           - "bang tien do thuc hien hop dong"
@@ -492,11 +503,8 @@ groups:
           tai_cap: "Bắt buộc"
         cic_s10a_extraction: true
         agents:
-          # FINANCIAL_ANALYSIS_AGENT removed: neither FA's template nor its
-          # guidance mentions CIC anywhere, so this document only spent the
-          # character budget that the evidence FA does read would otherwise use.
-          # It was also the one document FA received as raw OCR while CR/RA read
-          # the extracted version — that inconsistency goes with it.
+          FINANCIAL_ANALYSIS_AGENT: R
+          CREDIT_PROPOSAL_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
           RISK_ASSESSMENT_AGENT: R
         keywords:
@@ -584,6 +592,8 @@ groups:
           CREDIT_PROPOSAL_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
         keywords:
+          - "bao cao khao sat"
+          - "bao cao thuc dia"
           - "bao cao khao sat thuc dia"
           - "khao sat thuc dia"
           - "bien ban khao sat"
@@ -594,6 +604,8 @@ groups:
           - "bao cao de xuat cap tin dung"
           - "de xuat cap tin dung"
           - "danh gia rui ro"
+          - "sitevisit"
+          - "site visit"
 
       - id: bao_cao_gioi_han_tin_dung_nhom_kh
         label: >-
