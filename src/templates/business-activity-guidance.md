@@ -9,6 +9,12 @@ description: >-
 - Chỉ trình bày dòng/mục thực sự có căn cứ trong hồ sơ; xoá hẳn dòng không có dữ liệu.
 - Không tự dựng danh sách "Top 3/Top 5" nếu hồ sơ không nêu — liệt kê đúng số lượng có thật.
 - Mục nào hồ sơ không đề cập thì ghi "Không có dữ liệu" và bỏ bảng/sơ đồ.
+- Mọi tỷ trọng phần trăm — trong bảng lẫn trên dây nối sơ đồ — làm tròn 1 chữ số
+  thập phân, dấu phẩy thập phân: `35,2%`. Làm tròn xong mà phần thập phân là 0 thì
+  bỏ hẳn: viết `8%`, không viết `8,0%`. Không viết `35,17%`.
+- Ô bảng có giá trị đúng bằng không thì viết dấu gạch ngang `-`, không viết `0` hay
+  `0,00%`. Ô THIẾU dữ liệu vẫn để trống — trống là hồ sơ không nêu, `-` là hồ sơ nêu
+  và bằng không.
  
 #### QUY TẮC VẼ SƠ ĐỒ
 - SƠ ĐỒ (mục 1 và mục 5):
@@ -24,6 +30,9 @@ description: >-
   dài hơn thì nhãn cao hơn cả sợi dây và át mất sơ đồ. Viết "trả chậm 30 ngày",
   không viết "thanh toán trong vòng 30 ngày kể từ ngày nghiệm thu". Chi tiết đầy
   đủ để ở bảng hoặc phần Nhận định.
+    - Tỷ trọng trên dây nối làm tròn như mọi chỗ khác (xem NGUYÊN TẮC CHUNG):
+  `35,2%`, và `8%` chứ không `8,0%`. Số trên dây nối phải khớp cột Tỷ trọng của bảng,
+  kể cả cách làm tròn — hai chỗ lệch nhau là mâu thuẫn trong cùng một trang.
     - Nhãn tỷ trọng chỉ ghi PHẦN TRĂM, KHÔNG kèm số tuyệt đối. Viết `-->|6,03%|`,
   không viết `-->|6,03%<br/>3,65 tỷ|` hay `-->|6,03% (3,65 tỷ)|`. Số tuyệt đối
   đã có ở bảng ngay bên cạnh; đặt thêm lên dây chỉ làm nhãn rộng gấp đôi, đẩy cả
@@ -60,8 +69,9 @@ flowchart LR
 ```
 
 #### TRỌNG TÂM PHÂN TÍCH
-- Mục 1: Vẽ sơ đồ mô hình sản xuất kinh doanh theo đúng khung hình quạt của bố cục:
-NHIỀU NHẤT 5 đầu vào ở bên trái, doanh nghiệp ở giữa, NHIỀU NHẤT 5 đầu ra ở bên phải.
+- Mục 1: Vẽ sơ đồ mô hình sản xuất kinh doanh theo đúng khung của bố cục: sản phẩm
+đầu vào -> NHIỀU NHẤT 5 đối tác đầu vào -> doanh nghiệp -> NHIỀU NHẤT 5 đối tác đầu
+ra -> sản phẩm đầu ra.
   - Đầu vào: xếp theo tỷ trọng phát sinh CÓ của sổ chi tiết phải trả người bán (331)
   năm gần nhất, lấy từ trên xuống cho tới hết 5 dòng.
   - Đầu ra: xếp theo tỷ trọng phát sinh NỢ của sổ chi tiết phải thu khách hàng (131)
@@ -78,9 +88,12 @@ NHIỀU NHẤT 5 đầu vào ở bên trái, doanh nghiệp ở giữa, NHIỀU 
     — lấy đúng tên ở bảng MỤC 3 "Đầu ra".
     - TUYỆT ĐỐI không đảo ngược: nhà cung cấp (mục 4) luôn ở bên trái, khách mua
     (mục 3) luôn ở bên phải. Đối chiếu lại với hai bảng trước khi chốt.
-  - KHÔNG thêm khối mặt hàng/sản phẩm vào sơ đồ này. Mặt hàng đã có cột riêng ở bảng
-  mục 3 và mục 4; thêm vào đây sẽ đẩy sơ đồ rộng quá khổ trang và mọi khối bị thu nhỏ
-  chữ lại.
+  - Sơ đồ có 5 tầng: sản phẩm đầu vào -> đối tác đầu vào -> doanh nghiệp -> đối tác
+  đầu ra -> sản phẩm đầu ra. Mỗi đối tác kèm ĐÚNG MỘT khối mặt hàng của riêng nó,
+  lấy từ cột "Mặt hàng" cùng dòng ở bảng mục 3/mục 4. Đối tác nào hồ sơ không nêu mặt
+  hàng thì XOÁ khối sản phẩm của riêng đối tác đó, không ghi "không rõ".
+  - Tên mặt hàng giữ NGẮN (dưới 5 từ). Sơ đồ 5 tầng đã sát khổ trang; nhãn dài làm
+  khối phải bọc thêm dòng và đẩy cả sơ đồ cao lên.
  
 - Mục 2: Liệt kê NHIỀU NHẤT 5 sản phẩm/dịch vụ chính của khách hàng và tỷ trọng của các sản phẩm này trong 2 năm gần nhất.
  

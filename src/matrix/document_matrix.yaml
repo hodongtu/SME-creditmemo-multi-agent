@@ -85,6 +85,7 @@ groups:
     types:
 
       - id: giay_dang_ky_kinh_doanh
+        short_label: "Giấy chứng nhận đăng ký kinh doanh"
         label: >-
           Giấy chứng nhận đăng ký kinh doanh/Quyết định thành lập và hoạt động/
           Giấy phép đầu tư, Giấy chứng nhận đầu tư mà đồng thời là Giấy chứng
@@ -112,6 +113,7 @@ groups:
           - "enterprise registration"
 
       - id: giay_phep_du_dieu_kien
+        short_label: "Giấy phép đủ điều kiện kinh doanh"
         label: >-
           Giấy phép/Giấy chứng nhận đủ điều kiện áp dụng đối với doanh nghiệp
           hoạt động trong lĩnh vực, ngành nghề kinh doanh có điều kiện
@@ -132,6 +134,7 @@ groups:
           - "an toan thuc pham"
 
       - id: pccc_bao_hiem_chay_no
+        short_label: "Bảo hiểm cháy nổ / chứng nhận PCCC"
         label: >-
           Bảo hiểm cháy nổ nhà xưởng hoặc Giấy chứng nhận an toàn phòng cháy
           chữa cháy/Biên bản an toàn PCCC có xác nhận của cán bộ công an.
@@ -151,6 +154,7 @@ groups:
           - "chay no bat buoc"
 
       - id: so_huu_thue_nha_xuong
+        short_label: "Giấy tờ sở hữu, thuê nhà xưởng"
         label: >-
           Giấy tờ chứng minh quyền sở hữu nhà xưởng & chứng từ chứng minh mối
           quan hệ giữa Đại diện pháp luật/Cổ đông/Cá nhân góp vốn với chủ sở hữu
@@ -177,6 +181,7 @@ groups:
     types:
 
       - id: bao_cao_tai_chinh
+        short_label: "Báo cáo tài chính"
         label: "Báo cáo tài chính 2 năm gần nhất"
         requirement:
           cap_moi: ""
@@ -198,6 +203,7 @@ groups:
           - "bao cao kiem toan"
 
       - id: bang_can_doi_ke_toan
+        short_label: "Bảng cân đối kế toán"
         label: "Bảng cân đối kế toán"
         requirement:
           cap_moi: "Bắt buộc"
@@ -217,6 +223,7 @@ groups:
           - "no phai tra"
 
       - id: bao_cao_ket_qua_kinh_doanh
+        short_label: "Báo cáo kết quả kinh doanh"
         label: "Báo cáo kết quả kinh doanh"
         requirement:
           cap_moi: "Bắt buộc"
@@ -237,6 +244,7 @@ groups:
           - "loi nhuan sau thue"
 
       - id: to_khai_thue_gtgt
+        short_label: "Tờ khai thuế GTGT"
         label: >-
           Tờ khai thuế GTGT năm gần nhất và của các tháng/quý liền kề trước thời
           điểm đề xuất cấp tín dụng của năm hiện tại; HOẶC Sao kê tài khoản của
@@ -264,6 +272,7 @@ groups:
           - "phan mem ban hang"
 
       - id: sao_ke_tai_khoan_tctd
+        short_label: "Sao kê tài khoản tại TCTD"
         label: >-
           Sao kê tài khoản của KH tại TCTD 06 tháng gần nhất áp dụng đối với các
           KH chưa đáp ứng tiêu chí tín chấp liên quan đến "Số ngày phải thu +
@@ -284,6 +293,7 @@ groups:
           - "phat sinh co"
 
       - id: bang_ke_xuat_nhap_ton_cong_no
+        short_label: "Bảng tổng hợp xuất nhập tồn, công nợ"
         label: >-
           Bảng tổng hợp xuất nhập tồn, phải thu, phải trả của năm tài chính gần
           nhất hoặc cập nhật đến thời điểm gần nhất; hoặc Bảng kê chi tiết hàng
@@ -315,6 +325,7 @@ groups:
           - "nxt"
 
       - id: so_chi_tiet_khoan_muc_khac
+        short_label: "Sổ chi tiết tài khoản"
         label: "Các sổ chi tiết khoản mục khác (nếu có)"
         requirement:
           cap_moi: "Khuyến khích"
@@ -372,6 +383,7 @@ groups:
     types:
 
       - id: de_nghi_cap_tin_dung
+        short_label: "Đề nghị cấp tín dụng"
         label: >-
           Đề nghị cấp tín dụng/hạn mức kiêm phương án kinh doanh/sử dụng vốn
           trong đó nêu rõ phương án/kế hoạch kinh doanh/sử dụng vốn của năm đề
@@ -405,6 +417,7 @@ groups:
           - "loan proposal"
 
       - id: hop_dong_dau_ra_dau_vao
+        short_label: "Hợp đồng đầu ra, đầu vào"
         label: >-
           Một số hợp đồng đầu ra, đầu vào đã thực hiện - tối thiểu 3 hợp đồng
           cho từng loại với KH đầu vào, đầu ra chính hoặc các hợp đồng có tổng
@@ -430,6 +443,7 @@ groups:
           - "HDDV"
 
       - id: ho_so_tien_do_nang_luc_hop_dong
+        short_label: "Hồ sơ tiến độ, năng lực thực hiện hợp đồng"
         label: >-
           Hồ sơ tiến độ, năng lực thực hiện hợp đồng kì kế hoạch: Bảng tiến độ
           thực hiện hợp đồng các gói thầu đang thực hiện; hợp đồng đầu ra lớn
@@ -451,6 +465,7 @@ groups:
           - "hop dong dang thuc hien"
 
       - id: sao_ke_quyet_toan_hop_dong_lon
+        short_label: "Hồ sơ quyết toán hợp đồng lớn"
         label: >-
           Hồ sơ sao kê tài khoản/Quyết toán/BBNT/Bảng tiến độ thực hiện các HĐ
           lớn (chiếm trên 30%DT)/Phần mềm bán hàng
@@ -478,6 +493,7 @@ groups:
     types:
 
       - id: ho_so_tsbd
+        short_label: "Hồ sơ tài sản bảo đảm"
         label: >-
           Hồ sơ TSBĐ: Giấy tờ chứng minh quyền sở hữu và quyền sử dụng hợp pháp
           đối với TSBĐ theo đúng các quy định, hướng dẫn của NH về nhận TSBĐ
@@ -498,6 +514,7 @@ groups:
           - "collateral"
 
       - id: chung_thu_dinh_gia
+        short_label: "Chứng thư định giá"
         label: "Phiếu định giá/Chứng thư định giá"
         requirement:
           cap_moi: "Không bắt buộc"
@@ -518,6 +535,7 @@ groups:
     types:
 
       - id: cic_khach_hang_vay
+        short_label: "Thông tin CIC khách hàng vay"
         label: "Thông tin CIC của khách hàng vay"
         requirement:
           cap_moi: "Bắt buộc"
@@ -547,6 +565,7 @@ groups:
           - "credit bureau"
 
       - id: cic_tai_san_bao_dam
+        short_label: "Thông tin CIC tài sản bảo đảm"
         label: "Thông tin CIC Tài sản bảo đảm của Khách hàng vay"
         cic_r21_extraction: true
         requirement:
@@ -576,6 +595,7 @@ groups:
           - "ngay giai chap"
 
       - id: cic_dai_dien_phap_luat_co_dong
+        short_label: "Thông tin CIC người đại diện, cổ đông"
         label: >-
           Thông tin CIC Đại diện pháp luật, cổ đông/cá nhân góp vốn sở hữu
           >= 30% vốn cổ phần
@@ -597,6 +617,7 @@ groups:
     types:
 
       - id: bao_cao_khao_sat_thuc_dia
+        short_label: "Báo cáo khảo sát thực địa"
         label: "Báo cáo khảo sát thực địa và đề xuất cấp tín dụng"
         requirement:
           cap_moi: "Bắt buộc"
@@ -629,6 +650,7 @@ groups:
           - "site visit"
 
       - id: bao_cao_gioi_han_tin_dung_nhom_kh
+        short_label: "Báo cáo giới hạn tín dụng nhóm khách hàng"
         label: >-
           Báo cáo thông tin giới hạn tín dụng của Khách hàng và Nhóm khách hàng
           liên quan (nếu có)

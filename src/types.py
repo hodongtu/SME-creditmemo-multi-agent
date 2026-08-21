@@ -55,6 +55,10 @@ class ClassifiedDocument:
     reasoning: str
     confidence: float
     file_hash: str = ""
+    # One line naming this document for the reader of the finished memo, written
+    # by the classifier from the text it already had in front of it. Empty when
+    # the filename settled the type on its own and no LLM ever read the file.
+    description: str = ""
     extraction_status: str = "success"
     extraction_error: str = ""
     classifier_error_type: str = ""

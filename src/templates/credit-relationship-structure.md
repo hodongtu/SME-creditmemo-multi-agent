@@ -5,7 +5,7 @@
 | Thông tin chung | &nbsp; |
 | --------------- | ------ |
 | *Tên khách hàng* | {{TenKhachHang}} |
-| *Nguồn dữ liệu* | - {{TenFile}} |
+| *Nguồn dữ liệu* | {{TenFile}} |
 | *Mức độ tin cậy* | {{MucDoTinCay}} |
  
 ## 1. Quan hệ tín dụng của khách hàng tại Techcombank

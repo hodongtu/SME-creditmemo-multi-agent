@@ -36,7 +36,10 @@ from src.utils.citations import (
     format_footnote_findings,
     namespace_footnotes,
 )
-from src.utils.markdown_fixups import ensure_blank_line_before_lists
+from src.utils.markdown_fixups import (
+    ensure_blank_line_before_lists,
+    tidy_numbers,
+)
 
 from src.config import Config, shared_rate_limiter
 from src.types import (
@@ -1157,6 +1160,7 @@ class Supervisor:
                     reasoning=classification.get("reasoning", ""),
                     confidence=float(classification.get("confidence", 0.0)),
                     file_hash=file_hash,
+                    description=str(classification.get("description", "")).strip(),
                     extraction_status=extraction_status,
                     extraction_error=extraction_error,
                     classifier_error_type=classification.get(
@@ -2087,6 +2091,10 @@ class Supervisor:
         # bullet is correct on the page even if a specialist forgot the blank
         # line the prompt asks for.
         response = ensure_blank_line_before_lists(response)
+        # "8,00%" -> "8%", and a table cell holding only a zero -> "-". Asked of
+        # every agent in NUMBER FORMAT RULE and applied here too, because a rule
+        # in a prompt is a request.
+        response = tidy_numbers(response)
         # Credit relationship's own analysis call transcribes VAT revenue into
         # a ```vat-doanh-thu block for _build_debt_chart_block to read further
         # down (see vat_revenue.py) — an internal data channel, never meant

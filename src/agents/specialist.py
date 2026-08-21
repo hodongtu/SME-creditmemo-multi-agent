@@ -169,6 +169,19 @@ class SpecialistAgent:
         thập phân, dùng dấu phẩy làm dấu thập phân và dấu chấm cho hàng nghìn
         (ví dụ: 3.991.124.661.120 VNĐ → 3.991,12 tỷ VNĐ). Không ghi số đồng thô.
 
+        NUMBER FORMAT RULE (áp dụng cho MỌI bảng và MỌI câu văn trong báo cáo):
+        - Tỷ trọng phần trăm làm tròn 1 chữ số thập phân: 35,2%.
+        - Làm tròn xong mà phần thập phân toàn số 0 thì BỎ HẲN phần thập phân:
+        viết 8%, không viết 8,0% hay 8,00%. Chỉ bỏ khi mọi chữ số thập phân đều
+        là 0 — 35,20% vẫn giữ nguyên chữ số của nó.
+        - Trong BẢNG, ô nào có giá trị đúng bằng không (0, 0,00, 0,00%) thì viết
+        dấu gạch ngang "-". Một cột số dài đọc nhanh hơn nhiều khi số không
+        không trông giống một con số.
+        - Dấu "-" này CHỈ dùng cho số ĐỌC ĐƯỢC TỪ HỒ SƠ và bằng không. Ô thiếu
+        dữ liệu vẫn để TRỐNG theo EVIDENCE RULE — hai chuyện khác nhau: trống
+        nghĩa là hồ sơ không nêu, "-" nghĩa là hồ sơ nêu và bằng không. Tuyệt
+        đối không dùng "-" để lấp ô không có dữ liệu.
+
         EVIDENCE RULE (quan trọng nhất — ưu tiên cao hơn việc điền đủ mẫu báo cáo):
         - Mọi con số và mọi nhận định phải truy được về bằng chứng đã cung cấp
         (nội dung tài liệu, khối [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT], khối
@@ -176,7 +189,9 @@ class SpecialistAgent:
         dùng kiến thức bên ngoài hồ sơ.
         - Khi một số liệu hoặc thông tin KHÔNG có trong hồ sơ, ghi đúng chuỗi
         "Không có dữ liệu trong hồ sơ". Không ước lượng, không suy đoán, không
-        điền 0 hay "-" để lấp chỗ trống.
+        điền 0 hay "-" để lấp chỗ trống. (Dấu "-" trong bảng chỉ dành cho số đã
+        đọc được và bằng không — xem NUMBER FORMAT RULE. Ô không có dữ liệu vẫn
+        để trống.)
         - Không lặp lại giá trị của kỳ này sang kỳ khác để điền cho đủ ô. Nếu chỉ
         có số liệu của một kỳ, chỉ trình bày kỳ đó.
         - Với số liệu tự tính (tỷ trọng, tăng trưởng, chỉ số), nêu rõ các số đầu

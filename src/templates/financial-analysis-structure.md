@@ -5,7 +5,7 @@
 | Thông tin chung | &nbsp; |
 | --------------- | ------ |
 | *Tên khách hàng* | {{TenKhachHang}} |
-| *Nguồn dữ liệu* | - {{TenFile}} |
+| *Nguồn dữ liệu* | {{TenFile}} |
 | *Loại hồ sơ tài chính* | {{LoaiHoSo}} |
 | *Kỳ/Năm phân tích* | {{CacKyBaoCao}} |
 | *Đơn vị kiểm toán* | {{DonViKiemToan}} |

@@ -56,6 +56,12 @@ class DocumentType:
     id: str
     stt: str
     label: str
+    # A caption for the reader of a finished report. `label` cannot serve: it is
+    # the regulatory sentence from the checklist ("Tờ khai thuế GTGT năm gần nhất
+    # và của các tháng/quý liền kề..."), which is what the document must satisfy,
+    # not what it is called. Falls back to `label` when the YAML omits it, so a
+    # new type is never nameless — only verbose.
+    short_label: str
     group_id: str
     group_stt: str
     group_label: str
@@ -277,6 +283,7 @@ def _load(path: Path) -> DocumentMatrix:
             label = str(entry.get("label") or "").strip()
             if not label:
                 _fail(f"{where}: 'label' is required")
+            short_label = str(entry.get("short_label") or "").strip() or label
 
             raw_keywords = entry.get("keywords")
             if not isinstance(raw_keywords, list) or not raw_keywords:
@@ -299,6 +306,7 @@ def _load(path: Path) -> DocumentMatrix:
                 id=type_id,
                 stt=str(entry.get("stt") or ""),
                 label=label,
+                short_label=short_label,
                 group_id=group_id,
                 group_stt=str(group.get("stt") or ""),
                 group_label=str(group.get("label") or group_id),

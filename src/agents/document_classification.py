@@ -273,10 +273,25 @@ Rules:
   with every agent, whereas a wrong type sends it to the wrong ones.
 - Do not invent ids. Only ids listed above are valid.
 
+"description" names this document for a reader of the finished credit memo, who
+sees the filename and nothing else:
+- Vietnamese, ONE line, AT MOST 20 WORDS. A longer one is dropped and replaced
+  by the document type's own name, so the words have to earn their place.
+- Say what the document IS, then whichever of these the text actually shows:
+  number, counterparty, signing date, period covered.
+- Never guess. A detail that is not on the page is left out, not inferred from
+  the filename or the type.
+- Good: "Hợp đồng đại lý số 01/2023/HĐĐL/TDA-CKQN với Tôn Đông Á, ký 03/01/2023"
+- Good: "Bảng tổng hợp phải thu khách hàng TK 131, kỳ 01/01/2024-31/12/2024"
+- Too long: "Hợp đồng đại lý phân phối sản phẩm tôn mạ được ký kết giữa Công ty
+  Cổ phần Tôn Đông Á và Công ty TNHH Cơ khí Quy Nhơn vào ngày 03/01/2023 với
+  thời hạn hiệu lực một năm kể từ ngày ký"
+
 Return JSON only with:
 {{
   "document_type": "...",
   "reasoning": "short reason",
+  "description": "...",
   "confidence": 0.0
 }}
 """

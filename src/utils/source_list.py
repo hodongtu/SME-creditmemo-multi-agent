@@ -1,186 +1,116 @@
-"""The "Nguồn thông tin" list at the top of every report, built from filenames.
+"""The "Nguồn dữ liệu" list at the top of every report.
 
-A folder holding a year of monthly VAT returns produces a dozen lines before the
-analysis starts, so the list is collapsed to one line per document type with the
-periods compressed: sixteen ``TKT_MM.YYYY.xlsx`` become ``TKT 01-12/2025,
-01-04/2026``.
+One line per thing the reader would think of as one source, each naming what the
+document is and then the files it was read from:
 
-That collapsing used to be asked of the model, in a prompt rule carrying worked
-examples. It failed the first time a real folder exercised it: given those
-sixteen files the model answered ``TKT 01-04/2025``, which is character for
-character the example the rule had shown it. The result is worse than an ugly
-list — a credit memo that names four returns when sixteen were read understates
-its own evidence, and nothing downstream can tell.
+    - Hợp đồng đại lý số 01/2023/HĐĐL/TDA-CKQN với Tôn Đông Á, ký 03/01/2023 —  <em>023_HDDL.txt</em>
+    - Tờ khai thuế GTGT —  <em>TKT 01.2025.xlsx, TKT 02.2025.xlsx, TKT 03.2025.xlsx</em>
 
-So the arithmetic is here, and the model is handed the finished lines. Two rules
-follow from what the failure was:
+The list is built here rather than asked of the model, and the reason is on
+record. The rule that used to ask for it shipped with worked examples; given
+sixteen VAT returns the model answered ``TKT 01-04/2025``, character for
+character the example it had been shown. A credit memo that names four returns
+when sixteen were read understates its own evidence, and nothing downstream can
+tell. So the assembly is code, and the model is handed finished lines.
 
-- **No document may vanish.** Every fallback is "list the files as they are",
-  never "shorten as best you can". A long list is a cosmetic problem; a short
-  one is a false statement about what was read.
-- **Nothing is invented.** The label comes from the filenames themselves, not
-  from the document type's name in the matrix — those are regulatory sentences
-  ("Tờ khai thuế GTGT năm gần nhất và của các tháng/quý liền kề..."), not
-  captions. If the filenames in a group disagree, there is no label to derive
-  and the group is listed file by file.
+Two rules follow from what that failure was:
+
+- **No document may vanish.** Every filename that comes in appears in the
+  output, in full, extension included. A long line is a cosmetic problem; a
+  short one is a false statement about what was read.
+- **Nothing is invented.** The caption is either a description the classifier
+  wrote from the document's own text, or the document type's short label from
+  the matrix. Never a guess assembled from a filename.
 """
 
 from __future__ import annotations
 
-import re
-from itertools import groupby
+from src.matrix.document_matrix import get_type
 
-from src.utils.common import SUPPORTED_EXTENSIONS
-
-# A period is a 4-digit year, optionally preceded by a month or quarter. The
-# separator class carries ":" because macOS stores a "/" typed in Finder as a
-# colon on disk — "TKT_01/2025.xlsx" on screen is "TKT_01:2025.xlsx" to Python,
-# and a pattern that only knew about "/" would read none of these files.
-_SEPARATORS = r"[\s._/\-:]"
-_PERIOD = re.compile(
-    rf"(?:(?:T|Q|QUY|THANG)?\s*(\d{{1,2}})\s*{_SEPARATORS}\s*)?((?:19|20)\d{{2}})",
-    re.IGNORECASE,
-)
+# The classifier is asked for at most twenty words. Anything longer is not
+# shortened here — it is dropped in favour of the type's name. Cutting a caption
+# mid-sentence would leave the reader unable to tell whether what went missing
+# was "(ký 03/01/2023)" or a condition that changes the meaning, which is the
+# same reasoning that keeps ellipses out of the diagram labels.
+MAX_DESCRIPTION_WORDS = 20
 
 
-def _parse_period(stem: str) -> tuple[tuple[int, int | None], tuple[int, int]] | None:
-    """Read a (year, month) and where it sat, or None when the name has no period.
+def _usable_description(description: str) -> str:
+    """The caption a description can serve as, or "" when it cannot."""
 
-    Returning the span is what lets the label be derived by subtraction: whatever
-    is left of the filename once the period is cut out is the name of the thing.
-    """
-
-    match = _PERIOD.search(stem)
-    if not match:
-        return None
-    month = int(match.group(1)) if match.group(1) else None
-    # A two-digit run next to a year is only a month if it could be one. "TKT_99"
-    # is part of the name, not December of some 99th month.
-    if month is not None and not 1 <= month <= 12:
-        return None
-    return (int(match.group(2)), month), match.span()
-
-
-def _shared_label(stems_and_spans: list[tuple[str, tuple[int, int]]]) -> str:
-    """The filename with its period removed, when every file agrees on it.
-
-    Empty string when they disagree, which the caller reads as "these files have
-    no common name" rather than as a label. Deriving one anyway — a longest
-    common prefix, say — would caption ``TKT_01`` and ``ToKhaiThue_02`` as "T".
-    """
-
-    rests = {
-        re.sub(rf"{_SEPARATORS}+", " ", stem[:start] + stem[end:]).strip(" -_.")
-        for stem, (start, end) in stems_and_spans
-    }
-    if len(rests) != 1:
+    text = " ".join((description or "").split())
+    if not text or len(text.split()) > MAX_DESCRIPTION_WORDS:
         return ""
-    return rests.pop()
+    return text
 
 
-def _compress(periods: list[tuple[int, int | None]]) -> str:
-    """Render a set of periods as short as it goes without losing any of them.
+def _short_label(document_type: str) -> str:
+    """What to call a group the classifier gave no usable description for."""
 
-    Months run together into ranges within their year; whole years run together
-    only when none of them carries a month, since "2024-2026" alongside a month
-    list would read as a different kind of thing.
+    matched = get_type(document_type) if document_type else None
+    return matched.short_label if matched else "Tài liệu khác"
+
+
+def _cell_safe(text: str) -> str:
+    """Escape what would break the markdown table cell this line lands in.
+
+    An unescaped pipe ends the cell: measured through markdown 3.10.3, a caption
+    containing "A|B" splits the row, the header's column count wins, and
+    everything past the pipe is dropped — a document silently missing from the
+    source list, which is the one thing this module exists to prevent.
     """
 
-    parts: list[str] = []
-    for year, group in groupby(sorted(set(periods)), key=lambda period: period[0]):
-        months = [month for _, month in group if month is not None]
-        if not months:
-            parts.append(str(year))
-            continue
-        runs: list[str] = []
-        start = previous = months[0]
-        for month in months[1:] + [None]:
-            if month == previous + 1:
-                previous = month
-                continue
-            runs.append(f"{start:02d}-{previous:02d}" if start != previous else f"{start:02d}")
-            start = previous = month
-        parts.append(f"{', '.join(runs)}/{year}")
-
-    if len(parts) > 2 and all(re.fullmatch(r"\d{4}", part) for part in parts):
-        years = [int(part) for part in parts]
-        if years == list(range(years[0], years[-1] + 1)):
-            return f"{years[0]}-{years[-1]}"
-    return ", ".join(parts)
+    return text.replace("|", r"\|")
 
 
-def _strip_extension(filename: str) -> str:
-    """Drop the extension, but only one the pipeline actually ingests.
+def _line(caption: str, filenames: list[str]) -> str:
+    """One source line: what the document is, in bold, then the files it came from."""
 
-    Cutting at the last dot instead would take the year off ``TKT_01.2025`` — a
-    file with no extension at all, which these folders do contain. Discovery has
-    already rejected everything outside SUPPORTED_EXTENSIONS, so a name reaching
-    this list either ends in one of them or ends in nothing.
+    names = ", ".join(_cell_safe(name) for name in filenames)
+    return f"**{_cell_safe(caption)}** —  <em>{names}</em>"
+
+
+def build_source_lines(
+    documents: list[tuple[str, str, str]],
+) -> list[str]:
+    """Turn (filename, document_type, description) triples into report lines.
+
+    Grouped by document type, because the type is already decided by the routing
+    matrix and three BCTC files carry the same id whatever they are called.
+
+    Within a group the descriptions decide the shape, and this is the part worth
+    reading twice. Files whose captions agree are one line: three VAT returns say
+    the same thing about themselves, so listing them separately would be three
+    copies of one sentence. Files whose captions differ get a line each: three
+    contracts are three different agreements, and collapsing them under "Hợp
+    đồng đầu ra, đầu vào" would throw away the number, the counterparty and the
+    date that make each one worth citing.
+
+    Input order is preserved, so the list follows the order documents were
+    routed in.
     """
 
-    stem, dot, extension = filename.rpartition(".")
-    if dot and f".{extension.lower()}" in SUPPORTED_EXTENSIONS:
-        return stem
-    return filename
-
-
-def _display_names(filenames: list[str]) -> list[str]:
-    """Filenames as the report should print them, extensions off.
-
-    Unless the extension is the only thing telling two of them apart: ``BCTC.pdf``
-    and ``BCTC.xlsx`` would both render as ``BCTC`` and read as a duplicated line.
-    Collapsing them to one entry would be worse — this module's whole rule is that
-    no document disappears — so the group keeps its full names instead.
-    """
-
-    stripped = [_strip_extension(filename) for filename in filenames]
-    if len(set(stripped)) != len(stripped):
-        return list(filenames)
-    return stripped
-
-
-def _lines_for_group(filenames: list[str]) -> list[str]:
-    """One line for a group of same-type files, or one line each if it cannot be."""
-
-    if len(filenames) == 1:
-        return _display_names(filenames)
-
-    parsed = []
-    for filename in filenames:
-        stem = _strip_extension(filename)
-        period = _parse_period(stem)
-        if period is None:
-            return _display_names(filenames)
-        parsed.append((stem, period))
-
-    label = _shared_label([(stem, span) for stem, (_, span) in parsed])
-    if not label:
-        return _display_names(filenames)
-    return [f"{label} {_compress([period for _, (period, _) in parsed])}"]
-
-
-def build_source_lines(documents: list[tuple[str, str]]) -> list[str]:
-    """Collapse (filename, document_type) pairs into the report's source list.
-
-    Grouped by document type rather than by filename shape, because the type is
-    already decided by the routing matrix and three BCTC files carry the same id
-    whatever they are called. Documents whose type is unknown each stand alone —
-    they have nothing in common but their own unknown-ness.
-
-    Input order is preserved between groups so the list follows the order the
-    documents were routed in.
-    """
-
-    groups: dict[str, list[str]] = {}
+    groups: dict[str, list[tuple[str, str]]] = {}
     order: list[str] = []
-    for index, (filename, document_type) in enumerate(documents):
+    types: dict[str, str] = {}
+    for index, (filename, document_type, description) in enumerate(documents):
+        # An untyped document has nothing in common with any other, not even its
+        # own unknown-ness, so each one keys to itself and stands alone.
         key = document_type or f"__unknown_{index}"
         if key not in groups:
             groups[key] = []
             order.append(key)
-        groups[key].append(filename)
+            types[key] = document_type
+        groups[key].append((filename, _usable_description(description)))
 
     lines: list[str] = []
     for key in order:
-        lines.extend(_lines_for_group(groups[key]))
+        members = groups[key]
+        fallback = _short_label(types[key])
+        captions = {description or fallback for _, description in members}
+        if len(captions) == 1:
+            lines.append(_line(captions.pop(), [name for name, _ in members]))
+            continue
+        for filename, description in members:
+            lines.append(_line(description or fallback, [filename]))
     return lines

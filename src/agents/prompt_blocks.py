@@ -188,7 +188,7 @@ def _build_source_list_block(
     """
 
     lines = build_source_lines(
-        [(doc.filename, doc.document_type) for doc in documents]
+        [(doc.filename, doc.document_type, doc.description) for doc in documents]
     )
     if not lines:
         return ""
@@ -201,10 +201,18 @@ def _build_source_list_block(
             # while the direct chain renders it down to {TenFile}. Pointing
             # at the field by its heading matches whichever the agent got.
             "Danh sách dưới đã được hệ thống lập sẵn từ đúng những tài liệu "
-            "bạn đang đọc. CHÉP NGUYÊN VĂN vào trường \"Hồ sơ\"/\"Nguồn "
-            "dữ liệu\" ở đầu báo cáo, mỗi dòng dưới đây là MỘT dòng con. "
-            "TUYỆT ĐỐI không gom thêm, không rút gọn thêm, không bỏ dòng "
-            "nào, không đổi thứ tự.",
+            "bạn đang đọc. CHÉP NGUYÊN VĂN vào ô \"Nguồn dữ liệu\" của bảng "
+            "Thông tin chung, giữ nguyên cả thẻ <em>. TUYỆT ĐỐI không gom "
+            "thêm, không rút gọn thêm, không bỏ dòng nào, không đổi thứ tự, "
+            "không bỏ đuôi tệp.",
+            # A markdown table cell cannot hold a real list: measured through
+            # markdown 3.10.3, a "- " line inside a cell renders as a literal
+            # hyphen and every line after the first is swallowed. Joined with
+            # <br> the same lines come out one per row with <em> intact, which
+            # is the only shape that both fits the cell and reads as a list.
+            "Cả danh sách nằm trong MỘT ô, các dòng nối với nhau bằng <br> "
+            "(không xuống dòng thật, vì xuống dòng sẽ phá vỡ bảng). Dạng đúng: "
+            "- dòng 1<br>- dòng 2<br>- dòng 3",
             "",
             *(f"- {line}" for line in lines),
         ]

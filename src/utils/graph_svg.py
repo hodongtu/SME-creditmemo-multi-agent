@@ -234,7 +234,7 @@ def text_width(text: str, font_size: float) -> float:
     return font.getlength(text) / _MEASURE_SIZE * font_size * FONT_MEASURE_CORRECTION
 
 
-def _text_lines(label_html: str) -> list[str]:
+def _text_lines(label_html: str, max_width: float = NODE_MAX_WIDTH) -> list[str]:
     """Turn a label back into plain text lines, wrapping long ones.
 
     Labels arrive HTML-escaped with <br> separators because the CSS renderer
@@ -249,7 +249,7 @@ def _text_lines(label_html: str) -> list[str]:
     """
 
     raw = [html.unescape(part) for part in re.split(r"<br\s*/?>", label_html)]
-    limit = NODE_MAX_WIDTH - 2 * NODE_PADDING_X
+    limit = max_width - 2 * NODE_PADDING_X
     lines: list[str] = []
     for part in raw:
         part = part.strip()
@@ -424,7 +424,7 @@ def _colour_by_level(chart, nodes: dict[str, _Node]) -> None:
         node.fill, node.stroke = LEVEL_COLOURS[index]
 
 
-def _size_nodes(nodes: dict[str, _Node]) -> None:
+def _size_nodes(nodes: dict[str, _Node], max_width: float = NODE_MAX_WIDTH) -> None:
     """Size every box to its own text, with the same padding all round.
 
     Height follows the number of lines, so a two-line label gets a taller box
@@ -435,15 +435,16 @@ def _size_nodes(nodes: dict[str, _Node]) -> None:
 
     for node in nodes.values():
         width = max(text_width(line, FONT_SIZE) for line in node.lines) + 2 * NODE_PADDING_X
-        node.width = min(NODE_MAX_WIDTH, max(NODE_MIN_WIDTH, width))
+        node.width = min(max_width, max(NODE_MIN_WIDTH, width))
         node.height = len(node.lines) * LINE_HEIGHT + 2 * NODE_PADDING_Y
 
 
-def _place(
+def _place(  # noqa: PLR0913
     ranks: dict[int, list[str]],
     nodes: dict[str, _Node],
     vertical: bool = False,
     labelled: dict[int, float] | None = None,
+    max_width: float = NODE_MAX_WIDTH,
 ) -> tuple[float, float]:
     """Assign coordinates and return the drawing size.
 
@@ -455,7 +456,7 @@ def _place(
     The gap after a level is wide only when an edge leaving it carries a label.
     """
 
-    _size_nodes(nodes)
+    _size_nodes(nodes, max_width)
 
     # Extent of each level along the cross axis.
     spans: dict[int, float] = {}
@@ -644,58 +645,83 @@ def render_svg(chart) -> str | None:
     if not chart.edges:
         return None
 
-    nodes: dict[str, _Node] = {}
-    for node_id in chart.order:
-        style = chart.node_style.get(node_id, {})
-        nodes[node_id] = _Node(
-            node_id=node_id,
-            lines=_text_lines(chart.labels[node_id]),
-            fill=style.get("fill", DEFAULT_FILL),
-            stroke=style.get("stroke", DEFAULT_STROKE),
-            colour=style.get("color", DEFAULT_TEXT),
-        )
+    def _build(max_width: float):
+        built: dict[str, _Node] = {}
+        for node_id in chart.order:
+            style = chart.node_style.get(node_id, {})
+            built[node_id] = _Node(
+                node_id=node_id,
+                lines=_text_lines(chart.labels[node_id], max_width),
+                fill=style.get("fill", DEFAULT_FILL),
+                stroke=style.get("stroke", DEFAULT_STROKE),
+                colour=style.get("color", DEFAULT_TEXT),
+            )
+        built_edges = [
+            _Edge(src, dst, label, _text_lines(label) if label else [])
+            for src, label, dst in chart.edges
+            if src in built and dst in built
+        ]
+        return built, built_edges
 
-    edges = [
-        _Edge(src, dst, label, _text_lines(label) if label else [])
-        for src, label, dst in chart.edges
-        if src in nodes and dst in nodes
-    ]
-    if not edges:
+    def _layout(max_width: float):
+        built, built_edges = _build(max_width)
+        if not built_edges:
+            return None
+        for node_id, rank in _assign_ranks(list(built), built_edges).items():
+            built[node_id].rank = rank
+        by_rank: dict[int, list[str]] = {}
+        for node_id in chart.order:
+            by_rank.setdefault(built[node_id].rank, []).append(node_id)
+        _order_within_ranks(by_rank, built_edges, built)
+        _colour_by_level(chart, built)
+        # "flowchart TD" must come out top-down here too. Drawn left-to-right it
+        # would contradict the markdown view of the same report, which is the
+        # exact mismatch this renderer exists to prevent.
+        is_vertical = bool(getattr(chart, "vertical", False))
+        gaps = _label_gaps(built_edges, built)
+        w, h = _place(by_rank, built, is_vertical, gaps, max_width)
+        # Too wide for the page, and shaped so that wrapping keeps its meaning:
+        # lay it out into the page width instead of shrinking it to reach it.
+        if (
+            not is_vertical
+            and w > PAGE_CONTENT_WIDTH
+            and not gaps
+            and _is_linear_chain(built, built_edges)
+        ):
+            w, h = _place_wrapped(
+                chart.order, built, PAGE_CONTENT_WIDTH - 2 * MARGIN
+            )
+        return built, built_edges, by_rank, is_vertical, w, h
+
+    first = _layout(NODE_MAX_WIDTH)
+    if first is None:
         return None
+    nodes, edges, ranks, vertical, width, height = first
+    # Narrow the boxes before shrinking the text. A diagram wider than the page
+    # is scaled to fit, and the scale applies to the type as well — a five-rank
+    # chart of Vietnamese company names came out at 6.5pt on paper, below the
+    # 8pt this file treats as the floor for readable print. Re-wrapping the
+    # labels into narrower boxes trades width for height, and height is free:
+    # the page scrolls, the width does not. Same trade _place_wrapped makes for
+    # a linear chain, applied to shapes it cannot help.
+    if not vertical and width > PAGE_CONTENT_WIDTH:
+        for candidate in (160, 140, 120, 100):
+            if FONT_SIZE * (PAGE_CONTENT_WIDTH / width) * PX_TO_PT >= MIN_READABLE_FONT:
+                break
+            retry = _layout(candidate)
+            if retry is None:
+                break
+            nodes, edges, ranks, vertical, width, height = retry
 
-    rank_of = _assign_ranks(list(nodes), edges)
-    for node_id, rank in rank_of.items():
-        nodes[node_id].rank = rank
-    ranks: dict[int, list[str]] = {}
-    for node_id in chart.order:
-        ranks.setdefault(nodes[node_id].rank, []).append(node_id)
-
-    _order_within_ranks(ranks, edges, nodes)
-    _colour_by_level(chart, nodes)
-    # "flowchart TD" must come out top-down here too. Drawn left-to-right it
-    # would contradict the markdown view of the same report, which is the exact
-    # mismatch this renderer exists to prevent.
-    vertical = bool(getattr(chart, "vertical", False))
+    tallest_label = max((len(edge.lines) for edge in edges), default=0)
     # How far a label block reaches either side of its connector. The drawing is
     # sized from the boxes, and a tall label sits outside them — a three-line one
     # ran off the top of the viewBox and was clipped in the PDF.
-    tallest_label = max((len(edge.lines) for edge in edges), default=0)
     label_overhang = (
         (tallest_label - 1) * (EDGE_FONT_SIZE + 1) / 2 + EDGE_FONT_SIZE
         if tallest_label > 1
         else 0.0
     )
-    labelled = _label_gaps(edges, nodes)
-    width, height = _place(ranks, nodes, vertical, labelled)
-    # Too wide for the page, and shaped so that wrapping keeps its meaning: lay
-    # it out into the page width instead of shrinking it to reach the page.
-    if (
-        not vertical
-        and width > PAGE_CONTENT_WIDTH
-        and not labelled
-        and _is_linear_chain(nodes, edges)
-    ):
-        width, height = _place_wrapped(chart.order, nodes, PAGE_CONTENT_WIDTH - 2 * MARGIN)
 
     out_degree: dict[str, int] = {node_id: 0 for node_id in nodes}
     in_degree: dict[str, int] = {node_id: 0 for node_id in nodes}

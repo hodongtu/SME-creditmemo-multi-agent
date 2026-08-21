@@ -5,7 +5,7 @@
 | Thông tin chung | &nbsp; |
 | --------------- | ------ |
 | *Tên khách hàng* | {{TenKhachHang}} |
-| *Nguồn dữ liệu* | - {{TenFile}} |
+| *Nguồn dữ liệu* | {{TenFile}} |
 | *Ngành nghề kinh doanh* | {{NganhNghe}} |
 | *Mức độ tin cậy* | {{MucDoTinCay}} |
  
@@ -13,16 +13,26 @@
  
 ```mermaid
 flowchart LR
-  V1[{{DauVao1}}] -->|{{TyTrong}}| KH[{{TenKhachHang}}]
-  V2[{{DauVao2}}] -->|{{TyTrong}}| KH
-  V3[{{DauVao3}}] -->|{{TyTrong}}| KH
-  V4[{{DauVao4}}] -->|{{TyTrong}}| KH
-  V5[{{DauVao5}}] -->|{{TyTrong}}| KH
+  SP1[{{SanPhamDauVao1}}] --> V1[{{DauVao1}}]
+  SP2[{{SanPhamDauVao2}}] --> V2[{{DauVao2}}]
+  SP3[{{SanPhamDauVao3}}] --> V3[{{DauVao3}}]
+  SP4[{{SanPhamDauVao4}}] --> V4[{{DauVao4}}]
+  SP5[{{SanPhamDauVao5}}] --> V5[{{DauVao5}}]
+  V1 -->|{{TyTrong}}| KH[{{TenKhachHang}}]
+  V2 -->|{{TyTrong}}| KH
+  V3 -->|{{TyTrong}}| KH
+  V4 -->|{{TyTrong}}| KH
+  V5 -->|{{TyTrong}}| KH
   KH -->|{{TyTrong}}| R1[{{DauRa1}}]
   KH -->|{{TyTrong}}| R2[{{DauRa2}}]
   KH -->|{{TyTrong}}| R3[{{DauRa3}}]
   KH -->|{{TyTrong}}| R4[{{DauRa4}}]
   KH -->|{{TyTrong}}| R5[{{DauRa5}}]
+  R1 --> SR1[{{SanPhamDauRa1}}]
+  R2 --> SR2[{{SanPhamDauRa2}}]
+  R3 --> SR3[{{SanPhamDauRa3}}]
+  R4 --> SR4[{{SanPhamDauRa4}}]
+  R5 --> SR5[{{SanPhamDauRa5}}]
 ```
  
 *Nhận định*:

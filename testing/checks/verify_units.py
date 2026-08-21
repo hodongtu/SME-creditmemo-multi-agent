@@ -1,4 +1,4 @@
-"""Chứng minh hết nhân đôi đơn vị, và làm tròn 2 số thập phân."""
+"""Chứng minh hết nhân đôi đơn vị, và số trong báo cáo được trình bày đúng."""
 
 import sys
 from pathlib import Path
@@ -65,6 +65,49 @@ r = normalize_lc_ratios({"lc_terms": {"import_ratio": 0.355}})
 ok = r["lc_terms"]["import_ratio"] == 0.355
 print(f"   import_ratio 0.355 -> {r['lc_terms']['import_ratio']}  {'✅' if ok else '❌'}")
 fails += [] if ok else ["lc_terms bị làm tròn"]
+
+
+
+# --- Trình bày số trong báo cáo giao cho người đọc ---------------------------
+# Hai luật đặt ra cho mọi agent, chốt lại bằng mã ở đây vì luật trong prompt chỉ
+# là lời nhờ. Đáng canh nhất là chỗ chúng đụng EVIDENCE RULE: dấu "-" nghĩa là số
+# ĐỌC ĐƯỢC và bằng không, còn ô TRỐNG nghĩa là hồ sơ không nêu. Lẫn hai thứ này
+# là báo cáo nói dối người đọc, nên có riêng một khẳng định cho nó.
+from src.utils.markdown_fixups import tidy_numbers  # noqa: E402
+from src.agents.specialist import SpecialistAgent  # noqa: E402
+
+print("\n6. Trình bày số: bỏ thập phân toàn 0, ô bằng không thành '-'")
+for src, want, why in (
+    ("Tỷ trọng 8,00% và 8,0%.", "Tỷ trọng 8% và 8%.", "bỏ thập phân toàn 0"),
+    ("Tỷ trọng 35,2% giữ nguyên.", "Tỷ trọng 35,2% giữ nguyên.", "1 chữ số có nghĩa thì giữ"),
+    ("Tỷ trọng 35,20% giữ nguyên.", "Tỷ trọng 35,20% giữ nguyên.", "0 sau chữ số có nghĩa thì giữ"),
+    ("| Doanh thu | 0,00 | 376,64 |", "| Doanh thu | - | 376,64 |", "ô bằng 0 -> gạch ngang"),
+    ("| Tỷ trọng | 0,00% | 8,0% |", "| Tỷ trọng | - | 8% |", "cả hai luật cùng lúc"),
+    ("| Nợ quá hạn | 0 | 1,20 |", "| Nợ quá hạn | - | 1,20 |", "số 0 trần"),
+    ("|---|---:|---:|", "|---|---:|---:|", "hàng phân cách không bị đụng"),
+    ("| Ghi chú | | Chưa nêu |", "| Ghi chú | | Chưa nêu |", "Ô TRỐNG vẫn trống, không thành '-'"),
+    ("| Năm | 2020 | 100 |", "| Năm | 2020 | 100 |", "số khác 0 không bị đụng"),
+    ("Doanh nghiệp có 0 lao động thời vụ.", "Doanh nghiệp có 0 lao động thời vụ.",
+     "số 0 trong câu văn không thành gạch ngang"),
+    ("```mermaid\nA -->|8,0%| B\n```", "```mermaid\nA -->|8%| B\n```",
+     "nhãn sơ đồ cũng là thứ người đọc nhìn thấy"),
+):
+    got = tidy_numbers(src)
+    print(f"   {'✅' if got == want else '❌'} {why}")
+    if got != want:
+        fails.append(f"tidy_numbers: {src!r} -> {got!r}, mong {want!r}")
+
+rules = SpecialistAgent.__init__.__doc__ or ""
+import inspect  # noqa: E402
+prompt_src = inspect.getsource(SpecialistAgent)
+for needed, why in (
+    ("NUMBER FORMAT RULE", "luật có trong prompt chung của mọi agent"),
+    ('nghĩa là hồ sơ nêu và bằng không', "prompt nói rõ '-' khác ô trống"),
+):
+    ok = needed in prompt_src
+    print(f"   {'✅' if ok else '❌'} {why}")
+    if not ok:
+        fails.append(f"prompt thiếu: {needed!r}")
 
 print("\n" + "=" * 68)
 if fails:
