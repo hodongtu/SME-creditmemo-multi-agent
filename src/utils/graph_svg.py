@@ -96,8 +96,21 @@ EDGE_CHAR_WIDTH = EDGE_FONT_SIZE * 0.57
 # consistent 11% under what the PDF actually drew — consistent enough to correct
 # for, where the character count was not. With it, padding lands between 9.8 and
 # 11.3pt against a 10.5pt target; the character count gave 4.8 to 10.6.
-FONT_STACK = ("Helvetica Neue", "Helvetica", "Arial", "DejaVu Sans")
-FONT_MEASURE_CORRECTION = 1.115
+# The families REPORT_CSS prints with, in the same order. Used for two things
+# that must agree: measuring text to size the boxes, and the font written
+# into an SVG that gets embedded as an image. Measured against the report
+# font, Times is about 12% narrower than Helvetica for mixed-case text —
+# so a stack that disagreed with the stylesheet padded every box by that
+# much.
+FONT_STACK = ("Times New Roman", "Times", "Liberation Serif", "DejaVu Serif")
+# PIL's advance widths against WeasyPrint's, measured on eight Vietnamese
+# strings rendered at FONT_SIZE and read back out of the PDF: the ratio came
+# out 0.90 for every one of them, so with Times the two agree exactly and no
+# correction is needed. It was 1.115 for Helvetica Neue, which ships as a
+# .ttc collection PIL and the renderer resolved differently. Recalibrate
+# this whenever the font changes — leaving the old number padded every
+# diagram box by 11%.
+FONT_MEASURE_CORRECTION = 1.0
 _MEASURE_SIZE = 64
 # Kept for the fallback path only. Wrapping by character count stopped being
 # right when box width started being measured: twenty-one wide characters
@@ -323,12 +336,16 @@ def _assign_ranks(
     return {node: deepest - value for node, value in rank.items()}
 
 
-def _order_within_ranks(
-    ranks: dict[str, list[str]],
-    edges: list[_Edge],
+def _adjacency(
     nodes: dict[str, _Node],
-) -> None:
-    """Median heuristic, a few sweeps, to keep connectors from crossing."""
+    edges: list[_Edge],
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Who feeds each node and who it feeds, keyed by node id.
+
+    Read by the two sweeps below — one orders nodes within a rank, the other
+    aligns their coordinates across ranks. They are written as a mirrored pair
+    on purpose, and they were building this map from identical copies.
+    """
 
     predecessors: dict[str, list[str]] = {node: [] for node in nodes}
     successors: dict[str, list[str]] = {node: [] for node in nodes}
@@ -336,6 +353,17 @@ def _order_within_ranks(
         if edge.src in nodes and edge.dst in nodes:
             predecessors[edge.dst].append(edge.src)
             successors[edge.src].append(edge.dst)
+    return predecessors, successors
+
+
+def _order_within_ranks(
+    ranks: dict[str, list[str]],
+    edges: list[_Edge],
+    nodes: dict[str, _Node],
+) -> None:
+    """Median heuristic, a few sweeps, to keep connectors from crossing."""
+
+    predecessors, successors = _adjacency(nodes, edges)
 
     for rank_nodes in ranks.values():
         for position, node_id in enumerate(rank_nodes):
@@ -424,6 +452,76 @@ def _colour_by_level(chart, nodes: dict[str, _Node]) -> None:
         node.fill, node.stroke = LEVEL_COLOURS[index]
 
 
+def _align_across_ranks(
+    ranks: dict[int, list[str]],
+    edges: list["_Edge"],
+    nodes: dict[str, _Node],
+    vertical: bool,
+) -> None:
+    """Pull each box level with the boxes it connects to, in place.
+
+    The companion to _order_within_ranks above, and deliberately the same shape:
+    same predecessor/successor maps, same four alternating sweeps. That one
+    decides the ORDER within a level; this one decides the COORDINATE.
+
+    Without it every level is centred as a block against the widest one, which
+    only lines up whichever pair happens to fall in the middle. Measured on
+    section 1 of a real report — five suppliers, each with its own product box —
+    the outermost pair sat 136px apart, and a reader had to trace a wire that far
+    to see which product belonged to which supplier.
+
+    A box with exactly one neighbour ends up exactly level with it. A box pulled
+    two ways lands between them, and where alignment and spacing conflict the
+    spacing wins: boxes may not overlap, whatever it costs the alignment.
+    """
+
+    predecessors, successors = _adjacency(nodes, edges)
+
+    def size(node: _Node) -> float:
+        return node.width if vertical else node.height
+
+    def centre(node: _Node) -> float:
+        return (node.x if vertical else node.y) + size(node) / 2
+
+    def move_to(node: _Node, value: float) -> None:
+        if vertical:
+            node.x = value - size(node) / 2
+        else:
+            node.y = value - size(node) / 2
+
+    rank_keys = sorted(ranks)
+    for sweep in range(4):
+        keys = rank_keys if sweep % 2 == 0 else list(reversed(rank_keys))
+        neighbours = predecessors if sweep % 2 == 0 else successors
+        for key in keys:
+            rank_nodes = ranks[key]
+            wanted = []
+            for node_id in rank_nodes:
+                linked = [nodes[n] for n in neighbours[node_id] if n in nodes]
+                wanted.append(
+                    sum(centre(n) for n in linked) / len(linked)
+                    if linked
+                    else centre(nodes[node_id])
+                )
+            # Pack in the order _order_within_ranks settled on. Re-sorting by the
+            # wanted position would let two boxes swap places and cross their own
+            # wires, which is the problem that function exists to prevent.
+            placed: list[float] = []
+            edge_of_previous = None
+            for node_id, target in zip(rank_nodes, wanted):
+                half = size(nodes[node_id]) / 2
+                position = target
+                if edge_of_previous is not None:
+                    position = max(position, edge_of_previous + NODE_GAP + half)
+                placed.append(position)
+                edge_of_previous = position + half
+            # Packing only ever pushes forward, so the level drifts a little on
+            # every sweep unless it is pulled back to where it wanted to be.
+            drift = sum(placed) / len(placed) - sum(wanted) / len(wanted)
+            for node_id, position in zip(rank_nodes, placed):
+                move_to(nodes[node_id], position - drift)
+
+
 def _size_nodes(nodes: dict[str, _Node], max_width: float = NODE_MAX_WIDTH) -> None:
     """Size every box to its own text, with the same padding all round.
 
@@ -445,6 +543,7 @@ def _place(  # noqa: PLR0913
     vertical: bool = False,
     labelled: dict[int, float] | None = None,
     max_width: float = NODE_MAX_WIDTH,
+    edges: list["_Edge"] | None = None,
 ) -> tuple[float, float]:
     """Assign coordinates and return the drawing size.
 
@@ -505,10 +604,35 @@ def _place(  # noqa: PLR0913
         last_gap = gap_after(key)
         along += thickness + last_gap
 
+    # Levels are evenly stacked and centred above; now pull each box level with
+    # what it connects to. Skipped when there are no edges to align along.
+    if edges:
+        _align_across_ranks(ranks, edges, nodes, vertical)
+
     extent = along - last_gap + MARGIN
+    # Measured from where the boxes ended up, not from the widest level: after
+    # alignment the cross axis is no longer that level's span, and reporting the
+    # old number would clip the drawing at the viewBox.
+    starts = [(node.x if vertical else node.y) for node in nodes.values()]
+    ends = [
+        (node.x + node.width) if vertical else (node.y + node.height)
+        for node in nodes.values()
+    ]
+    low, high = min(starts, default=MARGIN), max(ends, default=MARGIN)
+    # Alignment can push a box above the top margin; slide everything back so the
+    # drawing starts where it always did.
+    shift = MARGIN - low
+    if abs(shift) > 0.01:
+        for node in nodes.values():
+            if vertical:
+                node.x += shift
+            else:
+                node.y += shift
+    across_extent = (high - low) + 2 * MARGIN
+
     if vertical:
-        return widest + 2 * MARGIN, extent
-    return extent, widest + 2 * MARGIN
+        return across_extent, extent
+    return extent, across_extent
 
 
 def _is_linear_chain(nodes: dict[str, _Node], edges: list["_Edge"]) -> bool:
@@ -679,7 +803,7 @@ def render_svg(chart) -> str | None:
         # exact mismatch this renderer exists to prevent.
         is_vertical = bool(getattr(chart, "vertical", False))
         gaps = _label_gaps(built_edges, built)
-        w, h = _place(by_rank, built, is_vertical, gaps, max_width)
+        w, h = _place(by_rank, built, is_vertical, gaps, max_width, built_edges)
         # Too wide for the page, and shaped so that wrapping keeps its meaning:
         # lay it out into the page width instead of shrinking it to reach it.
         if (

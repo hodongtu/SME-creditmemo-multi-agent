@@ -31,7 +31,6 @@
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 ### 1.1. Đánh giá doanh thu
  
@@ -40,14 +39,12 @@
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 | Tên khách hàng đầu ra | Doanh số {{Nam2}} | Tỷ trọng | Doanh số {{Nam3}} | Tỷ trọng | Chênh lệch |
 |---|---:|---:|---:|---:|---:|
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 ### 1.2. Đánh giá giá vốn
  
@@ -63,7 +60,6 @@
 | Biên lợi nhuận thuần từ HĐKD | | | |
 | ROS | | | |
  
-*Nhận định*:
  
 ## 2. Đánh giá các khoản mục trọng yếu hoặc có biến động lớn
  
@@ -88,7 +84,6 @@
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 ### 2.2. Các khoản mục chi tiết
  
@@ -168,7 +163,6 @@
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 ## 4. Kết luận
  
@@ -176,4 +170,4 @@
 |---|---|
 | Hiệu quả hoạt động kinh doanh | |
 | Biến động tài chính trọng yếu | |
-| Nhận định về tính ổn định | |
+| Tính ổn định | |

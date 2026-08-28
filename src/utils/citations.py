@@ -49,7 +49,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from src.utils.common import normalize_text
+from src.utils.common import CODE_FENCE as _FENCE, normalize_text
 
 # Which prefix each agent's labels get before the composer merges them. Two
 # letters, because the label is visible in the .md source a reviewer reads.
@@ -62,7 +62,6 @@ AGENT_LABEL_PREFIXES: dict[str, str] = {
     # oversight rather than a deliberate exemption.
     "FINANCIAL_ANALYSIS_AGENT": "fa",
     "CREDIT_PROPOSAL_AGENT": "cp",
-    "RISK_ASSESSMENT_AGENT": "ra",
 }
 
 # A definition line: "[^label]: source text". Must be anchored at line start —
@@ -72,7 +71,6 @@ _DEFINITION = re.compile(r"^\[\^([^\]\s]+)\]:[ \t]?(.*)$")
 # A reference: "[^label]" NOT followed by a colon. The negative lookahead is how
 # markdown itself tells the two apart, so the same text splits the same way here.
 _REFERENCE = re.compile(r"\[\^([^\]\s]+)\](?!:)")
-_FENCE = re.compile(r"^\s*(```|~~~)")
 # Where a definition starts, found anywhere in a line rather than anchored —
 # used only to detect two definitions squeezed onto one source line (see
 # _split_squeezed_definitions). _DEFINITION above stays anchored because that

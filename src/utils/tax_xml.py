@@ -134,7 +134,7 @@ class TaxXmlResult:
     form_name: str = ""
     taxpayer_id: str = ""
     taxpayer_name: str = ""
-    bctc_extraction: dict[str, Any] | None = None
+    financial_statement_extraction: dict[str, Any] | None = None
     vat_revenue: dict[str, tuple[float, bool]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     error: str = ""
@@ -198,7 +198,7 @@ def _statement(
     values_by_year: dict[str, dict[str, float]],
     code_labels: dict[str, str],
 ) -> dict[str, Any]:
-    """One statement in the shape bctc_extraction already uses.
+    """One statement in the shape financial_statement_extraction already uses.
 
     ``code`` is left empty on every line. The codes are real and correct, but
     they are TT133's, and FinancialRatioCalculator's tables are TT200's — where
@@ -268,8 +268,8 @@ def _check_identities(
     return problems
 
 
-def _parse_bctc(root: ET.Element, result: TaxXmlResult) -> TaxXmlResult:
-    """B01a-DNN and its appendices into a bctc_extraction record."""
+def _parse_financial_statement(root: ET.Element, result: TaxXmlResult) -> TaxXmlResult:
+    """B01a-DNN and its appendices into a financial_statement_extraction record."""
 
     period = root.find(".//n:KyKKhaiThue", _NS)
     end_year = _year_of(_text(period, "kyKKhaiDenNgay")) or f"Năm {_text(period, 'kyKKhai')}"
@@ -308,7 +308,7 @@ def _parse_bctc(root: ET.Element, result: TaxXmlResult) -> TaxXmlResult:
         return result
 
     audited = _text(root.find(".//n:CTieuTKhaiChinh", _NS), "bctcDaKiemToan") == "1"
-    result.bctc_extraction = {
+    result.financial_statement_extraction = {
         "document_type": result.form_name or "BCTC",
         "reporting_period": {
             "period_label": end_year,
@@ -346,7 +346,7 @@ def _parse_bctc(root: ET.Element, result: TaxXmlResult) -> TaxXmlResult:
             "XML không có phần thuyết minh báo cáo tài chính.",
         ],
     }
-    result.notes = list(result.bctc_extraction["extraction_notes"])
+    result.notes = list(result.financial_statement_extraction["extraction_notes"])
     return result
 
 
@@ -433,7 +433,7 @@ def parse_tax_xml(path: str) -> TaxXmlResult:
 
     if form_id == FORM_BCTC_B01A_DNN:
         result.kind = "bctc"
-        return _parse_bctc(root, result)
+        return _parse_financial_statement(root, result)
     if form_id == FORM_VAT_01GTGT:
         result.kind = "vat"
         return _parse_vat(root, result)

@@ -1,9 +1,6 @@
 # =============================================================================
-# DOCUMENT CLASSIFICATION MATRIX  (dossier group -> document type -> agents)
+# DOCUMENT CLASSIFICATION MATRIX
 # =============================================================================
-# Source: docs/document_matrix.xlsx — the business copy, NOT in the repo (see
-# .gitignore). This file is a hand transcription of that workbook; editing the
-# workbook means updating this by hand.
 #
 # THIS IS THE SOURCE OF TRUTH for document routing. Editing this file changes
 # which document reaches which agent — no Python change required.
@@ -22,10 +19,12 @@
 #                 O = Optional — used when present, ranked after R.
 #               A scalar value (`R`) = identical across all 4 loan programs.
 #               A map value = per-program, and MUST list all 4.
-#   requirement : the "Cấp mới"/"Tái cấp" columns of the source file. NOT wired
-#               into any logic yet; kept for a future missing-document checklist.
-#   bctc_extraction : true = run the financial-statement pass that turns the
-#               document into structured JSON (src/agents/bctc_extraction.py).
+#   requirement : the "Cấp mới"/"Tái cấp" columns of the source file. The
+#               "Cấp mới" column drives the missing-document list in the
+#               evidence gap check. "Tái cấp" is still unread — nothing in the
+#               system says whether a case is new or a re-issue.
+#   financial_statement_extraction : true = run the financial-statement pass that turns the
+#               document into structured JSON (src/agents/financial_statement_extraction.py).
 #   proposal_extraction : true = extract the credit application, sections B, C
 #               and D (src/agents/proposal_extraction.py).
 #   cic_s10a_extraction : true = extract the CIC credit-relationship report,
@@ -43,38 +42,20 @@
 # --- Choosing the primary agent ----------------------------------------------
 # `primary_agent` is declared at group level and applies to every type in the
 # group. When that agent is absent from a type's `agents` (e.g. I.1 lists only
-# RA), the first R-level agent wins, in the order CP > CR > FS > BA > RA. It can
+# RA), the first R-level agent wins, in the order CP > CR > FS > BA. It can
 # be overridden per type.
-#
-# Group VI does not exist in the source file (numbering jumps V -> VII). Kept.
-# =============================================================================
 
 version: 1
 
-# The 4 loan programs. The Excel file merges B1CP/MISA/PL++ into one column
-# because they agree today; they are separate here so that the day they diverge
-# is a value edit rather than a restructure.
-#
-# `aliases` = how a user might name the program in a question. The system looks
-# for these phrases in the prompt to pick the right column (see
-# detect_loan_program). Aliases are normalised exactly like document keywords:
-# accents stripped, lowercased, every non-alphanumeric character turned into a
-# space — so "PL++" and "PL+" both become "pl". Matching is whole-token, which
-# is why "P/L" (becoming "p l") is NOT mistaken for it.
-# An alias may point at only one program; a duplicate is an error at load time.
 loan_programs:
   - id: B1CP
     label: "B1CP"
-    aliases: ["b1cp", "b1 cp"]
   - id: MISA
     label: "MISA"
-    aliases: ["misa"]
   - id: PLPP
     label: "PL++"
-    aliases: ["pl++", "pl+", "plpp", "pl cong cong"]
   - id: PLO
     label: "PLO"
-    aliases: ["plo"]
 
 groups:
 
@@ -96,7 +77,6 @@ groups:
           tai_cap: "Nếu có thông tin cập nhật"
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
         keywords:
           - "giay chung nhan dang ky kinh doanh"
           - "giay chung nhan dang ky doanh nghiep"
@@ -122,7 +102,6 @@ groups:
           tai_cap: "Nếu có thông tin cập nhật"
         agents:
           BUSINESS_ACTIVITY_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
         keywords:
           - "giay chung nhan du dieu kien"
           - "du dieu kien"
@@ -144,7 +123,6 @@ groups:
         agents:
           BUSINESS_ACTIVITY_AGENT: O
           FINANCIAL_ANALYSIS_AGENT: O
-          RISK_ASSESSMENT_AGENT: O
         keywords:
           - "bao hiem chay no"
           - "phong chay chua chay"
@@ -164,7 +142,6 @@ groups:
           tai_cap: "Bắt buộc với từng chân dung KH"
         agents:
           BUSINESS_ACTIVITY_AGENT: R
-          RISK_ASSESSMENT_AGENT: O
         keywords:
           - "quyen so huu nha xuong"
           - "hop dong thue nha xuong"
@@ -186,10 +163,9 @@ groups:
         requirement:
           cap_moi: ""
           tai_cap: ""
-        bctc_extraction: true
+        financial_statement_extraction: true
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
         keywords:
@@ -208,10 +184,9 @@ groups:
         requirement:
           cap_moi: "Bắt buộc"
           tai_cap: "Bắt buộc"
-        bctc_extraction: true
+        financial_statement_extraction: true
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
         keywords:
@@ -228,10 +203,9 @@ groups:
         requirement:
           cap_moi: "Bắt buộc"
           tai_cap: "Bắt buộc"
-        bctc_extraction: true
+        financial_statement_extraction: true
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
         keywords:
@@ -254,10 +228,6 @@ groups:
           tai_cap: "Bắt buộc"
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
-          # Credit relationship reads this too, to fill the debt/revenue chart's
-          # VAT line — it emits a ```vat-doanh-thu block for supervisor.py to
-          # parse, see credit-relationship-guidance.md.
           CREDIT_RELATIONSHIP_AGENT: R
         keywords:
           - "to khai thue gtgt"
@@ -266,9 +236,6 @@ groups:
           - "thue gtgt"
           - "gtgt"
           - "vat declaration"
-          # "Ảnh chụp phần mềm bán hàng" is an alternative for this line
-          # itself, so the keyword lives here (III.4 mentions it too, but only
-          # as a supporting document).
           - "phan mem ban hang"
 
       - id: sao_ke_tai_khoan_tctd
@@ -282,7 +249,6 @@ groups:
           tai_cap: "Bắt buộc với từng chân dung KH"
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
         keywords:
           - "sao ke tai khoan"
           - "sao ke ngan hang"
@@ -306,7 +272,6 @@ groups:
         agents:
           BUSINESS_ACTIVITY_AGENT:  {B1CP: O, MISA: O, PLPP: O, PLO: R}
           FINANCIAL_ANALYSIS_AGENT: {B1CP: O, MISA: O, PLPP: O, PLO: R}
-          RISK_ASSESSMENT_AGENT:    {B1CP: O, MISA: O, PLPP: O, PLO: R}
           CREDIT_RELATIONSHIP_AGENT: {B1CP: O, MISA: O, PLPP: O, PLO: R}
         keywords:
           - "xuat nhap ton"
@@ -330,14 +295,9 @@ groups:
         requirement:
           cap_moi: "Khuyến khích"
           tai_cap: "Khuyến khích"
-        # Business activity was added after its guidance began asking for the top
-        # partners by turnover on accounts 131 and 331 — the very ledgers this
-        # type collects. Without the route it was being told to read a document
-        # it never received.
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           BUSINESS_ACTIVITY_AGENT: R
-          RISK_ASSESSMENT_AGENT: O
         keywords:
           - "so chi tiet tai khoan"
           - "so chi tiet"
@@ -388,9 +348,6 @@ groups:
           Đề nghị cấp tín dụng/hạn mức kiêm phương án kinh doanh/sử dụng vốn
           trong đó nêu rõ phương án/kế hoạch kinh doanh/sử dụng vốn của năm đề
           nghị cấp hạn mức; Đề nghị phát hành bảo lãnh.
-        # Section B (capital plan + business plan + efficiency + repayment),
-        # section C (collateral) and section D (credit request) are extracted
-        # into JSON — see src/agents/proposal_extraction.py.
         proposal_extraction: true
         requirement:
           cap_moi: "Bắt buộc"
@@ -400,7 +357,6 @@ groups:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
         keywords:
           - "de nghi cap tin dung"
           - "giay de nghi vay von"
@@ -427,7 +383,6 @@ groups:
           tai_cap: "Bắt buộc"
         agents:
           BUSINESS_ACTIVITY_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
         keywords:
           - "hop dong dau ra"
           - "hop dong dau vao"
@@ -455,7 +410,6 @@ groups:
         agents:
           BUSINESS_ACTIVITY_AGENT: R
           FINANCIAL_ANALYSIS_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
         keywords:
           - "bang tien do thuc hien hop dong"
           - "tien do thuc hien hop dong"
@@ -476,7 +430,6 @@ groups:
           BUSINESS_ACTIVITY_AGENT: R
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
         keywords:
           - "bien ban nghiem thu khoi luong"
           - "bien ban nghiem thu"
@@ -489,7 +442,6 @@ groups:
   # ===========================================================================
   - id: ho_so_tai_san_dam_bao
     label: "Hồ sơ tài sản đảm bảo"
-    primary_agent: RISK_ASSESSMENT_AGENT
     types:
 
       - id: ho_so_tsbd
@@ -502,7 +454,6 @@ groups:
           cap_moi: "Không bắt buộc"
           tai_cap: "Không bắt buộc"
         agents:
-          RISK_ASSESSMENT_AGENT: O
         keywords:
           - "tai san bao dam"
           - "tai san the chap"
@@ -520,7 +471,6 @@ groups:
           cap_moi: "Không bắt buộc"
           tai_cap: "Không bắt buộc"
         agents:
-          RISK_ASSESSMENT_AGENT: O
         keywords:
           - "chung thu dinh gia"
           - "phieu dinh gia"
@@ -545,7 +495,6 @@ groups:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
         keywords:
           - "thong tin cic cua khach hang vay"
           - "cic khach hang vay"
@@ -573,19 +522,10 @@ groups:
           tai_cap: "Không bắt buộc"
         agents:
           CREDIT_RELATIONSHIP_AGENT: O
-          RISK_ASSESSMENT_AGENT: O
         keywords:
           - "thong tin cic tai san bao dam"
           - "cic tai san bao dam"
           - "cic tsbd"
-          # Phrases taken from a real R20/R21 CIC report (measured on actual
-          # OCR, not invented text): the bold title "BÁO CÁO THÔNG TIN BẢO ĐẢM
-          # TIỀN VAY" is itself often misread, because it is large and bold, so
-          # the two phrases below anchor on section 2 instead — "THÔNG TIN ĐẢM
-          # BẢO TIỀN VAY CỦA KHÁCH HÀNG TẠI CÁC TỔ CHỨC TÍN DỤNG" and the label
-          # repeated above every asset block, "Danh sách Tài sản bảo đảm:".
-          # Both are long enough not to collide by chance with S10A or with
-          # ho_so_tsbd (the original ownership papers, not a CIC report).
           - "dam bao tien vay cua khach hang"
           - "danh sach tai san bao dam"
           - "chi tiet ve bao dam tien vay"
@@ -604,7 +544,6 @@ groups:
           tai_cap: "Bắt buộc"
         agents:
           CREDIT_RELATIONSHIP_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
         keywords:
           - "thong tin cic dai dien phap luat"
           - "cic dai dien phap luat"
@@ -626,11 +565,6 @@ groups:
         agents:
           BUSINESS_ACTIVITY_AGENT: R
           FINANCIAL_ANALYSIS_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
-          # Added with the extraction pass: both read the structured block, and
-          # a block only ever sees documents the matrix routed to that agent.
-          # Credit proposal needs next year's revenue/COGS plan to size a limit;
-          # credit relationship needs the buy/sell side to read the debt against.
           CREDIT_PROPOSAL_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
         keywords:
@@ -660,7 +594,6 @@ groups:
         agents:
           BUSINESS_ACTIVITY_AGENT: R
           FINANCIAL_ANALYSIS_AGENT: R
-          RISK_ASSESSMENT_AGENT: R
         keywords:
           - "bao cao thong tin gioi han tin dung"
           - "gioi han tin dung"

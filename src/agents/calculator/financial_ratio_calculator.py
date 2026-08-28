@@ -1,9 +1,4 @@
-"""Pre-compute financial ratios from BCTC structured-extraction JSON.
-
-Line items and their per-year values come from bctc_extraction (see
-bctc_extraction.py) — an LLM extraction pass over BCTC raw OCR text — not from
-parsing raw OCR text directly here.
-"""
+"""Pre-compute financial ratios from FS structured-extraction JSON"""
 
 from __future__ import annotations
 
@@ -11,7 +6,8 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from src.agents.bctc_extraction import (
+from src.utils.formatting import VND_PER_BILLION, format_vn_number
+from src.agents.extraction.financial_statement_extraction import (
     normalize_period_label,
     resolve_report_years,
 )
@@ -21,18 +17,11 @@ BALANCE_SHEET = "balance_sheet"
 INCOME_STATEMENT = "income_statement"
 CASH_FLOW = "cash_flow_statement"
 
+DAYS_PER_YEAR = 365
+
 
 @dataclass
 class MetricDefinition:
-    """Describe one extractable financial statement line item.
-
-    ``statements`` restricts where a metric may be read from — without it
-    "Lợi nhuận sau thuế chưa phân phối" (retained earnings, mã 421 on the
-    balance sheet) is picked up as net profit. ``codes`` are Mã số values that
-    corroborate a label match, and ``exclude`` blocks labels that merely contain
-    an alias ("Tài sản ngắn hạn **khác**", "Phải trả người bán **dài hạn**").
-    """
-
     key: str
     label: str
     aliases: tuple[str, ...]
@@ -43,8 +32,6 @@ class MetricDefinition:
 
 @dataclass
 class RatioDefinition:
-    """Describe one computed ratio and its formula."""
-
     key: str
     label: str
     formula: str
@@ -53,66 +40,60 @@ class RatioDefinition:
 
 
 class FinancialRatioCalculator:
-    """Extract statement line items by year and compute custom financial ratios."""
-
     METRICS: tuple[MetricDefinition, ...] = (
         MetricDefinition(
             "net_revenue",
             "Doanh thu thuần",
-            ("doanh thu thuần", "doanh thu thuan"),
+            ("doanh thu thuần",),
             statements=(INCOME_STATEMENT,),
             codes=("10",),
         ),
         MetricDefinition(
             "gross_revenue",
             "Doanh thu bán hàng và cung cấp dịch vụ",
-            ("doanh thu bán hàng", "doanh thu ban hang"),
+            ("doanh thu bán hàng",),
             statements=(INCOME_STATEMENT,),
             codes=("01",),
         ),
         MetricDefinition(
             "cogs",
             "Giá vốn hàng bán",
-            ("giá vốn hàng bán", "gia von hang ban"),
+            ("giá vốn hàng bán",),
             statements=(INCOME_STATEMENT,),
             codes=("11",),
         ),
         MetricDefinition(
             "gross_profit",
             "Lợi nhuận gộp",
-            ("lợi nhuận gộp", "loi nhuan gop"),
+            ("lợi nhuận gộp",),
             statements=(INCOME_STATEMENT,),
             codes=("20",),
         ),
         MetricDefinition(
             "financial_expense",
             "Chi phí tài chính",
-            ("chi phí tài chính", "chi phi tai chinh"),
+            ("chi phí tài chính",),
             statements=(INCOME_STATEMENT,),
             codes=("22",),
         ),
         MetricDefinition(
             "interest_expense",
             "Chi phí lãi vay",
-            ("chi phí lãi vay", "chi phi lai vay"),
+            ("chi phí lãi vay",),
             statements=(INCOME_STATEMENT,),
             codes=("23",),
         ),
         MetricDefinition(
             "profit_before_tax",
             "Lợi nhuận trước thuế",
-            ("lợi nhuận trước thuế", "loi nhuan truoc thue"),
-            # The cash-flow statement opens with the same figure; accept it as a
-            # fallback when the income statement row was not extracted.
+            ("lợi nhuận trước thuế",),
             statements=(INCOME_STATEMENT, CASH_FLOW),
             codes=("50",),
         ),
         MetricDefinition(
             "net_profit",
             "Lợi nhuận sau thuế",
-            ("lợi nhuận sau thuế", "loi nhuan sau thue"),
-            # Never the balance sheet: mã 421 "Lợi nhuận sau thuế chưa phân
-            # phối" is retained earnings, not the period's net profit.
+            ("lợi nhuận sau thuế",),
             statements=(INCOME_STATEMENT,),
             codes=("60",),
             exclude=("chưa phân phối", "chua phan phoi"),
@@ -120,7 +101,7 @@ class FinancialRatioCalculator:
         MetricDefinition(
             "current_assets",
             "Tài sản ngắn hạn",
-            ("tài sản ngắn hạn", "tai san ngan han"),
+            ("tài sản ngắn hạn",),
             codes=("100",),
             exclude=("tài sản ngắn hạn khác", "tai san ngan han khac"),
         ),
@@ -136,68 +117,43 @@ class FinancialRatioCalculator:
         MetricDefinition(
             "accounts_receivable",
             "Phải thu khách hàng",
-            (
-                "phải thu ngắn hạn của khách hàng",
-                "phai thu ngan han cua khach hang",
-                "phải thu khách hàng",
-                "phai thu khach hang",
-            ),
+            ("phải thu ngắn hạn của khách hàng", "phải thu khách hàng"),
             codes=("131",),
         ),
         MetricDefinition(
             "prepaid_suppliers",
             "Trả trước người bán",
-            (
-                "trả trước cho người bán ngắn hạn",
-                "tra truoc cho nguoi ban ngan han",
-                "trả trước người bán",
-                "tra truoc nguoi ban",
-            ),
+            ("trả trước cho người bán ngắn hạn", "trả trước người bán"),
             codes=("132",),
         ),
         MetricDefinition(
             "other_receivables",
             "Phải thu khác",
-            (
-                "phải thu ngắn hạn khác",
-                "phai thu ngan han khac",
-                "phải thu khác",
-                "phai thu khac",
-            ),
+            ("phải thu ngắn hạn khác", "phải thu khác"),
             codes=("136",),
         ),
         MetricDefinition(
             "inventory",
             "Hàng tồn kho",
-            ("hàng tồn kho", "hang ton kho"),
+            ("hàng tồn kho",),
             codes=("140", "141"),
         ),
         MetricDefinition(
             "total_assets",
             "Tổng tài sản",
-            (
-                "tổng cộng tài sản",
-                "tong cong tai san",
-                "tổng tài sản",
-                "tong tai san",
-            ),
+            ("tổng cộng tài sản", "tổng tài sản"),
             codes=("270",),
         ),
         MetricDefinition(
             "current_liabilities",
             "Nợ ngắn hạn",
-            ("nợ ngắn hạn", "no ngan han"),
+            ("nợ ngắn hạn",),
             codes=("310",),
         ),
         MetricDefinition(
             "accounts_payable",
             "Phải trả người bán",
-            (
-                "phải trả người bán ngắn hạn",
-                "phai tra nguoi ban ngan han",
-                "phải trả người bán",
-                "phai tra nguoi ban",
-            ),
+            ("phải trả người bán ngắn hạn", "phải trả người bán"),
             codes=("311",),
             exclude=(
                 "phải trả người bán dài hạn",
@@ -207,12 +163,7 @@ class FinancialRatioCalculator:
         MetricDefinition(
             "customer_advances",
             "Người mua trả tiền trước",
-            (
-                "người mua trả tiền trước ngắn hạn",
-                "nguoi mua tra tien truoc ngan han",
-                "người mua trả tiền trước",
-                "nguoi mua tra tien truoc",
-            ),
+            ("người mua trả tiền trước ngắn hạn", "người mua trả tiền trước"),
             codes=("312",),
         ),
         MetricDefinition(
@@ -230,13 +181,13 @@ class FinancialRatioCalculator:
         MetricDefinition(
             "total_liabilities",
             "Nợ phải trả",
-            ("nợ phải trả", "no phai tra", "tong no phai tra", "tổng nợ phải trả"),
+            ("nợ phải trả", "tong no phai tra"),
             codes=("300",),
         ),
         MetricDefinition(
             "equity",
             "Vốn chủ sở hữu",
-            ("vốn chủ sở hữu", "von chu so huu"),
+            ("vốn chủ sở hữu",),
             codes=("400", "410"),
         ),
     )
@@ -254,21 +205,21 @@ class FinancialRatioCalculator:
             "Số ngày tồn kho",
             "Hàng tồn kho cuối kỳ / Giá vốn hàng bán * 365",
             "days",
-            lambda m: _safe_div(m.get("inventory"), m.get("cogs"), 365),
+            lambda m: _days(m, "inventory", "cogs"),
         ),
         RatioDefinition(
             "dso",
             "Số ngày phải thu",
             "Phải thu cuối kỳ / Doanh thu thuần * 365",
             "days",
-            lambda m: _safe_div(m.get("accounts_receivable"), m.get("net_revenue"), 365),
+            lambda m: _days(m, "accounts_receivable", "net_revenue"),
         ),
         RatioDefinition(
             "prepaid_supplier_days",
             "Số ngày trả trước người bán",
             "Trả trước người bán cuối kỳ / Doanh thu thuần * 365",
             "days",
-            lambda m: _safe_div(m.get("prepaid_suppliers"), m.get("net_revenue"), 365),
+            lambda m: _days(m, "prepaid_suppliers", "net_revenue"),
         ),
         RatioDefinition(
             "receivable_plus_prepaid_days",
@@ -276,8 +227,8 @@ class FinancialRatioCalculator:
             "DSO + Số ngày trả trước người bán",
             "days",
             lambda m: _safe_sum(
-                _safe_div(m.get("accounts_receivable"), m.get("net_revenue"), 365),
-                _safe_div(m.get("prepaid_suppliers"), m.get("net_revenue"), 365),
+                _days(m, "accounts_receivable", "net_revenue"),
+                _days(m, "prepaid_suppliers", "net_revenue"),
             ),
         ),
         RatioDefinition(
@@ -285,14 +236,14 @@ class FinancialRatioCalculator:
             "Số ngày phải trả",
             "Phải trả cuối kỳ / Giá vốn hàng bán * 365",
             "days",
-            lambda m: _safe_div(m.get("accounts_payable"), m.get("cogs"), 365),
+            lambda m: _days(m, "accounts_payable", "cogs"),
         ),
         RatioDefinition(
             "customer_advance_days",
             "Số ngày người mua trả trước",
             "Người mua trả trước cuối kỳ / Giá vốn hàng bán * 365",
             "days",
-            lambda m: _safe_div(m.get("customer_advances"), m.get("cogs"), 365),
+            lambda m: _days(m, "customer_advances", "cogs"),
         ),
         RatioDefinition(
             "payable_plus_advance_days",
@@ -300,8 +251,8 @@ class FinancialRatioCalculator:
             "DPO + Số ngày người mua trả trước",
             "days",
             lambda m: _safe_sum(
-                _safe_div(m.get("accounts_payable"), m.get("cogs"), 365),
-                _safe_div(m.get("customer_advances"), m.get("cogs"), 365),
+                _days(m, "accounts_payable", "cogs"),
+                _days(m, "customer_advances", "cogs"),
             ),
         ),
         RatioDefinition(
@@ -429,15 +380,6 @@ class FinancialRatioCalculator:
             self.source_files_by_year(documents),
         )
 
-    # A year-on-year swing this large is not a business event, it is a unit that
-    # never got scaled. Deliberately looser than the 100x backstop in
-    # credit_need_calculator, which compares a plan against the year it was
-    # built from — two figures that cannot be far apart. Consecutive BCTC years
-    # can be: a company incorporated mid-year books a few hundred million and
-    # then a full year at sixty billion, and at 100x that customer gets told its
-    # own growth is a data error. 1000 is the smallest gap a real unit mistake
-    # can produce, since nghìn đồng is the finest unit resolve_money_multiplier
-    # knows, so nothing genuine is caught and nothing spurious is.
     UNIT_ANOMALY_METRICS = ("net_revenue", "total_assets")
     UNIT_ANOMALY_LOW = 0.001
     UNIT_ANOMALY_HIGH = 1000
@@ -446,17 +388,7 @@ class FinancialRatioCalculator:
         self,
         yearly_metrics: dict[str, dict[str, float]],
     ) -> list[str]:
-        """Flag consecutive years whose magnitudes cannot both be in đồng.
-
-        The BCTC pass reads the unit printed on each statement and scales here,
-        but a bundle can carry two statements printed in different units, and a
-        model can miss the unit line on one of them. Then one year is a million
-        times the other and every ratio spanning the pair is meaningless.
-
-        Says so rather than guessing which year is wrong — either could be, and
-        silently rescaling one would turn a visible inconsistency into an
-        invisible fabrication.
-        """
+        """Flag consecutive years whose magnitudes cannot both be in đồng."""
 
         warnings: list[str] = []
         years = sorted(yearly_metrics)
@@ -478,56 +410,65 @@ class FinancialRatioCalculator:
                 )
         return warnings
 
-    # A statement that does not add up is reporting at least one wrong figure,
-    # and the gap is usually far too small for the unit backstop to see: the
-    # sample that prompted this had a gross profit of 572 against a net revenue
-    # of 377, roughly a tenfold error where UNIT_ANOMALY_HIGH is 1000.
     IDENTITY_TOLERANCE = 0.01
 
-    def detect_identity_breaks(
+    NON_NEGATIVE_METRICS = (
+        ("total_assets", "Tổng tài sản"),
+        ("net_revenue", "Doanh thu thuần"),
+        ("equity", "Vốn chủ sở hữu"),
+    )
+
+    def data_quality_warnings(
         self,
         yearly_metrics: dict[str, dict[str, float]],
     ) -> list[str]:
-        """Flag years whose figures contradict the statement's own arithmetic.
-
-        These identities hold in every Vietnamese statement by construction, so a
-        break is proof that a figure was misread — no judgement about the
-        business is involved, which is what makes them safe to assert.
-
-        Reports rather than repairs. Which side is wrong is unknowable from here:
-        a broken gross-profit identity could be a bad revenue, a bad COGS or a bad
-        gross profit, and quietly rewriting one of them would turn a visible
-        contradiction into an invented number that nothing downstream could
-        question. Same reasoning as detect_unit_anomalies.
-        """
+        """Flag years whose figures contradict the statement's own arithmetic."""
 
         warnings: list[str] = []
         for year in sorted(yearly_metrics):
             m = yearly_metrics[year]
 
             def _has(*keys: str) -> bool:
-                return all(isinstance(m.get(k), (int, float)) for k in keys)
+                return all(isinstance(m.get(key), (int, float)) for key in keys)
+
+            def _money(key: str) -> str:
+                return _format_number(m[key], "value")
 
             def _off(actual: float, expected: float) -> bool:
                 scale = max(abs(actual), abs(expected))
-                return scale > 0 and abs(actual - expected) / scale > self.IDENTITY_TOLERANCE
+                return (
+                    scale > 0
+                    and abs(actual - expected) / scale > self.IDENTITY_TOLERANCE
+                )
 
             if _has("gross_profit", "net_revenue", "cogs"):
                 expected = m["net_revenue"] - m["cogs"]
                 if _off(m["gross_profit"], expected):
                     warnings.append(
                         f"SỐ LIỆU KHÔNG KHỚP ({year}): lợi nhuận gộp đọc được "
-                        f"{m['gross_profit']:,.0f} nhưng doanh thu thuần "
-                        f"{m['net_revenue']:,.0f} trừ giá vốn {m['cogs']:,.0f} "
-                        f"= {expected:,.0f}. Ít nhất một trong ba số này đọc sai "
-                        f"— đối chiếu BCTC gốc trước khi dùng."
+                        f"{_money('gross_profit')} nhưng doanh thu thuần "
+                        f"{_money('net_revenue')} trừ giá vốn {_money('cogs')} = "
+                        f"{_format_number(expected, 'value')}. Ít nhất một trong "
+                        f"ba số này đọc sai — đối chiếu BCTC gốc trước khi dùng."
                     )
+            elif (
+                _has("gross_profit", "net_revenue")
+                and m["gross_profit"] > m["net_revenue"]
+            ):
+                warnings.append(
+                    f"SỐ LIỆU KHÔNG KHỚP ({year}): lợi nhuận gộp "
+                    f"{_money('gross_profit')} lớn hơn doanh thu thuần "
+                    f"{_money('net_revenue')}. Đối chiếu BCTC gốc trước khi dùng."
+                )
 
-            if _has("net_revenue", "gross_revenue") and m["net_revenue"] > m["gross_revenue"]:
+            if (
+                _has("net_revenue", "gross_revenue")
+                and m["net_revenue"] > m["gross_revenue"]
+            ):
                 warnings.append(
                     f"SỐ LIỆU KHÔNG KHỚP ({year}): doanh thu thuần "
-                    f"{m['net_revenue']:,.0f} lớn hơn doanh thu bán hàng "
-                    f"{m['gross_revenue']:,.0f}, trong khi các khoản giảm trừ "
+                    f"{_money('net_revenue')} lớn hơn doanh thu bán hàng "
+                    f"{_money('gross_revenue')}, trong khi các khoản giảm trừ "
                     f"không thể âm. Đối chiếu BCTC gốc trước khi dùng."
                 )
 
@@ -536,10 +477,18 @@ class FinancialRatioCalculator:
                 if _off(m["total_assets"], expected):
                     warnings.append(
                         f"SỐ LIỆU KHÔNG KHỚP ({year}): tổng tài sản "
-                        f"{m['total_assets']:,.0f} khác nợ phải trả "
-                        f"{m['total_liabilities']:,.0f} cộng vốn chủ sở hữu "
-                        f"{m['equity']:,.0f} = {expected:,.0f}. Bảng cân đối "
+                        f"{_money('total_assets')} khác nợ phải trả "
+                        f"{_money('total_liabilities')} cộng vốn chủ sở hữu "
+                        f"{_money('equity')} = "
+                        f"{_format_number(expected, 'value')}. Bảng cân đối "
                         f"không cân — đối chiếu BCTC gốc trước khi dùng."
+                    )
+
+            for key, label in self.NON_NEGATIVE_METRICS:
+                if _has(key) and m[key] < 0:
+                    warnings.append(
+                        f"SỐ LIỆU KHÔNG KHỚP ({year}): {label} âm "
+                        f"({_money(key)}) — bất thường, nghi ngờ lỗi trích xuất."
                     )
         return warnings
 
@@ -562,7 +511,7 @@ class FinancialRatioCalculator:
 
         by_year: dict[str, set[str]] = {}
         for document in documents:
-            extraction = document.get("bctc_extraction")
+            extraction = document.get("financial_statement_extraction")
             if not isinstance(extraction, dict):
                 continue
             filename = str(document.get("filename") or "").strip()
@@ -588,55 +537,37 @@ class FinancialRatioCalculator:
 
     STATEMENT_KEYS = (BALANCE_SHEET, INCOME_STATEMENT, CASH_FLOW)
 
-    # Match scoring: a label that equals an alias outright beats a label that
-    # merely contains one; a corroborating Mã số outweighs both; a code with no
-    # label support is the weakest signal that is still worth using.
     EXACT_LABEL_SCORE = 60
     ALIAS_BASE_SCORE = 10
     CODE_AGREEMENT_BONUS = 100
     CODE_ONLY_SCORE = 40
 
-    # Which signal matched at all, ranked above how well it matched. A line that
-    # names the metric always beats one that merely carries a colliding Mã số,
-    # however the two score against each other.
     LABEL_TIER = 1
     CODE_ONLY_TIER = 0
 
-    # Ranked above both, because it says where a figure came from rather than
-    # how well it matched. An e-tax filing states its figures against the form's
-    # own indicator codes; a PDF was scanned and then read by a model. Without
-    # this the winner between two documents covering the same year is whichever
-    # line happened to score higher, which on a real pair took total assets from
-    # one source and cost of sales from the other — a single year assembled from
-    # two readings that were never meant to be mixed.
     SOURCE_RANK = {"xml": 2, "llm": 1, "": 1}
 
     def extract_yearly_metrics(
         self,
         documents: list[dict[str, Any]],
     ) -> dict[str, dict[str, float]]:
-        """Extract financial statement line items by year from bctc_extraction JSON.
+        """Extract financial statement line items by year from financial_statement_extraction JSON.
 
-        Reads each document's ``bctc_extraction`` (the structured JSON produced
-        by the BCTC extraction pass — see bctc_extraction.py), not raw OCR
+        Reads each document's ``financial_statement_extraction`` (the structured JSON produced
+        by the BCTC extraction pass — see financial_statement_extraction.py), not raw OCR
         text. A document without a successful extraction (not a BCTC, LLM
         failed, or no extraction LLM configured) contributes nothing.
         """
         yearly_metrics: dict[str, dict[str, float]] = {}
-        # (year, metric_key) -> (source, tier, score). Keeping the best-ranked row
-        # of the first one makes the result independent of line-item order.
         best_score: dict[tuple[str, str], tuple[int, int, int]] = {}
 
         for document in documents:
-            extraction = document.get("bctc_extraction")
+            extraction = document.get("financial_statement_extraction")
             if not isinstance(extraction, dict):
                 continue
             source_rank = self.SOURCE_RANK.get(
-                document.get("bctc_extraction_source") or "", 1
+                document.get("financial_statement_extraction_source") or "", 1
             )
-            # Columns named by position ("Số cuối kỳ") only mean something
-            # relative to the statement they came from, so the anchor is read
-            # per document rather than once for the whole set.
             current_year, previous_year = resolve_report_years(extraction)
 
             for statement_key in self.STATEMENT_KEYS:
@@ -665,17 +596,10 @@ class FinancialRatioCalculator:
                             value = float(raw_value)
                         except (TypeError, ValueError):
                             continue
-                        # Normalized again here, not just at extraction time:
-                        # this also covers extractions produced before that
-                        # existed, and a mixed spelling silently splits one
-                        # year into two columns whose growth ratio then
-                        # compares the year against itself. Idempotent.
                         year_key = normalize_period_label(
                             year, current_year, previous_year
                         )
                         slot = (year_key, metric.key)
-                        # Source first, then tier, then score. See SOURCE_RANK
-                        # and match_metric for what each one stops from winning.
                         rank = (source_rank, tier, score)
                         if rank <= best_score.get(slot, (-1, -1, -1)):
                             continue
@@ -692,26 +616,7 @@ class FinancialRatioCalculator:
         code: Any,
         statement_key: str,
     ) -> tuple[MetricDefinition, int, int] | None:
-        """Map one statement line to a metric, with a tier and a score.
-
-        The label is the primary key and the Mã số only corroborates it. Codes
-        extracted from poor scans are frequently wrong — in one real sample the
-        model returned 311 (phải trả người bán) for "Nợ ngắn hạn" — so letting a
-        code override a clear label would introduce errors rather than remove
-        them. A code is used on its own only when no label matches at all.
-
-        The tier is what makes that last sentence true between rows as well as
-        within one. It used to hold only within a row: the caller compared bare
-        scores, and CODE_ONLY_SCORE outranks an ordinary alias match, so a line
-        with no textual relation to the metric could take the slot from the line
-        that named it. Measured on a real statement, "11. Thu nhập khác" won the
-        giá vốn slot from "4. Giá vốn hàng bán" — the extraction had copied the
-        label's ordinal into the code field, and 11 is giá vốn's TT200 code.
-
-        LABEL_TIER beats CODE_ONLY_TIER outright; the score orders rows inside a
-        tier. Scores stay comparable to each other, which they would not if the
-        fix had been to push CODE_ONLY_SCORE below every alias match.
-        """
+        """Map one statement line to a metric, with a tier and a score."""
 
         normalized_label = _normalize_text(label)
         code_text = "" if code is None else str(code).strip()
@@ -758,7 +663,7 @@ class FinancialRatioCalculator:
         for metric in cls.METRICS:
             if statement_key not in metric.statements:
                 continue
-            if _code_matches(code_text, metric.codes):
+            if _code_rank(code_text, metric.codes) is not None:
                 return metric, cls.CODE_ONLY_TIER, cls.CODE_ONLY_SCORE
         return None
 
@@ -805,12 +710,16 @@ class FinancialRatioCalculator:
         ]
         # Above the numbers, not below them: a reader who has already worked
         # through the table has drawn the conclusion the warning exists to stop.
-        anomalies = (
+        warnings = (
             self.detect_unit_anomalies(yearly_metrics)
-            + self.detect_identity_breaks(yearly_metrics)
+            + self.data_quality_warnings(yearly_metrics)
         )
-        if anomalies:
-            lines.extend(anomalies)
+        if warnings:
+            lines.append(
+                "Data quality warnings (possible OCR/extraction errors — verify "
+                "against source before relying on these figures):"
+            )
+            lines.extend(f"- {warning}" for warning in warnings)
             lines.append("")
         if source_files:
             lines.extend(
@@ -831,118 +740,71 @@ class FinancialRatioCalculator:
             [
                 "",
                 "Extracted financial statement line items:",
-                self._format_table(years, yearly_metrics, self.METRICS),
+                self._markdown_table(
+                    "Chỉ tiêu", years, self._metric_rows(years, yearly_metrics)
+                ),
             ]
         )
         lines.extend(
             [
                 "",
                 "Computed financial ratios:",
-                self._format_ratio_table(years, yearly_ratios),
+                self._markdown_table(
+                    "Chỉ số|Công thức", years,
+                    self._ratio_rows(years, yearly_ratios),
+                ),
             ]
         )
-
-        warnings = self._validation_warnings(years, yearly_metrics)
-        if warnings:
-            lines.extend(
-                [
-                    "",
-                    "Data quality warnings (possible OCR/extraction errors — verify "
-                    "against source before relying on these figures):",
-                ]
-            )
-            lines.extend(f"- {warning}" for warning in warnings)
 
         lines.append("[/PRE-COMPUTED FINANCIAL METRICS]")
         return "\n".join(lines)
 
-    def _validation_warnings(
+    @staticmethod
+    def _markdown_table(
+        first_column: str,
+        years: list[str],
+        rows: list[tuple[str, ...]],
+    ) -> str:
+        """One table builder for both the line items and the ratios."""
+
+        leading = first_column.split("|")
+        head = "| " + " | ".join(leading) + " | " + " | ".join(years) + " |"
+        rule = "|" + "---|" * len(leading) + "|".join("---:" for _ in years) + "|"
+        out = [head, rule]
+        for row in rows:
+            out.append("| " + " | ".join(row) + " |")
+        return "\n".join(out)
+
+    def _metric_rows(
         self,
         years: list[str],
         yearly_metrics: dict[str, dict[str, float]],
-        tolerance: float = 0.02,
-    ) -> list[str]:
-        """Flag figures that fail basic accounting sanity checks."""
-        warnings: list[str] = []
-        for year in years:
-            metrics = yearly_metrics.get(year, {})
-            assets = metrics.get("total_assets")
-            liabilities = metrics.get("total_liabilities")
-            equity = metrics.get("equity")
-
-            # Accounting identity: Tổng tài sản = Nợ phải trả + Vốn chủ sở hữu.
-            if None not in (assets, liabilities, equity) and assets:
-                expected = liabilities + equity
-                if abs(assets - expected) / abs(assets) > tolerance:
-                    warnings.append(
-                        f"{year}: Tổng tài sản ({_format_number(assets, 'value')}) "
-                        f"≠ Nợ phải trả + VCSH "
-                        f"({_format_number(expected, 'value')}); "
-                        "chênh lệch vượt ngưỡng cho phép."
-                    )
-
-            # Gross profit should not exceed net revenue.
-            revenue = metrics.get("net_revenue")
-            gross_profit = metrics.get("gross_profit")
-            if None not in (revenue, gross_profit) and revenue and gross_profit > revenue:
-                warnings.append(
-                    f"{year}: Lợi nhuận gộp "
-                    f"({_format_number(gross_profit, 'value')}) lớn hơn "
-                    f"Doanh thu thuần ({_format_number(revenue, 'value')})."
-                )
-
-            # Any negative that should structurally be non-negative.
-            for key, label in (
-                ("total_assets", "Tổng tài sản"),
-                ("net_revenue", "Doanh thu thuần"),
-                ("equity", "Vốn chủ sở hữu"),
-            ):
-                value = metrics.get(key)
-                if value is not None and value < 0:
-                    warnings.append(
-                        f"{year}: {label} âm ({_format_number(value, 'value')}) "
-                        "— bất thường, nghi ngờ lỗi trích xuất."
-                    )
-        return warnings
-
-    def _format_table(
-        self,
-        years: list[str],
-        values_by_year: dict[str, dict[str, float]],
-        definitions: tuple[MetricDefinition, ...],
-    ) -> str:
-        header = "| Chỉ tiêu | " + " | ".join(years) + " |"
-        separator = "|---|" + "|".join("---:" for _ in years) + "|"
-        rows = [header, separator]
-        for definition in definitions:
+    ) -> list[tuple[str, ...]]:
+        rows = []
+        for definition in self.METRICS:
             cells = [
-                _format_number(values_by_year.get(year, {}).get(definition.key), "value")
+                _format_number(yearly_metrics.get(year, {}).get(definition.key), "value")
                 for year in years
             ]
+            # A row nobody could read a figure from is noise in the prompt.
             if any(cell != "N/A" for cell in cells):
-                rows.append(f"| {definition.label} | " + " | ".join(cells) + " |")
-        return "\n".join(rows)
+                rows.append((definition.label, *cells))
+        return rows
 
-    def _format_ratio_table(
+    def _ratio_rows(
         self,
         years: list[str],
         yearly_ratios: dict[str, dict[str, float]],
-    ) -> str:
-        header = "| Chỉ số | Công thức | " + " | ".join(years) + " |"
-        separator = "|---|---|" + "|".join("---:" for _ in years) + "|"
-        rows = [header, separator]
+    ) -> list[tuple[str, ...]]:
+        rows = []
         for definition in self.RATIO_DEFINITIONS:
             cells = [
                 _format_number(yearly_ratios.get(year, {}).get(definition.key), definition.unit)
                 for year in years
             ]
             if any(cell != "N/A" for cell in cells):
-                rows.append(
-                    f"| {definition.label} | {definition.formula} | "
-                    + " | ".join(cells)
-                    + " |"
-                )
-        return "\n".join(rows)
+                rows.append((definition.label, definition.formula, *cells))
+        return rows
 
 def _normalize_text(text: str) -> str:
     """Lowercase and remove Vietnamese accents for robust matching."""
@@ -967,9 +829,14 @@ def _code_rank(code_text: str, codes: tuple[str, ...]) -> int | None:
     return None
 
 
-def _code_matches(code_text: str, codes: tuple[str, ...]) -> bool:
-    """Whether a Mã số is in a metric's whitelist."""
-    return _code_rank(code_text, codes) is not None
+def _days(metrics: dict[str, float], balance: str, flow: str) -> float | None:
+    """Turnover days: a balance-sheet figure over a flow, annualised.
+
+    Five ratios are this shape and three of them appear again inside the
+    composites below, so the expression was written out eight times.
+    """
+
+    return _safe_div(metrics.get(balance), metrics.get(flow), DAYS_PER_YEAR)
 
 
 def _safe_div(
@@ -1014,21 +881,17 @@ def _safe_growth(
 
 def _safe_cash_conversion_cycle(metrics: dict[str, float]) -> float | None:
     """Compute CCC using the custom template formula."""
-    dso = _safe_div(metrics.get("accounts_receivable"), metrics.get("net_revenue"), 365)
-    dio = _safe_div(metrics.get("inventory"), metrics.get("cogs"), 365)
-    prepaid_days = _safe_div(metrics.get("prepaid_suppliers"), metrics.get("net_revenue"), 365)
-    dpo = _safe_div(metrics.get("accounts_payable"), metrics.get("cogs"), 365)
-    advance_days = _safe_div(metrics.get("customer_advances"), metrics.get("cogs"), 365)
-
-    if all(value is None for value in [dso, dio, prepaid_days, dpo, advance_days]):
+    days = [
+        _days(metrics, "accounts_receivable", "net_revenue"),
+        _days(metrics, "inventory", "cogs"),
+        _days(metrics, "prepaid_suppliers", "net_revenue"),
+        _days(metrics, "accounts_payable", "cogs"),
+        _days(metrics, "customer_advances", "cogs"),
+    ]
+    if all(value is None for value in days):
         return None
-    return (
-        (dso or 0)
-        + (dio or 0)
-        + (prepaid_days or 0)
-        - (dpo or 0)
-        - (advance_days or 0)
-    )
+    dso, dio, prepaid, dpo, advance = (value or 0 for value in days)
+    return dso + dio + prepaid - dpo - advance
 
 
 def _format_number(value: float | None, unit: str) -> str:
@@ -1041,8 +904,6 @@ def _format_number(value: float | None, unit: str) -> str:
         return f"{value:.1f} ngày"
     if unit == "x":
         return f"{value:.2f}x"
-    # Monetary values ("value" unit): show in tỷ VNĐ, Vietnamese formatting
-    # ('.' thousands, ',' decimal). The unit is stated once in the block header.
-    scaled = value / 1_000_000_000
-    formatted = f"{scaled:,.2f}"
-    return formatted.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+    # Money: đồng in, tỷ VNĐ out, Vietnamese separators. The block header states
+    # the unit once so the figure itself carries none.
+    return format_vn_number(value / VND_PER_BILLION, 2)

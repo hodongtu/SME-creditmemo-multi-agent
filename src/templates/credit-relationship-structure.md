@@ -42,4 +42,3 @@
  
 ### 2.4 Diễn biến dư nợ - doanh thu VAT trong 12 tháng gần nhất (ngày báo cáo: {{NgayBaoCaoDuLieu}})
  
-*Nhận định*:

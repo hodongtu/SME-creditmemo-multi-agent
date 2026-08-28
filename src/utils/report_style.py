@@ -26,12 +26,21 @@ REPORT_CSS = f"""
     margin: 11mm 9mm 13mm 9mm;
     @bottom-center {{
         content: counter(page) " / " counter(pages);
+        /* A page margin box does not inherit from body, so without this the page
+           number printed in whatever the renderer defaults to — PT Serif here,
+           beside a report set in Times. */
+        font-family: "Times New Roman", Times, "Liberation Serif", serif;
         font-size: 8pt;
         color: #666;
     }}
 }}
 body {{
-    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    /* Serif, and named in full so WeasyPrint asks fontconfig for the real
+       face rather than falling back to whatever "serif" resolves to.
+       graph_svg.FONT_STACK must list the same families: it measures text
+       with them to size the diagram boxes, and measuring in one font while
+       printing in another leaves every box the wrong width. */
+    font-family: "Times New Roman", Times, "Liberation Serif", serif;
     font-size: 9.5pt;
     line-height: 1.4;
     margin: 0;
@@ -43,8 +52,8 @@ h4 {{ font-size: 10pt; margin: 8px 0 4px; }}
 p, li {{ margin: 4px 0; }}
 /* Flush with the body text, not stepped in from it. The user agent's default is
    padding-left: 40px, which put the bullet at 49.5pt and its text at 55.5pt
-   against 25.5pt for the paragraph above — the Nhận định block read as a
-   sub-level of the sentence introducing it rather than as its substance. 6pt is
+   against 25.5pt for the paragraph above — the commentary under each table
+   read as a sub-level of what came before it rather than as its substance. 6pt is
    the gap WeasyPrint leaves between an outside marker and the content box,
    measured off the PDF, so this lands the bullet on the body's left edge and
    keeps the hanging indent for the wrapped lines of a long bullet.
@@ -99,8 +108,18 @@ table.tbl-xwide th, table.tbl-xwide td {{ padding: 2px; letter-spacing: -0.1px; 
    reads as a sentence; the list at the end drops a size, as a reference
    apparatus rather than body text. */
 sup a.footnote-ref {{ font-size: 7pt; text-decoration: none; color: #2f6f9f; }}
-.footnote {{ font-size: 8pt; color: #333; page-break-inside: auto; }}
-.footnote hr {{ border: none; border-top: 1px solid #999; margin: 10px 0 5px; }}
+.footnote {{
+    font-size: 8pt; color: #333; page-break-inside: auto;
+    /* The margin the <hr> used to carry, kept now that it is gone so the block
+       does not ride up against the last line of the report. */
+    margin-top: 10px;
+}}
+/* markdown's footnotes extension opens the block with its own <hr>. The
+   footnotes are already set apart by size, colour and position, so the rule was
+   a second divider doing the same job. Hidden rather than restyled — the
+   extension emits it either way, and display:none is honoured here: the PDF
+   comes back with zero drawings on the page. */
+.footnote hr {{ display: none; }}
 .footnote ol {{ margin: 0 0 0 16px; padding: 0; }}
 .footnote li {{ margin: 1px 0; page-break-inside: avoid; }}
 .footnote li p {{ margin: 0; }}

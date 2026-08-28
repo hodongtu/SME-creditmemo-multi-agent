@@ -1,23 +1,10 @@
-"""Formatting helpers for underwriting report output.
-
-Converts raw Vietnamese-đồng monetary figures into billions (tỷ VNĐ) with 2
-decimals and Vietnamese number formatting (``.`` thousands, ``,`` decimal), e.g.
-``3.991.124.661.120`` -> ``3.991,12 tỷ VNĐ``.
-"""
-
-from __future__ import annotations
-
+"""Formatting helpers for underwriting report output."""
 import re
 
 VND_PER_BILLION = 1_000_000_000
 
-# Grouped integer amounts only: at least one thousands group of exactly 3 digits.
-# This deliberately does NOT match contiguous digit runs (tax/registration codes
-# like "0104498100"), 4-digit years, or decimals such as "8.8".
 _AMOUNT_TOKEN = re.compile(r"[+-]?\d{1,3}(?:[.,]\d{3})+(?![\d.,])")
-# Optional trailing currency word to absorb into the replacement.
 _TRAILING_CURRENCY = re.compile(r"\s*(?:VN[ĐD]|đồng|VND)\b", re.IGNORECASE)
-# Units that mean the number is already scaled — never re-convert these.
 _ALREADY_SCALED = re.compile(r"^\s*(?:tỷ|triệu|nghìn\s+tỷ|ngàn\s+tỷ)\b", re.IGNORECASE)
 
 
@@ -45,8 +32,6 @@ def _parse_grouped_amount(token: str) -> float | None:
         else:
             text = text.replace(",", "")
     else:
-        # Only one separator kind present, and (by the token regex) it groups
-        # thousands — strip it regardless of which symbol was used.
         text = text.replace(".", "").replace(",", "")
 
     try:
@@ -65,8 +50,6 @@ def convert_amounts_in_text(text: str, decimals: int = 2) -> str:
     if not text:
         return text
 
-    # A trailing "VNĐ"/"đồng" must be swallowed together with the number, which
-    # re.sub cannot do cleanly, so scan and rebuild manually.
     result = []
     cursor = 0
     for match in _AMOUNT_TOKEN.finditer(text):

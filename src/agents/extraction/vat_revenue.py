@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 
-from src.agents.cic_s10a_extraction import normalize_month_label
+from src.agents.extraction.cic_s10a_extraction import normalize_month_label
 
 VAT_BLOCK_FENCE = "vat-doanh-thu"
 

@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import re
 
+from src.utils.common import CODE_FENCE as _FENCE
+
 _LIST_MARKER = re.compile(r"^\s*([-*+]|\d+[.)])\s+\S")
-_FENCE = re.compile(r"^\s*(```|~~~)")
 
 # "8,00%" and "8.0%" -> "8%". Only when every decimal digit is zero: "35,20%"
 # keeps its digits, because dropping a trailing zero after a significant one is
@@ -31,8 +32,10 @@ def ensure_blank_line_before_lists(text: str) -> str:
     line above it is lazy continuation of the previous paragraph whenever that
     line is non-blank, non-list text — the marker renders as a literal
     character inside the ``<p>``, not as a ``<ul>``/``<ol>``. Confirmed with
-    "**Nhận định**: ...\\n- điểm 1" rendering with a bare hyphen, and the same
-    block with a blank line inserted rendering as a real list.
+    a label line followed straight by "- điểm 1" rendering with a bare hyphen,
+    and the same block with a blank line inserted rendering as a real list. The
+    reports no longer print that label, but the failure is about any non-blank
+    line above a list, and a table row is one.
 
     A no-op on a list that already follows a blank line or another list item,
     and on anything inside a fenced code block.

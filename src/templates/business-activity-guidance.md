@@ -29,7 +29,7 @@ description: >-
     - Nhãn trên MŨI TÊN (dạng `-->|nhãn|`) TỐI ĐA 10 TỪ. Nó chú thích một mũi tên;
   dài hơn thì nhãn cao hơn cả sợi dây và át mất sơ đồ. Viết "trả chậm 30 ngày",
   không viết "thanh toán trong vòng 30 ngày kể từ ngày nghiệm thu". Chi tiết đầy
-  đủ để ở bảng hoặc phần Nhận định.
+  đủ để ở bảng hoặc phần bình luận.
     - Tỷ trọng trên dây nối làm tròn như mọi chỗ khác (xem NGUYÊN TẮC CHUNG):
   `35,2%`, và `8%` chứ không `8,0%`. Số trên dây nối phải khớp cột Tỷ trọng của bảng,
   kể cả cách làm tròn — hai chỗ lệch nhau là mâu thuẫn trong cùng một trang.

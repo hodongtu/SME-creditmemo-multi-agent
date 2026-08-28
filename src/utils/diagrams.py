@@ -1,20 +1,4 @@
-"""Parse Mermaid flowcharts and draw them so they survive PDF export.
-
-The agents emit ```mermaid blocks because that renders natively on GitHub and in
-VS Code. WeasyPrint has no JavaScript, so a mermaid block would reach the PDF as
-a raw ``<pre><code>`` dump.
-
-Parsing lives here; drawing is ``graph_svg.render_svg``. Flex-box was tried first
-and lost on measurement: it cannot draw a hub once and connect it to several
-spokes, so every partner diagram came out with arrows pointing at blank page. The
-CSS that remains covers only the two cases with no layout to compute — a chart
-with no edges at all, and the last-resort row-per-edge fallback.
-
-Anything this parser cannot read is left as the original mermaid block rather
-than dropped, so content is never lost.
-"""
-
-from __future__ import annotations
+"""Parse Mermaid flowcharts and draw them so they survive PDF export."""
 
 import html
 import re

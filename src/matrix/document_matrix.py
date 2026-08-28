@@ -1,18 +1,4 @@
-"""Loader for the document routing matrix (src/matrix/document_matrix.yaml).
-
-The matrix is the single source of truth for "which agents consume which kind of
-document". Classification only has to answer the *objective* question — what
-kind of document is this — and the matrix turns that answer into the agent
-fan-out. Before this, keyword scores were aimed straight at agents, which made
-the fan-out an emergent property of two threshold constants instead of a
-business decision.
-
-Everything is validated at load time and raises DocumentMatrixError on the first
-problem: a silently mis-parsed matrix would drop documents from an agent's
-evidence without any visible failure.
-"""
-
-from __future__ import annotations
+"""Loader for the document routing matrix (src/matrix/document_matrix.yaml)."""
 
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -22,28 +8,21 @@ from typing import Any
 import yaml
 
 from src.types import SPECIALIST_DOCUMENT_AGENTS
-from src.utils.common import normalize_text
 
 
 MATRIX_PATH = Path(__file__).resolve().parent / "document_matrix.yaml"
 
 RELEVANCE_LEVELS = ("R", "O")
+DEFAULT_LOAN_PROGRAM = "PLO"
 
-# Used only to pick a display "primary" agent when a document type's own agent
-# set does not contain its group's primary_agent (e.g. the business
-# registration certificate routes to RISK only). Most specific consumer first.
 PRIMARY_AGENT_PRECEDENCE = (
     "CREDIT_PROPOSAL_AGENT",
     "CREDIT_RELATIONSHIP_AGENT",
     "FINANCIAL_ANALYSIS_AGENT",
     "BUSINESS_ACTIVITY_AGENT",
-    "RISK_ASSESSMENT_AGENT",
 )
 
-# Ranked so "strongest wins" comparisons stay explicit rather than relying on
-# string ordering ("O" < "R" is true but accidental).
 _LEVEL_RANK = {"O": 1, "R": 2}
-
 
 class DocumentMatrixError(RuntimeError):
     """Raised when the matrix file is missing, malformed, or inconsistent."""
@@ -56,47 +35,23 @@ class DocumentType:
     id: str
     stt: str
     label: str
-    # A caption for the reader of a finished report. `label` cannot serve: it is
-    # the regulatory sentence from the checklist ("Tờ khai thuế GTGT năm gần nhất
-    # và của các tháng/quý liền kề..."), which is what the document must satisfy,
-    # not what it is called. Falls back to `label` when the YAML omits it, so a
-    # new type is never nameless — only verbose.
     short_label: str
     group_id: str
     group_stt: str
     group_label: str
     keywords: tuple[str, ...]
-    # {agent: {loan_program: "R"|"O"}} — always fully expanded across programs,
-    # so callers never have to know whether the YAML used the scalar shorthand.
     agents: dict[str, dict[str, str]]
     primary_agent: str
     requirement: dict[str, str] = field(default_factory=dict)
-    bctc_extraction: bool = False
+    financial_statement_extraction: bool = False
     proposal_extraction: bool = False
-    # Named after the CIC form code, not "cic": CIC issues several unrelated
-    # reports against one customer and they share only a letterhead, so the
-    # collateral report gets its own flag rather than widening this one.
     cic_s10a_extraction: bool = False
-    # The collateral report. Printed form code is actually "R20"; kept the
-    # "r21" name the module was already registered under rather than rename
-    # mid-project — the flag name is internal, only the matrix YAML key and the
-    # Python module need to agree with each other.
     cic_r21_extraction: bool = False
-    # The site-visit report. Unlike the four above it is not a form with fixed
-    # boxes — it is written prose — so the pass pulls out the parts that are
-    # facts about the business (industry, GSO code, main products, who it buys
-    # from and sells to, next year's plan) and keeps the officer's own verdict
-    # in a block of its own, labelled as opinion.
     sitevisit_extraction: bool = False
 
     @property
     def routing_signature(self) -> frozenset[str]:
-        """The set of agents this type feeds, ignoring R/O and loan program.
-
-        Two types with the same signature are interchangeable as far as routing
-        is concerned, so confusing one for the other costs nothing.
-        """
-
+        """The set of agents this type feeds, ignoring R/O and loan program."""
         return frozenset(self.agents)
 
 
@@ -105,17 +60,19 @@ class DocumentMatrix:
     version: int
     loan_programs: tuple[str, ...]
     loan_program_labels: dict[str, str]
-    # {normalized alias: loan program id} — how a user might name each program
-    # in a prompt. Normalized at load so detection never re-does the work.
-    loan_program_aliases: dict[str, str]
     types: dict[str, DocumentType]
-
-    def get(self, type_id: str) -> DocumentType | None:
-        return self.types.get(type_id)
 
 
 def _fail(message: str) -> None:
     raise DocumentMatrixError(f"{MATRIX_PATH.name}: {message}")
+
+
+def _need(value: Any, kind: type, message: str) -> Any:
+    """Return `value`, or refuse it for being absent, wrong-typed, or empty."""
+
+    if not isinstance(value, kind) or not value:
+        _fail(message)
+    return value
 
 
 def _parse_agents(
@@ -129,10 +86,18 @@ def _parse_agents(
     per-program map. A partial map is rejected rather than back-filled: the
     whole point of splitting the four programs is that a future divergence must
     be stated, not guessed.
+
+    An EMPTY mapping is allowed and means "no specialist consumes this type".
+    That is not the same as deleting the type: the document is still recognised,
+    still named correctly in the source list, and still counts toward the upload
+    box it was filed in — it simply is not fed to anyone. Collateral documents
+    sit here now that risk assessment is gone.
     """
 
-    if not isinstance(raw, dict) or not raw:
-        _fail(f"{where}: 'agents' must be a non-empty mapping")
+    if raw is None or raw == {}:
+        return {}
+    if not isinstance(raw, dict):
+        _fail(f"{where}: 'agents' must be a mapping")
 
     agents: dict[str, dict[str, str]] = {}
     for agent, value in raw.items():
@@ -177,12 +142,7 @@ def _resolve_primary_agent(
     agents: dict[str, dict[str, str]],
     where: str,
 ) -> str:
-    """Pick the agent this document type is displayed as belonging to.
-
-    The group's primary_agent wins when it actually consumes the type; otherwise
-    fall back to precedence order over the type's own agents, preferring an
-    agent that requires the document over one that merely may use it.
-    """
+    """Pick the agent this document type is displayed as belonging to."""
 
     if declared:
         if declared not in SPECIALIST_DOCUMENT_AGENTS:
@@ -197,7 +157,9 @@ def _resolve_primary_agent(
                 return agent
         return None
 
-    return _pick("R") or _pick("O") or sorted(agents)[0]
+    # "" when nothing consumes the type. The caller turns that into
+    # GENERAL_CONTEXT, which is where an unconsumed document belongs.
+    return _pick("R") or _pick("O") or (sorted(agents)[0] if agents else "")
 
 
 def _load(path: Path) -> DocumentMatrix:
@@ -207,87 +169,62 @@ def _load(path: Path) -> DocumentMatrix:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         raise DocumentMatrixError(f"{path.name}: invalid YAML: {exc}") from exc
-    if not isinstance(raw, dict):
-        _fail("top level must be a mapping")
+    _need(raw, dict, "top level must be a mapping")
 
     version = raw.get("version")
     if not isinstance(version, int):
         _fail("'version' must be an integer")
 
-    raw_programs = raw.get("loan_programs")
-    if not isinstance(raw_programs, list) or not raw_programs:
-        _fail("'loan_programs' must be a non-empty list")
+    raw_programs = _need(raw.get("loan_programs"), list,
+                         "'loan_programs' must be a non-empty list")
     programs: list[str] = []
     program_labels: dict[str, str] = {}
-    program_aliases: dict[str, str] = {}
     for entry in raw_programs:
-        if not isinstance(entry, dict) or not entry.get("id"):
-            _fail("each loan_programs entry needs an 'id'")
+        _need(entry, dict, "each loan_programs entry must be a mapping")
+        _need(entry.get("id"), str, "each loan_programs entry needs an 'id'")
         program_id = str(entry["id"])
         if program_id in program_labels:
             _fail(f"duplicate loan program id {program_id!r}")
         programs.append(program_id)
-        label = str(entry.get("label") or program_id)
-        program_labels[program_id] = label
-        # The id and label are always recognised; `aliases` only adds to them.
-        raw_aliases = entry.get("aliases") or []
-        if not isinstance(raw_aliases, list):
-            _fail(f"loan program {program_id!r}: 'aliases' must be a list")
-        for alias in [program_id, label, *raw_aliases]:
-            normalized = normalize_text(str(alias))
-            if not normalized:
-                _fail(
-                    f"loan program {program_id!r}: alias {alias!r} normalizes to "
-                    "nothing — it can never match"
-                )
-            owner = program_aliases.get(normalized)
-            if owner and owner != program_id:
-                # Two programs answering to the same words would make detection
-                # a coin flip, so refuse to load rather than pick one.
-                _fail(
-                    f"alias {alias!r} (normalized {normalized!r}) is claimed by "
-                    f"both {owner!r} and {program_id!r}"
-                )
-            program_aliases[normalized] = program_id
+        program_labels[program_id] = str(entry.get("label") or program_id)
 
-    raw_groups = raw.get("groups")
-    if not isinstance(raw_groups, list) or not raw_groups:
-        _fail("'groups' must be a non-empty list")
+    if DEFAULT_LOAN_PROGRAM not in programs:
+        # A constant naming a programme the matrix no longer declares would
+        # route every case against a column that does not exist.
+        _fail(
+            f"DEFAULT_LOAN_PROGRAM {DEFAULT_LOAN_PROGRAM!r} is not one of "
+            f"{programs}"
+        )
+
+    raw_groups = _need(raw.get("groups"), list,
+                       "'groups' must be a non-empty list")
 
     types: dict[str, DocumentType] = {}
     group_ids: set[str] = set()
     for group in raw_groups:
-        if not isinstance(group, dict):
-            _fail("each group must be a mapping")
-        group_id = str(group.get("id") or "")
-        if not group_id:
-            _fail("each group needs an 'id'")
+        _need(group, dict, "each group must be a mapping")
+        group_id = str(_need(group.get("id"), str, "each group needs an 'id'"))
         if group_id in group_ids:
             _fail(f"duplicate group id {group_id!r}")
         group_ids.add(group_id)
 
-        raw_types = group.get("types")
-        if not isinstance(raw_types, list) or not raw_types:
-            _fail(f"group {group_id!r}: 'types' must be a non-empty list")
+        raw_types = _need(group.get("types"), list,
+                          f"group {group_id!r}: 'types' must be a non-empty list")
 
         for entry in raw_types:
-            if not isinstance(entry, dict):
-                _fail(f"group {group_id!r}: each type must be a mapping")
-            type_id = str(entry.get("id") or "")
-            if not type_id:
-                _fail(f"group {group_id!r}: a type is missing 'id'")
+            _need(entry, dict, f"group {group_id!r}: each type must be a mapping")
+            type_id = str(_need(entry.get("id"), str,
+                                f"group {group_id!r}: a type is missing 'id'"))
             if type_id in types:
                 _fail(f"duplicate document type id {type_id!r}")
             where = f"type {type_id!r}"
 
-            label = str(entry.get("label") or "").strip()
-            if not label:
-                _fail(f"{where}: 'label' is required")
+            label = str(_need(entry.get("label"), str,
+                              f"{where}: 'label' is required")).strip()
             short_label = str(entry.get("short_label") or "").strip() or label
 
-            raw_keywords = entry.get("keywords")
-            if not isinstance(raw_keywords, list) or not raw_keywords:
-                _fail(f"{where}: 'keywords' must be a non-empty list")
+            raw_keywords = _need(entry.get("keywords"), list,
+                                 f"{where}: 'keywords' must be a non-empty list")
             keywords: list[str] = []
             for keyword in raw_keywords:
                 text = str(keyword).strip()
@@ -321,7 +258,7 @@ def _load(path: Path) -> DocumentMatrix:
                     str(key): str(value or "")
                     for key, value in requirement.items()
                 },
-                bctc_extraction=bool(entry.get("bctc_extraction", False)),
+                financial_statement_extraction=bool(entry.get("financial_statement_extraction", False)),
                 proposal_extraction=bool(
                     entry.get("proposal_extraction", False)
                 ),
@@ -342,7 +279,6 @@ def _load(path: Path) -> DocumentMatrix:
         version=version,
         loan_programs=tuple(programs),
         loan_program_labels=program_labels,
-        loan_program_aliases=program_aliases,
         types=types,
     )
 
@@ -354,38 +290,34 @@ def load_matrix() -> DocumentMatrix:
     return _load(MATRIX_PATH)
 
 
-def reload_matrix() -> DocumentMatrix:
-    """Drop the cache and re-read the file (for tests / notebook iteration)."""
-
-    load_matrix.cache_clear()
-    return load_matrix()
-
-
-def all_types() -> dict[str, DocumentType]:
-    return load_matrix().types
-
-
 def get_type(type_id: str) -> DocumentType | None:
-    return load_matrix().get(type_id)
+    return load_matrix().types.get(type_id)
 
 
 def document_type_keywords() -> dict[str, tuple[str, ...]]:
     """{document_type_id: keywords} — the input to rule-based classification."""
 
-    return {type_id: doc.keywords for type_id, doc in all_types().items()}
+    return {type_id: doc.keywords for type_id, doc in load_matrix().types.items()}
+
+
+def resolve_loan_program(loan_program: str = "") -> str:
+    """The programme whose column of the matrix a case is read against."""
+
+    if not loan_program:
+        return DEFAULT_LOAN_PROGRAM
+    if loan_program not in load_matrix().loan_programs:
+        raise DocumentMatrixError(
+            f"unknown loan program {loan_program!r}; expected one of "
+            f"{list(load_matrix().loan_programs)}"
+        )
+    return loan_program
 
 
 def agent_relevance_for_type(
     type_id: str,
     loan_program: str | None = None,
 ) -> dict[str, str]:
-    """Return {agent: "R"|"O"} for a document type.
-
-    ``loan_program=None`` resolves to the strongest level across every program.
-    The system has no loan-program input yet, and taking the strongest level
-    means an unknown program can only over-prioritise a document, never quietly
-    demote real evidence.
-    """
+    """Return {agent: "R"|"O"} for a document type."""
 
     doc = get_type(type_id)
     if doc is None:
@@ -410,11 +342,11 @@ def primary_agent_for_type(type_id: str) -> str | None:
     return doc.primary_agent if doc else None
 
 
-def is_bctc_type(type_id: str) -> bool:
+def is_financial_statement_type(type_id: str) -> bool:
     """True when this document type should go through structured BCTC extraction."""
 
     doc = get_type(type_id)
-    return bool(doc and doc.bctc_extraction)
+    return bool(doc and doc.financial_statement_extraction)
 
 
 def is_proposal_type(type_id: str) -> bool:
@@ -445,12 +377,7 @@ def is_sitevisit_type(type_id: str) -> bool:
     return bool(doc and doc.sitevisit_extraction)
 
 
-def routing_signature(type_id: str) -> frozenset[str]:
-    doc = get_type(type_id)
-    return doc.routing_signature if doc else frozenset()
-
-
-def describe_types_for_prompt() -> str:
+def describe_types_for_prompt(group_id: str = "") -> str:
     """Render the type catalogue for the classifier LLM prompt.
 
     Built from the matrix so the prompt can never list a type the matrix does
@@ -459,7 +386,9 @@ def describe_types_for_prompt() -> str:
 
     lines: list[str] = []
     current_group: str | None = None
-    for doc in all_types().values():
+    for doc in load_matrix().types.values():
+        if group_id and doc.group_id != group_id:
+            continue
         if doc.group_id != current_group:
             current_group = doc.group_id
             lines.append(f"\n{doc.group_stt}. {doc.group_label}")

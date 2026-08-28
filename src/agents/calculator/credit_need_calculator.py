@@ -1,24 +1,4 @@
-"""Deterministic credit-need table for the Credit Proposal agent.
-
-The proposal's core is arithmetic: how much working capital the cash cycle ties
-up, how much of it the customer already funds, and what is left to lend. Left to
-the model those figures are 25 chances to produce a plausible wrong number, so
-they are computed here and handed over as data — the same division of labour
-``FinancialRatioCalculator`` already has for the ratios.
-
-Two things drive the design.
-
-**Every row records where it came from.** A real credit application carries next
-year's revenue but almost never the guarantee mix or the LC terms, so most of the
-guarantee and LC rows run on policy defaults. A reviewer reading "83,4 tỷ đồng
-bảo lãnh" must be able to see at a glance whether that came off the customer's
-paperwork or out of a default table — printing both the same way would be
-presenting an assumption as evidence.
-
-**The planning year falls back down a chain.** Credit application first, then the
-site-visit report, then last year's statements. Each rung is a weaker claim than
-the one above it, and the source flag says which rung was used.
-"""
+"""Deterministic credit-need table for the Credit Proposal agent"""
 
 from __future__ import annotations
 
@@ -29,7 +9,6 @@ from src.utils.common import normalize_text
 
 DAYS_PER_YEAR = 365
 
-# Source labels. Ordered strongest to weakest as evidence.
 SRC_STATEMENTS = "BCTC"
 SRC_PROPOSAL = "đề nghị"
 SRC_SURVEY = "khảo sát"
@@ -37,46 +16,26 @@ SRC_CIC = "CIC"
 SRC_DERIVED = "tính toán"
 SRC_DEFAULT = "mặc định"
 
-# Last-resort stand-in for the value of contracts needing a guarantee, used only
-# when neither a contract plan nor a growth rate is available.
+GUARANTEE_NAME_MARKER = "bao lanh"
 GUARANTEE_REVENUE_RATIO = 0.30
-
-# (label, share of guarantee turnover, average days outstanding, name keys).
-# The shares are policy defaults, used per type only when the credit
-# application does not name that facility. The keys match a facility name in
-# ``credit_request.facilities``, which is free text the extraction copies off
-# the form.
 GUARANTEE_TYPES: tuple[tuple[str, float, int, tuple[str, ...]], ...] = (
     ("Bảo lãnh dự thầu", 0.05, 90, ("du thau",)),
-    # "thuc hien" rather than "thuc hien hop dong": forms shorten it to
-    # "thực hiện HĐ" about as often as they write it out.
     ("Bảo lãnh thực hiện hợp đồng", 0.10, 120, ("thuc hien",)),
     ("Bảo lãnh tạm ứng", 0.30, 90, ("tam ung",)),
     ("Bảo lãnh bảo hành", 0.05, 360, ("bao hanh",)),
     ("Bảo lãnh thanh toán/thuế", 0.30, 90, ("thanh toan", "thue")),
 )
 
-# A facility only counts as a guarantee if its name says so. Without this gate
-# a limit called "Hạn mức thanh toán quốc tế" would be booked as a payment
-# guarantee purely because it contains "thanh toán".
-GUARANTEE_NAME_MARKER = "bao lanh"
-
-# Tokens that mark a letter-of-credit facility. Matched on whole tokens: "L/C"
-# normalises to the two tokens "l" and "c", and looking for the substring "lc"
-# instead would fire inside unrelated words.
 LC_NAME_TOKENS = ("lc",)
 LC_NAME_PHRASES = ("thu tin dung", "tin dung chung tu")
-
-# Import ratio belongs in the 331 payables ledger (foreign suppliers' credit
-# turnover over the period's total). No extraction pass reads that ledger yet,
-# so it falls back to this and the row says so.
-IMPORT_RATIO_DEFAULT = 0.50
-# Of what is imported, the share settled by letter of credit.
-LC_SHARE_OF_IMPORT_DEFAULT = 0.50
-LC_SIGHT_SHARE_DEFAULT = 0.50
-LC_DEFERRED_SHARE_DEFAULT = 0.50
-LC_SIGHT_DAYS_DEFAULT = 30
-LC_DEFERRED_DAYS_DEFAULT = 180
+LC_ASSUMPTIONS: tuple[tuple[str, float], ...] = (
+    ("import_ratio", 0.50),
+    ("lc_share_of_import", 0.50),
+    ("sight_share", 0.50),
+    ("deferred_share", 0.50),
+    ("sight_days", 30),
+    ("deferred_days", 180),
+)
 
 
 @dataclass
@@ -91,15 +50,7 @@ class Row:
     note: str = ""
 
     def __post_init__(self) -> None:
-        """Round both years to two decimals.
-
-        Done here rather than in ``as_dict`` so the JSON export and the report
-        block round identically — they read the row directly and would otherwise
-        disagree in the last digits. Two decimals is the floor for every unit the
-        table uses: đồng has no smaller part, and days and percentages are not
-        measured finer than that either. What is being cut is float noise from
-        the divisions, not precision anyone can act on.
-        """
+        """Round both years to two decimals."""
 
         for attr in ("latest", "plan"):
             value = getattr(self, attr)
@@ -148,13 +99,7 @@ def _div(numerator: float | None, denominator: float | None) -> float | None:
 
 
 def total_other_lender_debt(cic_extractions: list[dict[str, Any]]) -> float | None:
-    """Outstanding balance across other credit institutions, from CIC S10A.
-
-    Section 2.1 lists one block per institution, and each block may carry both
-    per-facility lines *and* a "Tổng cộng" line. Summing everything would count
-    those institutions twice, so a total line wins for its own institution and
-    the detail lines are only added where no total was printed.
-    """
+    """Outstanding balance across other credit institutions, from CIC S10A."""
 
     per_lender: dict[str, dict[str, float]] = {}
     for extraction in cic_extractions:
@@ -166,8 +111,6 @@ def total_other_lender_debt(cic_extractions: list[dict[str, Any]]) -> float | No
                 continue
             lender = str(row.get("tctd") or "").strip() or "(không rõ TCTD)"
             bucket = per_lender.setdefault(lender, {"total": 0.0, "details": 0.0})
-            # normalize_text strips the diacritics, so "Tổng cộng", "TỔNG CỘNG"
-            # and an OCR pass that dropped the marks all match the same way.
             if "tong cong" in normalize_text(str(row.get("khoan_muc") or "")):
                 bucket["total"] = max(bucket["total"], amount)
             else:
@@ -198,11 +141,7 @@ def _facilities(proposal: dict[str, Any] | None) -> list[tuple[str, float]]:
 
 
 def _is_lc_name(name: str) -> bool:
-    """True when a facility name denotes a letter of credit.
-
-    Whole tokens, not substrings: "L/C" normalises to the two tokens "l" and
-    "c", and searching for "lc" inside the string would fire on unrelated words.
-    """
+    """True when a facility name denotes a letter of credit."""
 
     tokens = name.split()
     return (
@@ -248,12 +187,7 @@ def lc_turnover_from_file(proposal: dict[str, Any] | None) -> float | None:
 
 
 def planned_contract_value(proposal: dict[str, Any] | None) -> float | None:
-    """Total value the application plans to execute next year, or None.
-
-    Section B of the form lists contracts already signed with a "giá trị dự kiến
-    thực hiện năm kế hoạch" column; that total is the closest thing the file has
-    to the value of work needing a guarantee.
-    """
+    """Total value the application plans to execute next year, or None."""
 
     block = (proposal or {}).get("business_plan")
     if not isinstance(block, dict):
@@ -287,23 +221,13 @@ def _pick(
 
 
 def requested_sections(proposal: dict[str, Any] | None) -> dict[str, bool]:
-    """Which of the three blocks the credit application actually asks for.
-
-    The bank's rule is to drop a block the customer raised no need for. Read off
-    the facility list rather than guessed: a form asking only for a working
-    capital limit should not be answered with a page of guarantee estimates.
-
-    With no application at all every block stays on — there is nothing saying
-    the customer does not need them, and silently emitting an empty table would
-    read as a system fault rather than an absence of demand.
-    """
+    """Which of the three blocks the credit application actually asks for."""
 
     names = [name for name, _amount in _facilities(proposal)]
     if not names:
         return {"loan": True, "guarantee": True, "lc": True, "stated": False}
     guarantee = any(GUARANTEE_NAME_MARKER in name for name in names)
     lc = lc_turnover_from_file(proposal) is not None
-    # Anything that is neither a guarantee nor an LC is a funded facility.
     loan = any(
         GUARANTEE_NAME_MARKER not in name
         and not _is_lc_name(name)
@@ -357,7 +281,6 @@ def build_credit_need_table(
     ratios = (yearly_ratios or {}).get(latest_year) or {}
     table.latest_year = latest_year
 
-    # --- planning-year revenue and COGS, down the fallback chain ------------
     revenue_latest = _num(metrics.get("net_revenue"))
     cogs_latest = _num(metrics.get("cogs"))
 
@@ -374,15 +297,10 @@ def build_credit_need_table(
         cogs_latest,
     )
 
-    # Same fallback order as the figures themselves, so the column heading names
-    # the year the numbers under it actually belong to.
     year_sources = (
         ((proposal_extraction or {}).get("business_plan"), "plan_year"),
         ((sitevisit_extraction or {}).get("business_plan_next_year"), "year"),
     )
-    # Rendered in the same shape the statement years already come in ("Năm
-    # 2025"), because the two sit side by side as column headings and a bare
-    # "2026" next to "Năm 2025" reads as a mistake.
     table.plan_year = "Năm kế hoạch"
     for block, key in year_sources:
         if isinstance(block, dict) and str(block.get(key) or "").strip():
@@ -443,9 +361,6 @@ def build_credit_need_table(
     add(Row("Nhu cầu vốn vay", "VNĐ", loan_latest, loan_plan, SRC_DERIVED, note))
 
     # --- guarantees: planning year only, per type ---------------------------
-    # The fallback runs per line, not per document: a form naming only a bid
-    # bond puts that one on the customer's figure and leaves the other four on
-    # the policy share, each carrying its own source flag.
     stated_guarantees = guarantee_turnover_from_file(proposal_extraction)
     # Contract value needing a guarantee, down the three tiers the bank states.
     contract_value = planned_contract_value(proposal_extraction)
@@ -470,9 +385,6 @@ def build_credit_need_table(
         for label, share, days, _keys in GUARANTEE_TYPES:
             stated = stated_guarantees.get(label)
             if stated is not None:
-                # The form states a limit while the row is an average balance,
-                # so the stated amount goes through the same tenor conversion
-                # rather than being dropped in as-is.
                 add(Row(label, "VNĐ", None, _balance(stated, 1.0, days),
                         SRC_PROPOSAL, f"Hạn mức đề nghị / (365 / {days} ngày)"))
             else:
@@ -482,21 +394,16 @@ def build_credit_need_table(
 
     # --- LC: planning year only, based on projected COGS ---------------------
     if show_lc:
-        import_ratio, import_src = _pick(
-            _survey_lc(sitevisit_extraction, "import_ratio"), IMPORT_RATIO_DEFAULT)
-        lc_share, lc_share_src = _pick(
-            _survey_lc(sitevisit_extraction, "lc_share_of_import"),
-            LC_SHARE_OF_IMPORT_DEFAULT)
-        sight_share, sight_share_src = _pick(
-            _survey_lc(sitevisit_extraction, "sight_share"), LC_SIGHT_SHARE_DEFAULT)
-        deferred_share, deferred_share_src = _pick(
-            _survey_lc(sitevisit_extraction, "deferred_share"),
-            LC_DEFERRED_SHARE_DEFAULT)
-        sight_days, sight_days_src = _pick(
-            _survey_lc(sitevisit_extraction, "sight_days"), LC_SIGHT_DAYS_DEFAULT)
-        deferred_days, deferred_days_src = _pick(
-            _survey_lc(sitevisit_extraction, "deferred_days"),
-            LC_DEFERRED_DAYS_DEFAULT)
+        assumed = {
+            key: _pick(_survey_lc(sitevisit_extraction, key), default)
+            for key, default in LC_ASSUMPTIONS
+        }
+        import_ratio, import_src = assumed["import_ratio"]
+        lc_share, lc_share_src = assumed["lc_share_of_import"]
+        sight_share, sight_share_src = assumed["sight_share"]
+        deferred_share, deferred_share_src = assumed["deferred_share"]
+        sight_days, sight_days_src = assumed["sight_days"]
+        deferred_days, deferred_days_src = assumed["deferred_days"]
 
         add(Row("Tỷ lệ nhập khẩu", "%", None, import_ratio * 100, import_src,
                 "Nguồn chuẩn là sổ chi tiết 331 (phát sinh có của NCC nước ngoài "
@@ -544,11 +451,6 @@ def build_credit_need_table(
                 + " và ".join(dropped)
                 + " — đã bỏ phần này khỏi bảng."
             )
-    # Backstop for a unit failure nobody anticipated. The two fixes upstream
-    # only catch the spellings they know about, and getting this wrong is a
-    # factor of a thousand or more — large enough that no real business swings
-    # that far year to year, so a gap this size means the source figure was
-    # never scaled rather than that the customer collapsed.
     if revenue_latest and revenue_plan:
         ratio = revenue_plan / revenue_latest
         if ratio < 0.01 or ratio > 100:
@@ -587,13 +489,7 @@ def _residual(
     equity: float | None,
     other: float | None,
 ) -> float | None:
-    """Loan need = cycle need − equity funding − other lenders.
-
-    A missing component counts as zero rather than voiding the row: the customer
-    with no CIC record genuinely has no other-lender debt to subtract, and
-    blanking the whole line would hide the number the proposal is about. The
-    caller warns separately when CIC data was absent.
-    """
+    """Loan need = cycle need − equity funding − other lenders."""
 
     if need is None:
         return None

@@ -35,7 +35,6 @@ flowchart LR
   R5 --> SR5[{{SanPhamDauRa5}}]
 ```
  
-*Nhận định*:
  
 ## 2. Lĩnh vực kinh doanh và sản phẩm
  
@@ -44,7 +43,6 @@ flowchart LR
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 ## 3. Đầu ra
  
@@ -53,7 +51,6 @@ flowchart LR
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 ## 4. Đầu vào
  
@@ -62,7 +59,6 @@ flowchart LR
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 ## 5. Quy trình vận hành
  
@@ -73,7 +69,6 @@ flowchart LR
  
 ## 6. Kết luận
  
-*Nhận định*:
  
 *Ưu điểm*:
  
