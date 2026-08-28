@@ -21,6 +21,14 @@ def build_llm(
     """Build one ChatOpenAI client from environment variables."""
 
     model = os.getenv(model_env, "")
+    # An unset variable used to become model="", which the API answers with
+    # "you must provide a model parameter" — a 400 raised mid-run, per document,
+    # naming nothing. Say which variable is missing, before any call is made.
+    if not model:
+        raise ValueError(
+            f"{model_env} is not set; add it to .env or point this pass at a "
+            f"variable that is"
+        )
 
     kwargs = {
         "model": model,

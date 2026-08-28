@@ -7,7 +7,7 @@
 logs/
 
 # Customer data — never commit
-testing/samples/
+samples/
 
 # Internal docs
 docs/*
