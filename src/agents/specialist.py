@@ -1,8 +1,5 @@
 """Specialist agents + credit-memo composer (extracted from the notebook)."""
 
-from __future__ import annotations
-
-import re
 from typing import Any
 
 from langchain.agents import create_agent

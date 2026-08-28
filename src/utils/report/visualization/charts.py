@@ -15,14 +15,12 @@ two lines cross. Overlapping labels at a crossing are exactly the point where a
 reader most needs to tell the series apart.
 """
 
-from __future__ import annotations
-
 import html
 import math
 import re
 
-from src.utils.formatting import format_vn_number
-from src.utils.graph_svg import MIN_READABLE_FONT, PAGE_CONTENT_WIDTH
+from src.utils.report.formatting import format_vn_number
+from src.utils.report.visualization.graph_svg import MIN_READABLE_FONT, PAGE_CONTENT_WIDTH
 
 CHART_BLOCK = re.compile(
     r"^```linechart[ \t]*\n(.*?)^```[ \t]*$",

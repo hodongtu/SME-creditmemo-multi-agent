@@ -7,8 +7,6 @@ content hash + OCR config so re-runs of the notebook do not re-OCR the same
 document.
 """
 
-from __future__ import annotations
-
 import hashlib
 import json
 import os

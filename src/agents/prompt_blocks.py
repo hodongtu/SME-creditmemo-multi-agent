@@ -12,10 +12,10 @@ from src.agents.calculator.financial_ratio_calculator import (
 from src.matrix.document_matrix import get_type
 from src.types import ClassifiedDocument
 from src.agents.extraction.vat_revenue import merge_vat_series, parse_vat_revenue_block
-from src.utils.charts import build_linechart_block, pick_unit
-from src.utils.formatting import format_vn_number
-from src.utils.source_list import build_source_lines
-from src.utils.tax_xml import parse_tax_xml
+from src.utils.report.visualization.charts import build_linechart_block, pick_unit
+from src.utils.report.formatting import format_vn_number
+from src.utils.report.source_list import build_source_lines
+from src.utils.reading.tax_xml import parse_tax_xml
 
 
 def _vat_revenue_from_xml(

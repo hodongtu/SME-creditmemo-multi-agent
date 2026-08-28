@@ -9,7 +9,7 @@ import pandas as pd
 from openpyxl.utils import get_column_letter
 from pptx import Presentation
 
-from src.utils.ocr import ocr_pdf
+from src.utils.reading.ocr import ocr_pdf
 
 
 def extract_csv_text(

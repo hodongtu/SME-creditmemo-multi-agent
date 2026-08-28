@@ -23,8 +23,6 @@ Two rules follow from what that failure was:
   the matrix. Never a guess assembled from a filename.
 """
 
-from __future__ import annotations
-
 from src.matrix.document_matrix import get_type
 
 # The classifier is asked for at most twenty words. Anything longer is not

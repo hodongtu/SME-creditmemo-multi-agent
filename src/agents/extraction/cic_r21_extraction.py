@@ -1,7 +1,5 @@
 """LLM extraction of the CIC R20/R21 collateral report into structured JSON"""
 
-from __future__ import annotations
-
 from typing import Any
 
 from src.agents.extraction.structured_extraction import (

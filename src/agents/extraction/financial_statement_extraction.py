@@ -3,7 +3,7 @@
 import re
 from typing import Any
 
-from src.utils.tax_xml import parse_tax_xml
+from src.utils.reading.tax_xml import parse_tax_xml
 from src.agents.extraction.structured_extraction import (
     build_extraction_chain,
     resolve_money_multiplier,

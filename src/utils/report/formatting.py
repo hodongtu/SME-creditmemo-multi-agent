@@ -1,4 +1,5 @@
 """Formatting helpers for underwriting report output."""
+
 import re
 
 VND_PER_BILLION = 1_000_000_000

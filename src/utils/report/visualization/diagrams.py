@@ -4,7 +4,7 @@ import html
 import re
 from dataclasses import dataclass, replace
 
-from src.utils.graph_svg import render_svg
+from src.utils.report.visualization.graph_svg import render_svg
 
 MERMAID_BLOCK = re.compile(
     r"^```mermaid[ \t]*\n(.*?)^```[ \t]*$",

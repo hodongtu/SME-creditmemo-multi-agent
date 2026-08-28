@@ -6,11 +6,9 @@ whole document, ``tag_wide_tables`` marks each table with its column count so
 the stylesheet can step the font down only where it is needed.
 """
 
-from __future__ import annotations
-
 import re
 
-from src.utils.diagrams import DIAGRAM_CSS
+from src.utils.report.visualization.diagrams import DIAGRAM_CSS
 
 # Column thresholds at which a table gets a smaller font.
 WIDE_TABLE_COLUMNS = 7

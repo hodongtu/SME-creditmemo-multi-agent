@@ -1,12 +1,10 @@
 """Pre-compute financial ratios from FS structured-extraction JSON"""
 
-from __future__ import annotations
-
 import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from src.utils.formatting import VND_PER_BILLION, format_vn_number
+from src.utils.report.formatting import VND_PER_BILLION, format_vn_number
 from src.agents.extraction.financial_statement_extraction import (
     normalize_period_label,
     resolve_report_years,

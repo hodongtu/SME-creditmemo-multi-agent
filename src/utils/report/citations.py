@@ -44,8 +44,6 @@ first reference in the body.
 Pure text analysis — no LLM call.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 

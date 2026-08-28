@@ -9,17 +9,17 @@ from langgraph.graph import END, StateGraph
 
 from src.agents.calculator.financial_ratio_calculator import FinancialRatioCalculator
 from src.utils.common import normalize_text
-from src.utils.extractors import extract_document_text
-from src.utils.formatting import convert_amounts_in_text
-from src.utils.template_leak import check_template_leakage
-from src.utils.citations import (
+from src.utils.reading.extractors import extract_document_text
+from src.utils.report.formatting import convert_amounts_in_text
+from src.utils.report.template_leak import check_template_leakage
+from src.utils.report.citations import (
     AGENT_LABEL_PREFIXES,
     FootnoteAudit,
     consolidate_footnotes,
     format_footnote_findings,
     namespace_footnotes,
 )
-from src.utils.markdown_fixups import (
+from src.utils.report.markdown_fixups import (
     ensure_blank_line_before_lists,
     tidy_numbers,
 )

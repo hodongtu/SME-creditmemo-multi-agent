@@ -36,8 +36,6 @@ hold is reported rather than returned, because the likeliest cause is that the
 wrong block was read.
 """
 
-from __future__ import annotations
-
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field

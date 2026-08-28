@@ -1,9 +1,10 @@
 # SME Credit Memo — Multi-Agent Underwriting
 
 A **multi-agent** system for SME (small & medium enterprise) credit underwriting, built on
-**LangGraph**. It ingests customer files (financial statements, detailed ledgers, VAT
-declarations, bank statements…), then automatically runs OCR → document classification →
-specialist agents → and synthesizes a complete **Credit Memo**, with guardrails along the way.
+**LangGraph**. The upload screen supplies three things — the customer's files, which **flow** to
+run, and which **loan program** the customer is applying under — and the pipeline does the rest:
+OCR → document classification → evidence-gap check → structured extraction → one specialist
+agent → a formatted Vietnamese report.
 
 The entry point is the notebook [local_underwriting_agents.ipynb](local_underwriting_agents.ipynb);
 all agent logic lives in the importable package [src/](src/).
@@ -25,18 +26,20 @@ all agent logic lives in the importable package [src/](src/).
 
 ## Key Features
 
-- **Deterministic underwriting pipeline** via LangGraph: every step is a node, and routing is
-  decided by explicit rules (the LLM is not free to jump between steps).
+- **Deterministic pipeline** via LangGraph: every step is a node, and no LLM decides which step
+  runs next. The one branch in the graph is driven by the agent the user picked on screen.
 - **In-house OCR**: PDF → text using `pypdfium2` + Tesseract, with image preprocessing and caching.
-- **Automatic document classification**: rule-based keyword scoring, falling back to an LLM when
-  confidence is low — routes each document to the right agent.
-- **5 specialist agents** + **1 composer** that assembles the credit memo.
-- **Deterministic financial-ratio computation** (`FinancialRatioCalculator`) — figures are
-  computed in code, not "made up" by the LLM.
-- **Multi-layer guardrails**: input check and evidence-gap check.
-- **Web search enrichment** (optional, via Tavily) and **LangSmith tracing** (optional).
-- **Per-role models**: each task type (decision, analysis, memo composition, extraction…) is
-  bound to its own model, configured via environment variables.
+- **Document classification from the upload box down**: each of the six upload folders narrows the
+  candidate types before any keyword scoring happens, and an LLM is consulted only when the
+  keyword pass is genuinely unsure.
+- **4 specialist agents**, one per flow. Exactly one runs per request.
+- **Deterministic figures**: financial ratios (`FinancialRatioCalculator`) and the credit need
+  (`credit_need_calculator`) are computed in code and handed to the agent as data, not left for
+  the LLM to derive.
+- **Structured extraction gated by route**: five extraction passes exist; only the ones the chosen
+  agent actually reads are run, so a business-activity run costs a fraction of a proposal run.
+- **Evidence-gap check before spend**: a run missing its required documents stops and names them,
+  before a single extraction or analysis call is made.
 
 ---
 
@@ -44,18 +47,18 @@ all agent logic lives in the importable package [src/](src/).
 
 | Module | Role |
 |---|---|
-| [src/agents/supervisor.py](src/agents/supervisor.py) | **Orchestrator** — builds and runs the LangGraph, decides route + workflow mode |
-| [src/agents/document_classification.py](src/agents/document_classification.py) | Document discovery & classification (rule-based + LLM fallback) |
-| [src/matrix/document_matrix.py](src/matrix/document_matrix.py) | Loads `document_matrix.yaml` — which agents consume which document type |
-| [src/agents/specialist.py](src/agents/specialist.py) | The specialist agents + Credit Memo composer |
-| [src/agents/financial_ratio_calculator.py](src/agents/financial_ratio_calculator.py) | Deterministic financial-ratio computation |
-| [src/agents/guardrails.py](src/agents/guardrails.py) | Input/output safety guardrail, web search |
+| [src/agents/supervisor.py](src/agents/supervisor.py) | **Orchestrator** — builds and runs the LangGraph, prepares documents, gates extraction, finalizes the report |
+| [src/agents/documents/](src/agents/documents/) | File discovery (`document_discovery.py`) and keyword classification (`document_classification.py`) |
+| [src/matrix/document_matrix.py](src/matrix/document_matrix.py) | Loads `document_matrix.yaml` — which agents consume which document type, per loan program |
+| [src/agents/specialist.py](src/agents/specialist.py) | The four specialist agents |
+| [src/agents/prompt_blocks.py](src/agents/prompt_blocks.py) | Turns extracted JSON + computed figures into the labelled blocks an agent's prompt carries |
+| [src/agents/calculator/](src/agents/calculator/) | Deterministic financial ratios and credit-need computation |
+| [src/agents/extraction/](src/agents/extraction/) | The five structured-extraction passes (BCTC, proposal, CIC S10A, CIC R21, site visit) + VAT revenue parsing |
 | [src/config.py](src/config.py) | LLM client factory + runtime `Config` |
-| [src/agents/tools.py](src/agents/tools.py) | Database tools (T24, CIC/bureau…) attached to specialist agents |
-| [src/types.py](src/types.py) | Shared types (`AgentName`, `WorkflowMode`, `ClassifiedDocument`…) |
-| [src/agents/tracing.py](src/agents/tracing.py) | Wraps the workflow in a single LangSmith run (optional) |
-| [src/utils/](src/utils/) | OCR, document extraction, money formatting (đồng → tỷ VNĐ), notebook helpers |
-| [src/templates/](src/templates/) | Markdown output templates for each specialist agent |
+| [src/types.py](src/types.py) | Shared types (`AgentName`, `WorkflowMode`, `ClassifiedDocument`, `UnderwritingGraphState`…) |
+| [src/utils/reading/](src/utils/reading/) | OCR, PDF/CSV/XLSX extraction, tax-XML parsing |
+| [src/utils/report/](src/utils/report/) | Citations, money formatting (đồng → tỷ VNĐ), markdown repair, template-leak checks, and `visualization/` for charts, diagrams, HTML/PDF rendering |
+| [src/templates/](src/templates/) | Per-agent output structure + guidance Markdown |
 
 ---
 
@@ -63,128 +66,124 @@ all agent logic lives in the importable package [src/](src/).
 
 ### LangGraph diagram
 
-Every request flows through one deterministic `StateGraph`. The state passed between nodes is
-`UnderwritingGraphState` (query, documents, decision, execution plan, output…).
+Every request flows through one deterministic `StateGraph` of **8 nodes**. The state passed
+between nodes is `UnderwritingGraphState`.
 
 ```mermaid
 flowchart TD
-    START([Request]) --> A[prepare_input<br/>normalize query + conversation history]
-    A --> B[input_guardrail<br/>input safety check]
-    B -->|blocked| E1([END])
-    B -->|continue| C[discover_documents<br/>scan PDF/XLS/CSV/TXT/MD files]
-    C -->|out of scope: no docs, no analysis asked| E3([END])
-    C -->|continue| D[classify_documents<br/>OCR + classify → route documents]
-    D --> F[decide_workflow<br/>pick route + workflow_mode]
-    F --> G[evidence_gap_check<br/>Self-Ask: is there enough evidence?]
+    START([Request: files + agent + loan_program]) --> C[discover_documents<br/>scan PDF/XLS/CSV/PPTX/TXT/MD/XML]
+    C --> D[classify_documents<br/>OCR + classify + structured extraction flags]
+    D --> G[evidence_gap_check<br/>is the required evidence present?]
     G -->|blocked: missing evidence| E2([END])
-    G -->|continue| X[extract_documents<br/>only the passes this route reads]
-    X --> H[web_search<br/>optional enrichment]
-    H -->|workflow_mode| R{Router}
+    G -->|continue| X[extract_documents<br/>only the passes this agent reads]
+    X -->|agent chosen on screen| R{Router}
     R --> W2[single_business_activity]
     R --> W3[single_credit_relationship]
     R --> W4[single_financial_analysis]
-    R --> W5[single_risk_assessment]
     R --> W6[single_credit_proposal]
-    R --> W7[full_credit_memo]
-    W2 & W3 & W4 & W5 & W6 & W7 --> FIN[_finalize<br/>format tỷ VNĐ]
-    FIN --> ENDN([END])
+    W2 & W3 & W4 & W6 --> ENDN([END])
 ```
 
-### Stage 1 — Preprocessing & classification
+There is **no routing LLM**. `process()` takes the agent id directly, `_decision_for()` maps it to
+its workflow mode, and an id the system does not define raises immediately rather than silently
+falling back.
 
-**1. `prepare_input`** — Normalizes the user query and builds a compact conversation context from
-`conversation_history`.
+### Stage 1 — Discovery & classification
 
-**2. `input_guardrail`** — When enabled (`RUN_SAFETY_GUARDRAILS=true`), `LocalGuardrails` calls an
-LLM to classify the input as safe/unsafe. If **UNSAFE** → stop immediately with a blocking reply
-(route `INPUT_GUARDRAILS`), avoiding the cost of downstream agents.
+**1. `discover_documents`** — Recursively scans the paths in `INPUT_PATHS` for files with valid
+extensions: `.pdf .xlsx .xls .csv .pptx .txt .md .xml` (capped by `max_files`, default 50). Files with an
+unsupported extension are **named in a warning** rather than dropped in silence — a folder of
+twelve XML tax returns once produced a report built on nothing at all, with no line saying so.
+Duplicates are removed by path, then by content hash.
 
-**3. `discover_documents`** — Recursively scans the paths in `INPUT_PATHS` for files with valid
-extensions: `.pdf .xlsx .xls .csv .txt .md` (capped by `max_files`).
+**2. `classify_documents`** — For each file:
 
-If it finds **nothing** and the request also names no analysis task (a greeting, a question about
-the tool), the run stops here with a fixed reply saying what the system does and what it needs —
-route `OUT_OF_SCOPE`, **zero LLM calls and zero OCR**. This is not a chatbot: with no documents and
-no task there is nothing to analyse, and an LLM could only produce small talk. The check needs both
-halves, which is why it sits here rather than earlier: *"phân tích tài chính"* sent without
-attaching statements still goes through, so `evidence_gap_check` can answer with the **specific**
-documents that are missing.
+- **Upload box** — the folder a file sits in *is* its group. The screen creates six folders and
+  the user drops files into them, so `ho_so_tai_chinh/BCTC_2025.pdf` declares its own group with no
+  guessing involved. Every ancestor is checked, not just the parent, so `ho_so_tai_chinh/2025/BCTC.pdf`
+  keeps its box.
 
-**4. `classify_documents`** — For each file:
-- **Text extraction**: PDF → OCR (`pypdfium2` renders pages → image preprocessing → Tesseract,
-  cached by file hash); XLSX/CSV → tabular read via pandas.
-- **Classification**: identifies *what kind of document* it is — one of the 23 `document_type`
-  rows in the routing matrix (`src/matrix/document_matrix.yaml`) — by scoring that type's
-  keywords against the filename and body (a filename hit counts triple — a well-named file
-  states its own type). If confidence ≥ threshold
-  (`document_classifier_rule_confidence_threshold`, default **0.65**) it is used as-is;
-  otherwise it **falls back to an LLM** classifier that picks from the same catalogue.
-  Two conditions keep the rule result even below the threshold, because in both the LLM
-  could not change anything that matters:
+  | Folder | Group | Types |
+  |---|---|---|
+  | `ho_so_phap_ly` | Hồ sơ pháp lý | 4 |
+  | `ho_so_tai_chinh` | Hồ sơ tài chính | 7 |
+  | `ho_so_vay_von` | Hồ sơ vay vốn | 4 |
+  | `ho_so_tai_san_dam_bao` | Hồ sơ tài sản đảm bảo | 2 |
+  | `ho_so_noi_bo` | Hồ sơ nội bộ | 3 |
+  | `ho_so_soan_thao_noi_bo` | Hồ sơ soạn thảo nội bộ | 2 |
+
+- **Text extraction** — PDF → OCR (`pypdfium2` renders pages → image preprocessing → Tesseract,
+  cached by file hash); XLSX/CSV → tabular read via pandas; XML → tax-return parsing.
+
+- **Classification** — identifies *which of the 22 `document_type` rows* in the routing matrix
+  (`src/matrix/document_matrix.yaml`) the file is, by scoring that type's keywords against the
+  filename and body (a filename hit counts triple — a well-named file states its own type).
+  Knowing the upload box restricts the candidates to that group first. If confidence clears the
+  threshold (0.65, `document_classifier_grouped_confidence_threshold` when the box is known,
+  `document_classifier_rule_confidence_threshold` when it is not) the keyword result is used as-is;
+  otherwise it **falls back to an LLM** classifier picking from the same catalogue.
+
+  Two conditions keep the keyword result even below the threshold, because in both the LLM could
+  not change anything that matters:
   - every plausible type feeds the same agents — the label would change, the routing would not;
   - the filename names **exactly one** type and the body did not overturn it. Confidence is a
     margin measure, so a clearly-named statement whose text quotes a neighbouring type's
     vocabulary (a BCTC naming the balance sheet inside itself) can dip under the threshold with
-    nothing genuinely in doubt. Sole ownership is what makes this safe: if body vocabulary pulls
-    a different type to the top, the tiebreak still runs.
-- **Routing**: the matrix maps that type to the agents that consume it, each marked `R`
-  (required evidence) or `O` (optional). One document routinely feeds several agents — a BCTC
-  is evidence for both `FINANCIAL_ANALYSIS_AGENT` and `RISK_ASSESSMENT_AGENT`. `R` documents
-  get the larger share of an agent's character budget.
-- A document matching no type falls back to `GENERAL_CONTEXT` and is shared with every agent,
-  so a classification miss never hides evidence.
+    nothing genuinely in doubt.
 
-**Loan program**: the matrix holds an `R`/`O` level per agent **per loan program** (`B1CP`, `MISA`,
-`PL++`, `PLO`). Name the program anywhere in your request — *"Phân tích khách chương trình PLO"* —
-and the matching column is used. Detection is exact string matching against the `aliases` declared in
-the YAML, not an LLM guess. If no program is named, or two are named at once (*"so sánh B1CP với
-PLO"*), the system falls back to the **strongest** level across all programs: that can only
-over-prioritise a document, never demote real evidence. The outcome is always reported in
-`result["loan_program_detection"]` and in the run's step log, so a missed or wrong detection is
-visible rather than silent.
+  If the LLM returns a type id the matrix does not define, the keyword result is kept — an unknown
+  id would route the document nowhere.
+
+- **Routing** — the matrix maps that type to the agents that consume it, each marked `R` (required
+  evidence) or `O` (optional). One document routinely feeds several agents. `R` documents get the
+  larger share of an agent's character budget.
+
+- A document matching no type falls back to `GENERAL_CONTEXT` and is shared with every agent, so a
+  classification miss never hides evidence.
+
+**Loan program.** The matrix holds an `R`/`O` level per agent **per loan program** (`B1CP`, `MISA`,
+`PLPP`, `PLO`). The user picks it on the upload screen and it arrives as the `loan_program`
+argument; empty falls back to `DEFAULT_LOAN_PROGRAM` (**PLO**) and an unknown id raises. Nothing is
+detected or inferred. The program actually applied is reported in `result["loan_program"]`.
 
 **Editing the routing matrix**: `src/matrix/document_matrix.yaml` is the single source of truth
 (transcribed from `docs/document_matrix.xlsx`). Changing which agents see a kind of document is a
-YAML edit, not a code change. It is validated on load — an unknown agent name, a bad `R`/`O`
-value, or a per-loan-program map missing one of the four programs raises immediately.
+YAML edit, not a code change. It is validated on load — an unknown agent name, a bad `R`/`O` value,
+or a per-loan-program map missing one of the four programs raises immediately.
 
-### Stage 2 — Routing
+### Stage 2 — Evidence gap check
 
-**1. `decide_workflow`** — Based on the query, the classified documents, and the context, the
-decision maker (LLM `MODEL_DECISION`) picks:
-- **`route`** (`AgentName`) — the primary responding agent.
-- **`workflow_mode`** (`WorkflowMode`) — the execution branch in the graph.
+`evidence_gap_check` asks whether there is enough evidence for the chosen agent to answer, and
+builds an execution plan. It works two ways at once:
 
-The 7 possible workflow modes:
+- **By agent bucket** — a document counts toward *every* agent it is real evidence for, not just
+  its primary label, so "missing evidence" does not fire for coverage that is genuinely present in
+  a combined document. `FINANCIAL_ANALYSIS_AGENT` without financial documents is a `high` gap that
+  cannot continue; `BUSINESS_ACTIVITY_AGENT` without business documents is `medium`.
+- **By upload box** — the matrix knows which types are `R` for this agent under this loan program,
+  so the response can name **the specific documents that are absent**, which the bucket check
+  alone cannot do.
 
-| workflow_mode | Meaning |
+If the run cannot continue, it stops here with a Vietnamese response listing what is missing —
+before any extraction or analysis call is paid for.
+
+### Stage 3 — Structured extraction
+
+`extract_documents` runs the passes that turn raw OCR into JSON the agent reads as data instead of
+prose. Each pass costs **one LLM call per matching document**, so only the passes the chosen agent
+consumes are run:
+
+| Agent | Passes run |
 |---|---|
-| `single_business_activity` | Business-activity analysis only |
-| `single_credit_relationship` | Credit-relationship analysis only (T24/CIC) |
-| `single_financial_analysis` | Financial analysis only |
-| `single_risk_assessment` | Risk assessment only |
-| `single_credit_proposal` | Credit-proposal calculation only (deterministic) |
-| `full_credit_memo` | **Run the full pipeline → complete credit memo** |
+| `BUSINESS_ACTIVITY_AGENT` | site visit |
+| `FINANCIAL_ANALYSIS_AGENT` | BCTC, site visit |
+| `CREDIT_RELATIONSHIP_AGENT` | CIC S10A, CIC R21, site visit |
+| `CREDIT_PROPOSAL_AGENT` | BCTC, CIC S10A, proposal, site visit |
 
-**2. `evidence_gap_check`** — A **Self-Ask** analysis of whether there is enough evidence to
-answer, and builds an **execution plan**. If required documents are missing
-(`can_answer_now = false`) → it stops and returns a response spelling out what is missing (route
-`EVIDENCE_GAP_CHECK`), avoiding expensive agent runs.
-
-**3. `extract_documents`** — Runs the structured-extraction passes (BCTC, credit application,
-CIC S10A, CIC R21, site-visit report) that turn raw OCR into JSON the agents read as data instead
-of prose. Each pass costs one LLM call **per matching document**, so only the passes the chosen
-route actually consumes are run — which agents read which block is derived from the same constants
-that build the prompts (`CIC_S10A_JSON_AGENTS`, `METRICS_BLOCK_AGENTS`…), so the gate cannot drift
-from the readers.
-
-| Route | Passes run |
-|---|---|
-| `single_business_activity` | site visit |
-| `single_credit_relationship` | CIC S10A, CIC R21, site visit |
-| `single_financial_analysis` | BCTC, site visit |
-| `single_credit_proposal` | BCTC, credit application, site visit |
-| `single_risk_assessment`, `full_credit_memo` | all five |
+The five passes are declared **once**, as the `EXTRACTION_PASSES` table in
+[supervisor.py](src/agents/supervisor.py). One row carries a pass's label, its per-document flags,
+its chain, its extractor, the prompt block it produces and the agents that read it — so which
+agents read which block cannot drift from the gate that decides whether to run it.
 
 The site-visit report is the one every specialist reads, because it is the only document
 describing the business itself rather than one facet of it — industry and GSO code, main products,
@@ -194,72 +193,46 @@ cite a judgement as though the file recorded a fact.
 
 Deliberately placed **after** the gap check: a run blocked for missing evidence pays for no
 extraction at all. Safe to defer because nothing before this point reads an extraction *result* —
-routing and the gap check both work off the document types the matrix assigned. Skipped passes are
-named in the step log with the calls they saved.
+the gap check works off the document types the matrix assigned. Skipped passes are named in the
+step log with the calls they saved.
 
-**4. `web_search`** — When enabled (`RUN_WEB_SEARCH=true`), `WebSearchProcessorAgent` (Tavily)
-adds market/industry context. The router then branches by `workflow_mode`.
+### Stage 4 — The specialist agent
 
-### Stage 3 — The `full_credit_memo` branch (full pipeline)
+The router sends the run to the single node matching the agent picked on screen. That agent
+receives:
 
-This is the highest-value branch. Execution order in
-[_run_credit_memo_workflow](src/agents/supervisor.py):
-
-```
-        ┌──────────────────────── run IN PARALLEL (ThreadPoolExecutor) ─────────────────────┐
-        │  BusinessActivityAnalysis  CreditRelationshipAnalysis  FinancialAnalysis           │
-        │  (business ops)            (T24 + CIC/bureau)          (statements + ratios)       │
-        │                         CreditProposalAnalysis                                     │
-        │                         (facility, limit, tenor, collateral)                       │
-        └───────────────────────────────────┬──────────────────────────────────────────────┘
-                                             ▼
-                          RISK_ASSESSMENT  (receives all 4 analyses)
-                                             ▼
-                    CREDIT_MEMO_COMPOSER  (synthesizes everything into the memo)
-                                             ▼
-                              _finalize → format tỷ VNĐ
-```
-
-1. **Four analysis agents run in parallel** — Business Activity, Credit Relationship, Financial
-   Analysis and Credit Proposal each read the document set routed to them and are independent, so
-   they run concurrently via `ThreadPoolExecutor` (max 4 workers, bounded by `LLM_MAX_CONCURRENCY`
-   to respect the rate limit).
-2. **Risk Assessment** — receives **all** prior outputs (the four analyses) to assess overall
-   risk.
-3. **Credit Memo Composer** — `CreditMemoComposerAgent` (LLM `MODEL_CREDIT_MEMO`) synthesizes
-   everything into the final memo, capped by a character budget (`CREDIT_MEMO`, default 80k).
-
-### Stage 4 — Finalization (`_finalize`)
-
-Applied to **every** branch before returning the result:
-
-- **Money formatting** — all VNĐ figures are converted to **billions of VNĐ (tỷ VNĐ)** for
-  readability (display only).
-- **Debt/revenue chart** — a `linechart` block drawn by the pipeline from the extracted CIC S10A
-  JSON (debt) and the credit-relationship agent's own transcription of the VAT returns (revenue),
-  so no model retypes the figures. Inserted **only when `CREDIT_RELATIONSHIP_AGENT` actually ran** —
-  it is that section's content, and every branch hands `_finalize` the unfiltered document list, so
-  without the gate any run whose folder merely held a CIC file grew a chart. It anchors under the
-  credit-relationship heading, falling back to the end of the report if the composer reworded it.
-- Returns the full state: `response`, `agent_name`, `steps`, `document_classifications`,
-  `agent_outputs`…
-
-### The specialist agents
-
-Each specialist is a subclass of `SpecialistAgent`
-([specialist.py](src/agents/specialist.py)), built with `create_agent` (LangChain) and attached to:
-- Its own **output template** (Markdown in [src/templates/](src/templates/)).
-- Its own **database tools** by group ([tools.py](src/agents/tools.py)):
-  `FINANCIAL_DATABASE_TOOLS`, `BUSINESS_ACTIVITY_DATABASE_TOOLS`,
-  `CREDIT_RELATIONSHIP_DATABASE_TOOLS` (T24, CIC/bureau), `RISK_ASSESSMENT_DATABASE_TOOLS`.
+- the documents the matrix routed to it, trimmed to its character budget (`R` before `O`);
+- the labelled prompt blocks built from the extraction JSON;
+- **computed figures rather than raw numbers to work from** — financial ratios from
+  `FinancialRatioCalculator`, the credit need from `credit_need_calculator`;
+- its own output structure and guidance templates from [src/templates/](src/templates/).
 
 | Agent | Responsibility |
 |---|---|
-| `BusinessActivityAnalysis` | Assess operations, core products/services, supply chain, sales outlook |
-| `FinancialAnalysis` | Financial analysis; uses ratios from `FinancialRatioCalculator` |
-| `CreditRelationshipAnalysis` | Credit relationships; queries T24 & CIC/bureau when customer identifiers are available |
-| `RiskAssessment` | Aggregate risk assessment |
-| `CreditMemoComposerAgent` | Composes the final credit memo |
+| `BusinessActivityAnalysis` | Operations, core products/services, supply chain, sales outlook |
+| `FinancialAnalysis` | Financial analysis, built on the pre-computed ratios |
+| `CreditRelationshipAnalysis` | Credit relationships and debt history, from CIC S10A/R21 |
+| `CreditProposalAnalysis` | Facility, limit, tenor, collateral — built on the computed credit need |
+
+### Stage 5 — Finalization (`_finalize`)
+
+Applied to every branch before returning, in this order and for stated reasons:
+
+- **Footnotes consolidated** into one list at the end, returning the audit — collapsing repeated
+  labels first would hide two agents having claimed the same one.
+- **Blank line before bullet lists** — a list glued to the line above renders as a bare `-`.
+- **`tidy_numbers`** — `8,00%` → `8%`, a table cell holding only a zero → `-`.
+- **VAT revenue block stripped** — an internal data channel between the credit-relationship agent
+  and the chart builder, never meant for the reader.
+- **Money formatting** — VNĐ figures converted to **tỷ VNĐ** for readability (display only).
+- **Findings appended** — unresolved citations and template leakage are *reported*, because a rule
+  written in a prompt is a request, not enforcement.
+- **Debt/revenue chart** — a `linechart` block drawn by the pipeline from the extracted CIC S10A
+  JSON (debt) and the credit-relationship agent's own transcription of the VAT returns (revenue),
+  so no model retypes the figures. Inserted **only when `CREDIT_RELATIONSHIP_AGENT` actually ran**.
+  It anchors under that agent's heading, falling back to the end of the report. Placed last, after
+  every text rewriter, because this block is written by the pipeline and is not the rewriters'
+  business.
 
 ---
 
@@ -272,30 +245,32 @@ Each specialist is a subclass of `SpecialistAgent`
 │   ├── config.py                     # LLM factory + Config
 │   ├── types.py                      # Shared types
 │   ├── agents/
-│   │   ├── supervisor.py             # LangGraph orchestrator
-│   │   ├── document_classification.py
-│   │   ├── specialist.py
-│   │   ├── financial_ratio_calculator.py
-│   │   ├── guardrails.py
-│   │   ├── tools.py                  # Database tools
-│   │   └── tracing.py                # LangSmith tracing
+│   │   ├── supervisor.py             # LangGraph orchestrator + EXTRACTION_PASSES
+│   │   ├── specialist.py             # The four specialist agents
+│   │   ├── prompt_blocks.py          # Extraction JSON -> labelled prompt blocks
+│   │   ├── documents/                # discovery, keyword classification
+│   │   ├── calculator/               # financial ratios, credit need
+│   │   └── extraction/               # BCTC, proposal, CIC S10A, CIC R21, site visit, VAT
 │   ├── matrix/
-│   │   ├── document_matrix.py        # Loads document_matrix.yaml
-│   │   └── document_matrix.yaml      # Document type -> consuming agents
+│   │   ├── document_matrix.py        # Loads and validates the YAML
+│   │   └── document_matrix.yaml      # 22 document types -> consuming agents, per program
 │   ├── utils/
-│   │   ├── ocr.py                    # PDF → text (pypdfium2 + Tesseract)
-│   │   ├── extractors.py             # PDF/CSV/XLSX
-│   │   ├── formatting.py             # đồng → tỷ VNĐ
-│   │   ├── paths.py, flow.py, common.py
-│   └── templates/                    # Specialist output templates
-├── testing/samples/                  # Sample files (NOT committed — gitignored)
+│   │   ├── common.py, paths.py
+│   │   ├── reading/                  # ocr.py, extractors.py, tax_xml.py
+│   │   └── report/                   # citations, formatting, markdown_fixups,
+│   │       └── visualization/        #   charts, diagrams, graph_svg, report_html/style
+│   └── templates/                    # Per-agent structure + guidance Markdown
+├── samples/<testcase>/               # Uploaded files, one folder per upload box (gitignored)
 ├── logs/                             # Run outputs (gitignored)
-├── docs/ARCHITECTURE.md
+├── docs/                             # document_matrix.xlsx + reference documents
 ├── .env / .env.example
 └── README.md
 ```
 
-> **Note:** `testing/samples/` (customer data) and `logs/` are excluded from git via
+> There are **no `__init__.py` files** anywhere under `src/` — it is a namespace package, imported
+> as `src.agents.supervisor` from the project root.
+
+> **Note:** `samples/` (customer data) and `logs/` are excluded from git via
 > [.gitignore](.gitignore). `.env` holds real API keys — **never commit it**.
 
 ---
@@ -312,14 +287,14 @@ brew install tesseract tesseract-lang
 sudo apt-get install tesseract-ocr tesseract-ocr-vie
 ```
 
-**Python packages** (the main packages used in this project):
+**Python packages:**
 
 ```bash
-pip install langgraph langchain langchain-core langchain-openai \
-            openai pandas pypdfium2 pytesseract opencv-python numpy pillow \
-            python-dotenv nest-asyncio ipython pyyaml nbstripout
-# Optional: langchain-tavily (web search), langsmith (tracing)
+pip install -r requirements.txt
 ```
+
+PDF export of the final report additionally needs **WeasyPrint** and its native libraries
+(`brew install weasyprint` on macOS installs both).
 
 ### Notebook outputs — run this once per clone
 
@@ -345,17 +320,15 @@ git show :local_underwriting_agents.ipynb | grep -c '"output_type"'   # must pri
 
 ## Configuration (.env)
 
-Copy `.env.example` → `.env` and fill in the values. The main variable groups:
+Copy `.env.example` → `.env` and fill in the values.
 
-**Per-role models** (required — a missing one causes `you must provide a model parameter`):
+**Models** — three roles, each bound to its own variable. An unset one raises at startup naming
+the variable, before any call is made:
 
 ```env
-MODEL_DECISION=gpt-4o-mini        # route/workflow decision
-MODEL_DOCUMENT=gpt-4o-mini        # document classification (LLM fallback)
-MODEL_ANALYZER=gpt-4o-mini        # specialist agents
-MODEL_CREDIT_MEMO=gpt-4o-mini     # memo composition
-MODEL_GUARDRAIL=gpt-4o-mini       # input/output safety guardrail
-MODEL_ECONOMY=gpt-4o-mini         # cheaper structured extractions
+MODEL_DOCUMENT=gpt-4o-mini    # document classification (LLM fallback), temperature 0.5
+MODEL_ANALYZER=gpt-4o-mini    # the specialist agents, temperature 0.1
+MODEL_ECONOMY=gpt-4o-mini     # all five structured-extraction passes, temperature 0.0
 ```
 
 **API & endpoint:**
@@ -365,61 +338,44 @@ OPENAI_API_KEY=sk-...
 OPENAI_API_BASE=https://api.openai.com/v1   # change to use a compatible endpoint
 ```
 
-**Feature toggles** (off by default):
+**Timeouts & retries:**
 
 ```env
-RUN_SAFETY_GUARDRAILS=false   # input guardrail
-RUN_WEB_SEARCH=false          # Tavily enrichment (needs TAVILY_API_KEY)
+LLM_TIMEOUT_SECONDS=60        # per request
+LLM_CLIENT_MAX_RETRIES=3      # backs off on 429/5xx, honours Retry-After
 ```
 
-**Performance & OCR:**
+**OCR** — all optional, defaults shown:
 
 ```env
-LLM_REQUESTS_PER_MINUTE=9      # hard ceiling shared by every LLM client
-LLM_CLIENT_MAX_RETRIES=3       # backs off on 429, honours Retry-After
-LLM_MAX_CONCURRENCY=3          # specialists run in parallel in full_credit_memo
-LLM_TIMEOUT_SECONDS=60
-LLM_ANALYZE_TIMEOUT_SECONDS=...
-OCR_LANG=vie+eng  OCR_DPI=...  OCR_PSM=...  OCR_CACHE_DIR=...
-OCR_MAX_WORKERS=              # pages OCR'd at once; empty = min(8, CPU count)
+TESSERACT_CMD=tesseract
+OCR_LANG=vie+eng   OCR_DPI=300   OCR_PSM=6   OCR_OEM=3
+OCR_CACHE_DIR=                # empty = no cache
+OCR_TIMEOUT_SECONDS=          # per page
+OCR_MAX_WORKERS=              # pages OCR'd at once; empty/0 = min(8, CPU count)
+OCR_PREPROCESS=0  OCR_DESKEW=1  OCR_DENOISE=0  OCR_BINARIZE=0
+OCR_LAYOUT=1      OCR_DELINE=1  OCR_UPSCALE=1.0
 OCR_AUTO_ROTATE=0             # fix sideways scans; off by default, see below
 ```
 
 **OCR is the slowest step in a run**, and pages are OCR'd concurrently because Tesseract works
-out-of-process — a 43-page statement in `testing/samples` goes from **96s to 22s** at 8 workers.
-Pages are rendered in batches of `OCR_MAX_WORKERS` rather than all at once, which also keeps
-memory flat: a 300dpi page is ~25 MB, so an 87-page file would otherwise hold ~2.1 GB.
+out-of-process — a 43-page statement went from **96s to 22s** at 8 workers. Pages are rendered in
+batches of `OCR_MAX_WORKERS` rather than all at once, which also keeps memory flat: a 300dpi page
+is ~25 MB, so an 87-page file would otherwise hold ~2.1 GB.
 
-`OCR_AUTO_ROTATE` is off because the detector's accuracy splits by angle, measured on the
-sample set: every **90°** verdict was correct (4/4 — genuinely sideways pages), every **180°**
-verdict was wrong (4/4 — upright pages flipped into unreadable noise). Off trades away the 90°
-repair to stop the 180° damage. Turn it on for a document set that really is sideways; it costs
-about 2.2s per 43 pages now that pages run in parallel.
+`OCR_AUTO_ROTATE` is off because the detector's accuracy splits by angle, measured on the sample
+set: every **90°** verdict was correct (4/4 — genuinely sideways pages), every **180°** verdict was
+wrong (4/4 — upright pages flipped into unreadable noise). Off trades away the 90° repair to stop
+the 180° damage. Turn it on for a document set that really is sideways; it costs about 2.2s per
+43 pages now that pages run in parallel.
 
-**Staying under a provider rate limit.** All seven LLM clients share **one**
-`InMemoryRateLimiter` (`shared_rate_limiter()` in [src/config.py](src/config.py)), so
-`LLM_REQUESTS_PER_MINUTE` is a whole-process ceiling rather than a per-client one. Bursting is
-disabled (`max_bucket_size=1`), which is what makes exceeding the quota impossible instead of merely
-unlikely: the four parallel specialists queue on the limiter rather than firing at once.
-
-Set the value **below** your provider's real quota. One full credit memo run costs about **9 LLM
-calls** — four parallel specialists, risk assessment, the memo composer, one structured extraction
-per matching document, and one per document the keyword pass was unsure about. At 9/minute that
-means a full run cannot finish in under a minute; that is the price of never seeing a 429. Every run
-reports its own numbers under `result["rate_limit"]` and in the step log, so a throttled run can be
-told apart from a stuck one.
-
-The memo is the expensive case because it runs every agent and therefore needs every extraction
-pass. Single-agent routes are much cheaper than the document count suggests: a
-`single_business_activity` run reads no structured block at all, so every extraction pass its files
-would have matched is skipped (see `extract_documents` above).
-
-To go faster: raise the limit if your quota allows, run a single agent (about 3 calls) instead of
-the full memo, or **name documents clearly**. Naming is the biggest lever left — a file called
-`BCTC_2024.pdf` or `SO CHI TIET 331 - CONG NO PHAI TRA.xlsx` settles on the keyword pass, while
-`SO 331.xlsx` or `scan001.pdf` matches nothing and costs a classification call every run.
-
-**Tracing (optional):** `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`.
+**Cost per run.** There is no rate limiter — the retry/back-off in the SDK is what stands between a
+burst of extractions and a 429. A run costs one classification call per document the keyword pass
+was unsure about, one extraction call per document per pass the chosen agent needs, and one
+analysis call. **Naming documents clearly is the biggest lever**: a file called `BCTC_2024.pdf` or
+`SO CHI TIET 331 - CONG NO PHAI TRA.xlsx` settles on the keyword pass, while `SO 331.xlsx` or
+`scan001.pdf` matches nothing and costs a classification call every run. Dropping files into the
+right upload folder has the same effect, for the same reason.
 
 ---
 
@@ -427,18 +383,24 @@ the full memo, or **name documents clearly**. Naming is the biggest lever left �
 
 1. Open [local_underwriting_agents.ipynb](local_underwriting_agents.ipynb).
 2. **Cell 2** — sets up paths & `load_dotenv`. Prints `Project root`.
-3. **Cell 4** — configure the request:
+3. **Cell 3** — the three things the upload screen supplies:
    ```python
-   QUERY = "Hãy phân tích tài chính cho khách hàng này"
-   INPUT_PATHS = [str(PROJECT_ROOT / "testing" / "samples" / "case_1")]  # file or folder
+   TESTCASE_ID = "case_1"
+   LOAN_PROGRAM = "PLO"                      # B1CP, MISA, PLPP, PLO; empty = PLO
+   AGENT = "FINANCIAL_ANALYSIS_AGENT"        # or BUSINESS_ACTIVITY / CREDIT_RELATIONSHIP
+                                             #    / CREDIT_PROPOSAL _AGENT
+   INPUT_PATHS = [str(PROJECT_ROOT / "samples" / TESTCASE_ID)]
    ```
-4. Run the import cells in order (config → tools → classification → specialist → guardrails →
-   supervisor).
-5. **Final cell** — builds `Supervisor(config)`, draws the graph, calls `supervisor.process(...)`,
-   and prints the memo.
+4. **Cell 4** — builds `Config` with the three LLM clients.
+5. **Cells 5–7** — import types, document modules, agents.
+6. **Cell 8** — builds `Supervisor(config)`, draws the graph, calls
+   `supervisor.process(INPUT_PATHS, agent=AGENT, loan_program=LOAN_PROGRAM)`, prints the report,
+   the step log and the per-document classification, and warns about any extraction that failed or
+   any document that matched no type.
+7. **Cell 9** — writes every artifact to `logs/<testcase>_<timestamp>/` and exports the PDF.
 
-> If you change `.env`, re-run cell 2 (`load_dotenv(override=True)`) **and** the cell that builds
-> `config` to load the new values.
+> If you change `.env`, re-run cell 2 (`load_dotenv(override=True)`) **and** cell 4 to rebuild the
+> clients with the new values.
 
 ---
 
@@ -448,7 +410,16 @@ Each run creates a `logs/<testcase>_<timestamp>/` directory containing:
 
 | File | Content |
 |---|---|
-| `final_response.md` | The final memo / answer |
-| `result.json` | Full state (response, route, steps…) |
-| `agent_outputs.json` | Raw output of each agent |
+| `final_response.md` | The final report, diagrams inlined |
+| `final_response.pdf` | The same report rendered via WeasyPrint |
+| `result.json` | Full state (response, agent, loan program, steps, plan, gaps…) |
+| `agent_outputs.json` | Raw output of the agent that ran |
 | `document_classifications.json` | Classification result per document |
+| `document_selections.json` | Which documents each agent was given, and how much of each |
+| `financial_metrics.json` | The computed ratios, as data |
+| `credit_need.json` | The computed credit need, as data |
+| `financial_statement_extraction.json` | BCTC extraction JSON, per document |
+| `proposal_extraction.json` | Credit-application extraction JSON, per document |
+| `cic_s10a_extraction.json` | CIC S10A extraction JSON, per document |
+| `cic_r21_extraction.json` | CIC R21 extraction JSON, per document |
+| `sitevisit_extraction.json` | Site-visit extraction JSON, per document |

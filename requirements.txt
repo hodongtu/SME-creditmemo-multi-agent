@@ -22,7 +22,7 @@ pillow==12.2.0
 pandas==2.3.3
 openpyxl==3.1.5          # xlsx reading (direct, format-faithful)
 xlrd==2.0.2              # legacy .xls reading via pandas
-python-pptx==1.0.2       # pptx reading (industry knowledge decks, src/knowledge/)
+python-pptx==1.0.2       # pptx reading (src/utils/reading/extractors.py)
 markdown==3.10.3         # Markdown -> HTML for PDF export
 weasyprint==69.0         # HTML -> PDF (needs Pango/Cairo/GLib, see above)
 
@@ -39,5 +39,6 @@ ipython==9.14.1
 nbstripout==0.9.1
 
 # --- Optional ---
-langchain-tavily==0.2.18  # web search enrichment (RUN_WEB_SEARCH=true)
-langsmith==0.8.18         # tracing (LANGSMITH_TRACING=true)
+# No code imports this: LangChain picks the tracer up from LANGSMITH_TRACING /
+# LANGSMITH_API_KEY on its own. Drop the line if you do not trace.
+langsmith==0.8.18

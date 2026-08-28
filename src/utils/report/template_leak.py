@@ -10,8 +10,6 @@ placeholders ``[CompanyName]``, ``[TaxCode]``, ``[Year]``.
 Pure text analysis — no LLM call.
 """
 
-from __future__ import annotations
-
 import re
 import unicodedata
 
@@ -48,6 +46,7 @@ SCAFFOLD_MARKERS = (
     "assertion separation rule",
     "monetary unit rule",
     "language rule",
+    "commentary rule",
     "xoa han dong khong co du lieu",
     # Headings of the structured blocks in the prompt. An agent required to cite
     # a figure but given no filename will reach for the only label in front of

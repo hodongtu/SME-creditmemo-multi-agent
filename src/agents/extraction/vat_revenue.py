@@ -15,8 +15,6 @@ is an internal data channel, never meant for the reader, so every entry point
 into a final response strips it (see strip_vat_revenue_block).
 """
 
-from __future__ import annotations
-
 import re
 
 from src.agents.extraction.cic_s10a_extraction import normalize_month_label

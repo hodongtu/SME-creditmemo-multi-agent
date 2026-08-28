@@ -6,8 +6,6 @@ with citations: it is about paragraph/list boundaries, which any block of
 report prose can get wrong regardless of whether it carries a footnote.
 """
 
-from __future__ import annotations
-
 import re
 
 from src.utils.common import CODE_FENCE as _FENCE

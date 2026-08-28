@@ -15,8 +15,6 @@ then route orthogonal edges. It is not a general graph drawer — it assumes the
 graph flows in one direction, which is what the report templates produce.
 """
 
-from __future__ import annotations
-
 import html
 import re
 from dataclasses import dataclass, field

@@ -17,15 +17,13 @@ bullet indent, 8pt footnotes) and a markdown viewer applies its own stylesheet
 instead. What carries over is the drawing.
 """
 
-from __future__ import annotations
-
 import base64
 import re
 
-from src.utils.charts import CHART_BLOCK, charts_to_html, line_chart_svg, parse_linechart
-from src.utils.diagrams import MERMAID_BLOCK, _render, mermaid_to_html
-from src.utils.graph_svg import FONT_STACK
-from src.utils.report_style import REPORT_CSS, tag_wide_tables
+from src.utils.report.visualization.charts import CHART_BLOCK, charts_to_html, line_chart_svg, parse_linechart
+from src.utils.report.visualization.diagrams import MERMAID_BLOCK, _render, mermaid_to_html
+from src.utils.report.visualization.graph_svg import FONT_STACK
+from src.utils.report.visualization.report_style import REPORT_CSS, tag_wide_tables
 
 MARKDOWN_EXTENSIONS = ("tables", "fenced_code", "footnotes")
 # Number footnotes by where they are REFERENCED, not where they are defined. The
