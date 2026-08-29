@@ -1,3 +1,4 @@
+import inspect
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -217,6 +218,22 @@ EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
         ),
     ),
 )
+
+
+# _run_structured_extraction gọi extract(chain, filename, content, path) cho mọi
+# pass. Kiểm ngay lúc import vì "extract" khai kiểu Callable[..., Any] — không
+# type checker nào thấy được một chữ ký lệch. Chuyện này đã xảy ra thật: một lượt
+# dọn dẹp bỏ tham số path "không dùng" khỏi bốn extractor và làm vỡ 4/5 pass giữa
+# lượt chạy của khách. Không bộ đo nào bắt được, vì chúng gọi các hàm này trực
+# tiếp chứ không đi qua runner. Vỡ lúc import thì rẻ; vỡ giữa lượt chạy thì không.
+for _pass in EXTRACTION_PASSES:
+    try:
+        inspect.signature(_pass.extract).bind(None, "", "", "")
+    except TypeError as exc:
+        raise TypeError(
+            f"pass {_pass.label!r}: {_pass.extract.__name__} không nhận được "
+            f"cách runner gọi — {exc}"
+        ) from exc
 
 
 _PASS_BY_LABEL = {pass_.label: pass_ for pass_ in EXTRACTION_PASSES}
@@ -923,7 +940,10 @@ class Supervisor:
         quota, and that limiter is gone. Results are written onto each document
         in place and nothing raises, so a failed or unconfigured extraction
         always leaves _build_user_input a clean signal to fall back to the raw
-        OCR text.
+        OCR text. That covers extraction *failing*; it does not cover a pass
+        declared with the wrong signature, which is a programming error and is
+        meant to be loud — the guard under EXTRACTION_PASSES catches that one
+        at import instead.
 
         Shared by the BCTC and credit-application passes: they differ only in
         which documents they apply to and where the result is stored.
