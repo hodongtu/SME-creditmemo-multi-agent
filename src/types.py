@@ -61,6 +61,7 @@ class ClassifiedDocument:
     is_cic_s10a: bool = False
     is_cic_r21: bool = False
     is_sitevisit: bool = False
+    is_ledger: bool = False
     financial_statement_extraction: dict[str, Any] | None = None
     financial_statement_extraction_error: str = ""
     financial_statement_extraction_source: str = ""
@@ -72,6 +73,8 @@ class ClassifiedDocument:
     cic_r21_extraction_error: str = ""
     sitevisit_extraction: dict[str, Any] | None = None
     sitevisit_extraction_error: str = ""
+    ledger_extraction: dict[str, Any] | None = None
+    ledger_extraction_error: str = ""
 
 
 class UnderwritingGraphState(TypedDict, total=False):

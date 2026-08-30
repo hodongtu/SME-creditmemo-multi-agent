@@ -51,6 +51,7 @@ class Config:
     cic_s10a_extraction_llm: Any = None
     cic_r21_extraction_llm: Any = None
     sitevisit_extraction_llm: Any = None
+    ledger_extraction_llm: Any = None
     max_files: int = 50
     max_chars_per_document: int = 120_000
     document_classifier_rule_confidence_threshold: float = 0.65

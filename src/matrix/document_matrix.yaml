@@ -259,6 +259,7 @@ groups:
           - "phat sinh co"
 
       - id: bang_ke_xuat_nhap_ton_cong_no
+        ledger_extraction: true
         short_label: "Bảng tổng hợp xuất nhập tồn, công nợ"
         label: >-
           Bảng tổng hợp xuất nhập tồn, phải thu, phải trả của năm tài chính gần
@@ -290,6 +291,7 @@ groups:
           - "nxt"
 
       - id: so_chi_tiet_khoan_muc_khac
+        ledger_extraction: true
         short_label: "Sổ chi tiết tài khoản"
         label: "Các sổ chi tiết khoản mục khác (nếu có)"
         requirement:

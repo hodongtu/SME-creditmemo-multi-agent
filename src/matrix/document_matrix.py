@@ -48,6 +48,7 @@ class DocumentType:
     cic_s10a_extraction: bool = False
     cic_r21_extraction: bool = False
     sitevisit_extraction: bool = False
+    ledger_extraction: bool = False
 
     @property
     def routing_signature(self) -> frozenset[str]:
@@ -271,6 +272,9 @@ def _load(path: Path) -> DocumentMatrix:
                 sitevisit_extraction=bool(
                     entry.get("sitevisit_extraction", False)
                 ),
+                ledger_extraction=bool(
+                    entry.get("ledger_extraction", False)
+                ),
             )
 
     if not types:
@@ -375,6 +379,13 @@ def is_sitevisit_type(type_id: str) -> bool:
 
     doc = get_type(type_id)
     return bool(doc and doc.sitevisit_extraction)
+
+
+def is_ledger_type(type_id: str) -> bool:
+    """True when this document type is a detail-ledger spreadsheet."""
+
+    doc = get_type(type_id)
+    return bool(doc and doc.ledger_extraction)
 
 
 def describe_types_for_prompt(group_id: str = "") -> str:

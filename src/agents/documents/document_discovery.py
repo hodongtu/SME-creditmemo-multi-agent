@@ -59,6 +59,15 @@ def discover_documents(input_paths: list[str], max_files: int = 50) -> list[str]
     unreadable: list[str] = []
 
     def consider(item) -> None:
+        # Office writes a "~$name.xlsx" lock file beside any open workbook. It
+        # carries a supported extension, so it used to be discovered, OCR'd and
+        # classified — and 165 bytes of binary scored 0.87 confidence against
+        # the real workbook's 0.76, entering the evidence set as required
+        # evidence. Skipped in silence like dotfiles: it is Office's temp file,
+        # not something the user meant to submit, so it does not belong in the
+        # unreadable-files warning either.
+        if item.name.startswith("~$"):
+            return
         if item.suffix.lower() in SUPPORTED_EXTENSIONS:
             files.append(str(item))
         elif not item.name.startswith("."):

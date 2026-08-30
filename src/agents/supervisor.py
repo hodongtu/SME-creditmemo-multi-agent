@@ -54,6 +54,7 @@ from src.matrix.document_matrix import (
     is_financial_statement_type,
     is_cic_r21_type,
     is_sitevisit_type,
+    is_ledger_type,
     is_cic_s10a_type,
     is_proposal_type,
     primary_agent_for_type,
@@ -77,6 +78,10 @@ from src.agents.extraction.cic_r21_extraction import (
 from src.agents.extraction.sitevisit_extraction import (
     build_sitevisit_extraction_chain,
     extract_sitevisit_structured_data,
+)
+from src.agents.extraction.ledger_extraction import (
+    build_ledger_extraction_chain,
+    extract_ledger_batch,
 )
 from src.agents.calculator.credit_need_calculator import build_credit_need_table
 from src.agents import prompt_blocks
@@ -122,6 +127,11 @@ class ExtractionPass:
     json_agents: tuple[str, ...] | dict[str, Any]
     extra_consumers: tuple[str, ...] = ()
     per_agent_block_args: bool = False
+    # One call for every matching document at once, instead of one per document.
+    # For a pass whose record spans files — the same ledger account can arrive
+    # split across two of them — per-document extraction cannot see the whole
+    # set. Changes the extract signature, which the guard below checks.
+    batch: bool = False
 
     @property
     def chain_attr(self) -> str:
@@ -217,6 +227,32 @@ EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
             "CREDIT_PROPOSAL_AGENT",
         ),
     ),
+    ExtractionPass(
+        label="Ledger",
+        tag="SỔ CHI TIẾT",
+        flag_attr="is_ledger",
+        result_attr="ledger_extraction",
+        error_attr="ledger_extraction_error",
+        llm_attr="ledger_extraction_llm",
+        build_chain=build_ledger_extraction_chain,
+        extract=extract_ledger_batch,
+        batch=True,
+        build_block=prompt_blocks._build_ledger_structured_block,
+        heading=prompt_blocks.LEDGER_BLOCK_HEADING,
+        # Every agent the matrix routes a detail ledger to. Each consumes it as
+        # JSON, which also replaces the raw grid in their prompt: the grid is a
+        # wall of TSV that arrived at the tail of the prompt with no heading,
+        # and the record is the same figures under an account each report
+        # section can be filled from.
+        json_agents=(
+            "FINANCIAL_ANALYSIS_AGENT",
+            "BUSINESS_ACTIVITY_AGENT",
+            # The matrix routes bang_ke_xuat_nhap_ton_cong_no here too, at R
+            # under PLO, and the borrowings sheet is bank-by-bank debt that
+            # reconciles against CIC S10A. Without this it saw the raw grid.
+            "CREDIT_RELATIONSHIP_AGENT",
+        ),
+    ),
 )
 
 
@@ -228,7 +264,9 @@ EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
 # tiếp chứ không đi qua runner. Vỡ lúc import thì rẻ; vỡ giữa lượt chạy thì không.
 for _pass in EXTRACTION_PASSES:
     try:
-        inspect.signature(_pass.extract).bind(None, "", "", "")
+        inspect.signature(_pass.extract).bind(
+            *((None, []) if _pass.batch else (None, "", "", ""))
+        )
     except TypeError as exc:
         raise TypeError(
             f"pass {_pass.label!r}: {_pass.extract.__name__} không nhận được "
@@ -480,6 +518,7 @@ class Supervisor:
                 error_attr=pass_.error_attr,
                 label=pass_.label,
                 missing_llm_message=f"No {pass_.llm_attr} configured.",
+                batch=pass_.batch,
             )
 
         skipped = self._describe_skipped_passes(documents, needed)
@@ -694,6 +733,7 @@ class Supervisor:
             is_cic_s10a = is_cic_s10a_type(document_type)
             is_cic_r21 = is_cic_r21_type(document_type)
             is_sitevisit = is_sitevisit_type(document_type)
+            is_ledger = is_ledger_type(document_type)
             steps.append(
                 f"Classified document: {filename} -> "
                 + (f"{document_type} " if document_type else "(no type matched) ")
@@ -735,6 +775,7 @@ class Supervisor:
                     is_cic_s10a=is_cic_s10a,
                     is_cic_r21=is_cic_r21,
                     is_sitevisit=is_sitevisit,
+                    is_ledger=is_ledger,
                 )
             )
         return documents
@@ -931,6 +972,7 @@ class Supervisor:
         error_attr: str,
         label: str,
         missing_llm_message: str,
+        batch: bool = False,
     ) -> None:
         """Run one structured-extraction pass over the documents it applies to.
 
@@ -961,11 +1003,20 @@ class Supervisor:
             )
             return
 
-        for doc in targets:
+        # A batch pass sees every matching document at once and returns one
+        # answer per document, in order. Its record can therefore span files —
+        # a ledger account split across two of them merges into one entry.
+        pairs = (
+            zip(targets, extract(
+                chain, [(d.filename, d.content, d.path) for d in targets]
+            ))
+            if batch
             # The path goes with the text because one pass needs to know what
             # kind of file it is holding: an e-tax XML is read from its codes
             # rather than sent to the model. The other four ignore it.
-            result, error = extract(chain, doc.filename, doc.content, doc.path)
+            else ((d, extract(chain, d.filename, d.content, d.path)) for d in targets)
+        )
+        for doc, (result, error) in pairs:
             setattr(doc, result_attr, result)
             setattr(doc, error_attr, error)
             if flag_attr == "is_financial_statement" and result is not None:
@@ -1487,6 +1538,7 @@ class Supervisor:
         cic_s10a_block = json_blocks["CIC S10A"]
         cic_r21_block = json_blocks["CIC R21"]
         sitevisit_block = json_blocks["Sitevisit"]
+        ledger_block = json_blocks["Ledger"]
         # State the periods explicitly: several BCTC files overlap by a year, so
         # the merged set (e.g. 2 files -> 3 years) does not match the sample
         # column count in the layout. Telling the agent removes the guesswork.
@@ -1512,6 +1564,9 @@ class Supervisor:
                 # Counted with the rest: next year's plan carries revenue and
                 # COGS, so it can disagree about units with any block above it.
                 sitevisit_block,
+                # Đồng, straight from the spreadsheet's cells — the one block
+                # here whose unit is certain rather than read off a page.
+                ledger_block,
                 credit_need_block,
             )
             if block
@@ -1540,6 +1595,7 @@ class Supervisor:
             - len(cic_s10a_block)
             - len(cic_r21_block)
             - len(sitevisit_block)
+            - len(ledger_block)
             - len(credit_need_block)
             - len(unit_warning)
             - block_overhead,
@@ -1605,6 +1661,7 @@ class Supervisor:
         cic_s10a_section = f"{cic_s10a_block}\n\n" if cic_s10a_block else ""
         cic_r21_section = f"{cic_r21_block}\n\n" if cic_r21_block else ""
         sitevisit_section = f"{sitevisit_block}\n\n" if sitevisit_block else ""
+        ledger_section = f"{ledger_block}\n\n" if ledger_block else ""
         credit_need_section = (
             f"{credit_need_block}\n\n" if credit_need_block else ""
         )
@@ -1621,6 +1678,7 @@ class Supervisor:
                 f"{cic_s10a_section}"
                 f"{cic_r21_section}"
                 f"{sitevisit_section}"
+                f"{ledger_section}"
                 f"{credit_need_section}"
                 f"{self.DOC_SECTION_HEADER}"
                 f"{docs_text}"

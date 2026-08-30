@@ -10,6 +10,7 @@ from src.agents.calculator.financial_ratio_calculator import (
     _format_number,
 )
 from src.matrix.document_matrix import get_type
+from src.agents.extraction import ledger_extraction
 from src.types import ClassifiedDocument
 from src.agents.extraction.vat_revenue import merge_vat_series, parse_vat_revenue_block
 from src.utils.report.visualization.charts import build_linechart_block, pick_unit
@@ -60,6 +61,7 @@ CREDIT_NEED_BLOCK_HEADING = "[BẢNG TÍNH NHU CẦU TÍN DỤNG]"
 CIC_S10A_BLOCK_HEADING = "[EXTRACTED CIC S10A REPORT]"
 CIC_R21_BLOCK_HEADING = "[EXTRACTED CIC R21 REPORT]"
 SITEVISIT_BLOCK_HEADING = "[EXTRACTED SITE VISIT REPORT]"
+LEDGER_BLOCK_HEADING = "[DỮ LIỆU SỔ CHI TIẾT ĐÃ ĐỌC TỪ FILE EXCEL]"
 DEBT_CHART_TITLE = "Diễn biến dư nợ và doanh thu VAT 12 tháng gần nhất"
 DEBT_CHART_TITLE_DEBT_ONLY = "Diễn biến dư nợ 12 tháng gần nhất"
 DEBT_CHART_COLUMNS = ("Tổng dư nợ (CIC)", "Doanh thu VAT")
@@ -435,6 +437,77 @@ def _build_cic_r21_structured_block(
             "sản bảo đảm nào — đây là thông tin có thật, không phải lỗi.",
         ],
     )
+
+
+def _build_ledger_structured_block(
+    selected: list[ClassifiedDocument],
+) -> str:
+    """Render the detail-ledger record for the prompt.
+
+    JSON like the other four, and deliberately so. A markdown table is denser,
+    but it was measurably worse: the agent's own report template is markdown
+    tables, so evidence in that shape reads as scaffolding rather than data —
+    the same run rendered as a table left the receivables and inventory sections
+    empty that JSON had filled.
+
+    One record covers every ledger file, so it is rendered ONCE no matter how
+    many documents carry it. ``fit_to_budget`` bounds the whole thing at once;
+    budgeting per document gave six files six full allowances against one prompt.
+    """
+
+    records = []
+    for doc in selected:
+        if doc.is_ledger and doc.ledger_extraction and not any(
+            record is doc.ledger_extraction for record in records
+        ):
+            records.append(doc.ledger_extraction)
+    if not records:
+        return ""
+
+    parts = [
+        LEDGER_BLOCK_HEADING,
+        "Trích từ sổ chi tiết / bảng cân đối phát sinh công nợ khách hàng nộp "
+        "dưới dạng Excel, gộp mọi file thành một bản: khoá của \"accounts\" là "
+        "số hiệu tài khoản.",
+        "SỐ LIỆU ĐỌC THẲNG TỪ Ô EXCEL, không qua OCR và không do mô hình nào "
+        "chép lại — đúng nguyên văn con số trong file. \"units\" ghi đơn vị "
+        "từng trường: \"vnd\" là ĐỒNG, \"quantity\" là số lượng.",
+        'Báo cáo trình bày theo TỶ VNĐ. Khi chép một số "vnd" vào báo cáo, hãy '
+        'GHI NGUYÊN SỐ ĐỒNG CÓ DẤU PHÂN CÁCH NGHÌN (ví dụ 225.510.140.846) và '
+        'để chương trình tự quy đổi — đừng tự chia cho một tỷ. Một lượt chạy '
+        'trước đã chia nhầm cho một triệu và biến 225,51 tỷ thành 225.510,14.',
+        'ĐÂY LÀ DỮ LIỆU ĐỂ ĐIỀN VÀO BÁO CÁO, không phải khung mẫu. "category" '
+        'cho biết điền vào mục nào của báo cáo: "receivable" → Phải thu khách '
+        'hàng; "payable" → Phải trả người bán (số dư bên NỢ của tài khoản này '
+        'là Trả trước cho người bán); "inventory" → Hàng tồn kho; '
+        '"fixed_asset" → Tài sản cố định, tài sản dở dang dài hạn; "cash" → '
+        'Tiền và các khoản tương đương tiền; "borrowing" → Vay nợ ngắn hạn và '
+        'dài hạn; "equity" → Vốn chủ sở hữu; "other_receivable" → Các khoản '
+        'mục tài sản khác; "other_payable" → Các khoản mục nguồn vốn khác.',
+        'Tên trường: "opening_debit"/"opening_credit" là dư đầu kỳ bên nợ/có, '
+        '"debit_movement"/"credit_movement" là phát sinh nợ/có, '
+        '"closing_debit"/"closing_credit" là dư cuối kỳ; hàng tồn kho dùng '
+        '"opening_/inflow_/outflow_/closing_" kèm "_quantity" hoặc "_value". '
+        '"source_columns" cho biết mỗi trường ứng với cột nào trong file gốc.',
+        '"items" là toàn bộ dòng chi tiết; cột nào trong file có giá trị 0 thì '
+        'ghi 0 chứ không lược đi. Nếu có dòng tên '
+        f'"{ledger_extraction.RESIDUAL_LABEL} (N)" thì đó là tổng gộp của N '
+        'dòng nhỏ không liệt kê riêng, nên tổng các dòng luôn khớp "totals" — '
+        'đừng cộng "items" rồi gọi đó là tổng khi đã có "totals".',
+        '"code_source": "printed" nghĩa là số hiệu tài khoản in trong file; '
+        '"convention" nghĩa là file không in số hiệu và chương trình xếp theo '
+        'quy ước hệ thống tài khoản. Đừng trích dẫn số hiệu "convention" như '
+        'thể khách hàng đã ghi nó.',
+    ]
+    for record in records:
+        parts.append(
+            json.dumps(
+                ledger_extraction.fit_to_budget(record),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    return "\n\n".join(parts)
 
 
 def _build_sitevisit_structured_block(
