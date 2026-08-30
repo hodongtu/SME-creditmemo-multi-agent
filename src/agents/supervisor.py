@@ -1,4 +1,5 @@
 import inspect
+import json
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -84,14 +85,10 @@ from src.agents.extraction.ledger_extraction import (
     extract_ledger_batch,
 )
 from src.agents.calculator.credit_need_calculator import build_credit_need_table
+from src.tools.customer_key import resolve_customer_key
 from src.agents import prompt_blocks
 from src.agents.extraction.vat_revenue import strip_vat_revenue_block
-from src.agents.specialist import (
-    BusinessActivityAnalysis,
-    CreditProposalAnalysis,
-    CreditRelationshipAnalysis,
-    FinancialAnalysis,
-)
+from src.agents.specialist import SPECIALIST_BY_AGENT
 
 DEFAULT_ROUTE: AgentName = "FINANCIAL_ANALYSIS_AGENT"
 DEFAULT_WORKFLOW_MODE: WorkflowMode = "single_financial_analysis"
@@ -294,13 +291,6 @@ class Supervisor:
     _build_credit_need_block = staticmethod(prompt_blocks._build_credit_need_block)
     _build_debt_chart_block = staticmethod(prompt_blocks._build_debt_chart_block)
 
-    ROUTE_AGENTS: dict[str, tuple[str, ...]] = {
-        "BUSINESS_ACTIVITY_AGENT": ("BUSINESS_ACTIVITY_AGENT",),
-        "CREDIT_RELATIONSHIP_AGENT": ("CREDIT_RELATIONSHIP_AGENT",),
-        "FINANCIAL_ANALYSIS_AGENT": ("FINANCIAL_ANALYSIS_AGENT",),
-        "CREDIT_PROPOSAL_AGENT": ("CREDIT_PROPOSAL_AGENT",),
-    }
-
     DEBT_CHART_ANCHORS = ("dien bien du no", "quan he tin dung")
     RELEVANCE_SCORE = {"R": 2.0, "O": 1.0}
 
@@ -334,6 +324,7 @@ class Supervisor:
         workflow.add_node("classify_documents", self._graph_classify_documents)
         workflow.add_node("evidence_gap_check", self._graph_evidence_gap_check)
         workflow.add_node("extract_documents", self._graph_extract_documents)
+        workflow.add_node("fetch_reference_data", self._graph_fetch_reference_data)
         workflow.add_node(
             "single_business_activity",
             self._graph_run_business_activity,
@@ -359,8 +350,11 @@ class Supervisor:
             self._graph_after_evidence_gap_check,
             {"blocked": END, "continue": "extract_documents"},
         )
+        # After extraction, not before: the customer key is read out of the
+        # extraction results, so there is nothing to query with until they exist.
+        workflow.add_edge("extract_documents", "fetch_reference_data")
         workflow.add_conditional_edges(
-            "extract_documents",
+            "fetch_reference_data",
             self._graph_select_workflow_branch,
             {
                 "single_business_activity": "single_business_activity",
@@ -538,6 +532,101 @@ class Supervisor:
             "steps": steps,
         }
 
+    def _graph_fetch_reference_data(
+        self,
+        state: UnderwritingGraphState,
+    ) -> UnderwritingGraphState:
+        """Query the reference data this route's agents read.
+
+        Nothing here is optional-but-silent. A missing executor, a customer key
+        that could not be read, a key the wrong shape, a tool the folder's own
+        documents already cover — each ends in a step-log line saying which, so a
+        report thin on internal data can be told from one that was never asked.
+        """
+
+        documents = state.get("documents") or []
+        steps = state.get("steps", [])
+        route = (state.get("decision") or {}).get("route", DEFAULT_ROUTE)
+        specialist = SPECIALIST_BY_AGENT.get(route)
+        wanted = list(specialist.query_tools) if specialist else []
+        if not wanted:
+            return {"reference_data": {}, "customer_key": {}, "steps": steps}
+
+        key = resolve_customer_key(documents)
+        for warning in key.warnings:
+            steps.append(f"Customer key: {warning}")
+
+        executor = self.config.query_executor
+        if executor is None or not key.usable:
+            reason = ("No query_executor configured." if executor is None
+                      else "Không xác định được mã số thuế.")
+            steps.append(
+                f"Skipped reference data for {len(wanted)} tool(s): {reason}"
+            )
+            return {"reference_data": {}, "customer_key": key._asdict(),
+                    "steps": steps}
+
+        steps.append(
+            f"Customer key: MST {key.tax_code} đọc từ {key.source_file} "
+            f"({key.source_field})"
+        )
+        present = {doc.document_type for doc in documents}
+        fetched: dict[str, Any] = {}
+        for query_tool in wanted:
+            extras = getattr(query_tool, "extras", None) or {}
+            covered = sorted(present & set(extras.get("superseded_by", ())))
+            if covered:
+                # The folder already holds the paper version, and that one wins.
+                steps.append(
+                    f"Skipped {query_tool.name} query: hồ sơ đã có "
+                    f"{', '.join(covered)}"
+                )
+                continue
+            try:
+                # A LangChain tool answers with a string; json.loads is the
+                # contract, not a workaround for it.
+                fetched[query_tool.name] = json.loads(
+                    query_tool.invoke(
+                        {"tax_code": key.tax_code, "executor": executor}
+                    )
+                )
+                steps.append(f"{query_tool.name} query: ok cho MST {key.tax_code}")
+            except Exception as exc:
+                # A database that is down must not take the report with it: the
+                # documents are still evidence, and the block simply stays empty.
+                steps.append(
+                    f"{query_tool.name} query failed: {type(exc).__name__}: "
+                    f"{str(exc)[:200]}"
+                )
+        # The key travels with the rows so the block that renders them can say
+        # whose they are; "_key" is not a tool name, and the block builder
+        # only ever looks up labels.
+        fetched["_key"] = key._asdict()
+        # Recomputed rather than guessed ahead: the gap check runs before this
+        # node, so at that point nobody knows whether a query will answer. Now
+        # it is known, and the summary the agent reads should say so.
+        covered = {
+            type_id
+            for query_tool in wanted if query_tool.name in fetched
+            for type_id in (getattr(query_tool, "extras", None) or {}).get(
+                "superseded_by", ()
+            )
+        }
+        state_update: dict[str, Any] = {
+            "reference_data": fetched,
+            "customer_key": key._asdict(),
+            "steps": steps,
+        }
+        if covered:
+            state_update["gap_analysis"] = self._analyze_evidence_gaps(
+                documents, route, covered
+            )
+            steps.append(
+                "Evidence gap re-checked: "
+                f"{', '.join(sorted(covered))} lấy từ truy vấn hệ thống"
+            )
+        return state_update
+
     @staticmethod
     def _graph_select_workflow_branch(
         state: UnderwritingGraphState,
@@ -603,6 +692,7 @@ class Supervisor:
                 state.get("execution_plan") or {},
                 state.get("gap_analysis") or {},
                 state.get("steps", []),
+                state.get("reference_data") or {},
             ),
         }
 
@@ -620,6 +710,7 @@ class Supervisor:
             state.get("execution_plan") or {},
             state.get("gap_analysis") or {},
             state.get("steps", []),
+            state.get("reference_data") or {},
         )
 
     # ── Entry point ───────────────────────────────────────────────────────
@@ -931,7 +1022,10 @@ class Supervisor:
     def _passes_needed_for_route(cls, route: str) -> set[str]:
         """Which extraction passes the agents on this route actually consume."""
 
-        agents = set(cls.ROUTE_AGENTS.get(route, ()))
+        # One agent per route since the routing tier went: the map this used to
+        # read was {agent: (agent,)}, an identity table whose only real content
+        # was the list of valid ids — which SPECIALIST_BY_AGENT already holds.
+        agents = {route} if route in SPECIALIST_BY_AGENT else set()
         return {
             pass_.label
             for pass_ in EXTRACTION_PASSES
@@ -1044,10 +1138,10 @@ class Supervisor:
         for a credit proposal, with nothing in the output to point at.
         """
 
-        if agent not in cls.ROUTE_AGENTS:
+        if agent not in SPECIALIST_BY_AGENT:
             raise ValueError(
                 f"unknown agent {agent!r}; expected one of "
-                f"{sorted(cls.ROUTE_AGENTS)}"
+                f"{sorted(SPECIALIST_BY_AGENT)}"
             )
         return {
             "route": agent,
@@ -1074,6 +1168,7 @@ class Supervisor:
         self,
         documents: list[ClassifiedDocument],
         route: str,
+        covered_types: set[str] | None = None,
     ) -> dict[str, Any]:
         inventory = {
             "financial_documents": [],
@@ -1128,7 +1223,7 @@ class Supervisor:
         # cannot: that only knows a bucket holds no evidence, never what was
         # supposed to be in it.
         for group_id, group_label, absent in self._missing_required_types(
-            documents, route
+            documents, route, covered_types
         ):
             missing.append(
                 {
@@ -1175,6 +1270,7 @@ class Supervisor:
     def _missing_required_types(
         documents: list[ClassifiedDocument],
         route: str,
+        covered_types: set[str] | None = None,
     ) -> list[tuple[str, str, list[str]]]:
         """Per upload box: (id, label, short labels of the mandatory types absent).
 
@@ -1194,7 +1290,12 @@ class Supervisor:
         re-issue, so every case is read against ``cap_moi``.
         """
 
+        # A type queried from the bank's systems is not missing evidence, it is
+        # evidence that arrived by another door. Without this every DB-mode run
+        # carried "Hộp Hồ sơ nội bộ thiếu Thông tin CIC khách hàng vay" into the
+        # agent's prompt while the CIC data sat in the prompt beside it.
         present = {doc.document_type for doc in documents if doc.document_type}
+        present |= covered_types or set()
         boxes: dict[str, tuple[str, list[str]]] = {}
         for doc_type in load_matrix().types.values():
             requirement = doc_type.requirement.get("cap_moi", "")
@@ -1273,7 +1374,7 @@ class Supervisor:
             # Every remaining route is a single specialist. Unknown ids land
             # here too and are answered with the default rather than a plan
             # naming an agent that no longer exists.
-            agents = [route if route in self.ROUTE_AGENTS else DEFAULT_ROUTE]
+            agents = [route if route in SPECIALIST_BY_AGENT else DEFAULT_ROUTE]
             order = [
                 (
                     "financial_analysis"
@@ -1307,17 +1408,15 @@ class Supervisor:
         execution_plan: dict[str, Any],
         gap_analysis: dict[str, Any],
         steps: list[str],
+        reference_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         steps.append(f"Running {agent_name}")
-        user_input = self._build_user_input(documents, agent_name, gap_analysis)
-        if agent_name == "FINANCIAL_ANALYSIS_AGENT":
-            agent = FinancialAnalysis(self.config.analysis_llm)
-        elif agent_name == "CREDIT_RELATIONSHIP_AGENT":
-            agent = CreditRelationshipAnalysis(self.config.analysis_llm)
-        elif agent_name == "CREDIT_PROPOSAL_AGENT":
-            agent = CreditProposalAnalysis(self.config.analysis_llm)
-        else:
-            agent = BusinessActivityAnalysis(self.config.analysis_llm)
+        user_input = self._build_user_input(
+            documents, agent_name, gap_analysis, reference_data or {}
+        )
+        agent = SPECIALIST_BY_AGENT.get(
+            agent_name, SPECIALIST_BY_AGENT[DEFAULT_ROUTE]
+        )(self.config.analysis_llm)
         # Namespaced even though a single-agent run has nobody to collide with:
         # the labels a reviewer reads in the .md should mean the same thing here
         # as in a full memo, and this is the one path all five modes share.
@@ -1499,11 +1598,29 @@ class Supervisor:
 
     # ── Assembling a specialist's prompt ──────────────────────────────────
 
+    @staticmethod
+    def _reference_provenance(reference_data: dict[str, Any]) -> str:
+        """Which customer these rows were fetched for, and on whose word.
+
+        The agent is told the key came off a document rather than from the
+        screen, because that is the difference between "the bank says" and "a
+        scan said, and the bank answered about whoever that was".
+        """
+
+        key = reference_data.get("_key") or {}
+        if not key.get("tax_code"):
+            return ""
+        return (
+            f"Truy vấn theo MST {key['tax_code']}, đọc từ "
+            f"{key.get('source_file') or 'hồ sơ'} ({key.get('source_field') or '?'})."
+        )
+
     def _build_user_input(
         self,
         documents: list[ClassifiedDocument],
         target_agent: str,
         gap_analysis: dict[str, Any],
+        reference_data: dict[str, Any] | None = None,
     ) -> str:
         budget = self.config.agent_input_char_budgets.get(target_agent, 12_000)
         base = (
@@ -1539,6 +1656,18 @@ class Supervisor:
         cic_r21_block = json_blocks["CIC R21"]
         sitevisit_block = json_blocks["Sitevisit"]
         ledger_block = json_blocks["Ledger"]
+        # One block per tool the target agent declares, in the order it lists
+        # them. An agent that declares none contributes nothing here.
+        target_class = SPECIALIST_BY_AGENT.get(target_agent)
+        reference_sections = [
+            prompt_blocks._build_tool_result_block(
+                query_tool,
+                (reference_data or {}).get(query_tool.name) or {},
+                self._reference_provenance(reference_data or {}),
+            )
+            for query_tool in (target_class.query_tools if target_class else ())
+        ]
+        reference_sections = [block for block in reference_sections if block]
         # State the periods explicitly: several BCTC files overlap by a year, so
         # the merged set (e.g. 2 files -> 3 years) does not match the sample
         # column count in the layout. Telling the agent removes the guesswork.
@@ -1596,6 +1725,7 @@ class Supervisor:
             - len(cic_r21_block)
             - len(sitevisit_block)
             - len(ledger_block)
+            - sum(len(block) for block in reference_sections)
             - len(credit_need_block)
             - len(unit_warning)
             - block_overhead,
@@ -1662,6 +1792,7 @@ class Supervisor:
         cic_r21_section = f"{cic_r21_block}\n\n" if cic_r21_block else ""
         sitevisit_section = f"{sitevisit_block}\n\n" if sitevisit_block else ""
         ledger_section = f"{ledger_block}\n\n" if ledger_block else ""
+        reference_text = "".join(f"{block}\n\n" for block in reference_sections)
         credit_need_section = (
             f"{credit_need_block}\n\n" if credit_need_block else ""
         )
@@ -1679,6 +1810,7 @@ class Supervisor:
                 f"{cic_r21_section}"
                 f"{sitevisit_section}"
                 f"{ledger_section}"
+                f"{reference_text}"
                 f"{credit_need_section}"
                 f"{self.DOC_SECTION_HEADER}"
                 f"{docs_text}"

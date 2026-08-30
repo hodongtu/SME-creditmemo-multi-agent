@@ -89,6 +89,10 @@ class UnderwritingGraphState(TypedDict, total=False):
     decision: dict[str, Any]
     workflow_mode: WorkflowMode
     gap_analysis: dict[str, Any]
+    # Reference data fetched from the bank's systems, keyed by the name of the
+    # tool that fetched it, plus the customer key it was fetched with.
+    reference_data: dict[str, Any]
+    customer_key: dict[str, Any]
     execution_plan: dict[str, Any]
     steps: list[str]
     output_state: dict[str, Any]

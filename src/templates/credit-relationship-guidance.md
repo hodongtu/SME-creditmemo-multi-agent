@@ -9,6 +9,9 @@ description: >-
 - Bố cục được cung cấp là khung tham khảo, không phải biểu mẫu bắt buộc điền kín.
 - Không lặp giá trị của kỳ này sang kỳ khác để lấp ô trống.
 - Bảng biểu chỉ hiển thị những kỳ/năm có số liệu.
+- Mục 1 lấy từ khối [QUAN HỆ TÍN DỤNG NỘI BỘ — TRUY VẤN HỆ THỐNG]; mục 2 lấy từ khối CIC,
+  dù khối đó đọc từ file khách nộp hay truy vấn từ hệ thống. Không lấy số của mục này điền cho
+  mục kia — một bên là dư nợ tại chính ngân hàng mình, một bên là tại các TCTD khác.
 - Nếu không có dữ liệu T24 hoặc CIC, ghi rõ "Không có dữ liệu" và nêu giới hạn này trong phần bình luận — không suy đoán dư nợ hay nhóm nợ.
  
 #### TRỌNG TÂM PHÂN TÍCH

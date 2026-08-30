@@ -58,6 +58,13 @@ but the values you write stay in the document's Vietnamese — they are read on
 into a Vietnamese report:
 
 {{
+  "customer": {{
+    "ten": "tên doanh nghiệp như in trên tài liệu, hoặc ''",
+    "ma_so_thue": "mã số thuế: ĐÚNG 10 chữ số, hoặc 13 với ba chữ số chi nhánh. Chép
+      nguyên chữ số, bỏ dấu cách và gạch nối. Không thấy in trên tài liệu thì '' —
+      KHÔNG suy ra từ mã nào khác, con số này dùng để tra cứu dữ liệu tín dụng và
+      một chữ số sai sẽ kéo về hồ sơ của doanh nghiệp khác"
+  }},
   "survey_info": {{
     "survey_date": "YYYY-MM-DD, or verbatim when unclear, null when absent",
     "officers": ["surveying officer's name"],

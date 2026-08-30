@@ -52,6 +52,10 @@ class Config:
     cic_r21_extraction_llm: Any = None
     sitevisit_extraction_llm: Any = None
     ledger_extraction_llm: Any = None
+    # Runs one reference-data query: (sql, params) -> list of row dicts. Left
+    # unset the pipeline queries nothing and says so; connecting, pooling and
+    # permissions belong to whoever supplies this.
+    query_executor: Any = None
     max_files: int = 50
     max_chars_per_document: int = 120_000
     document_classifier_rule_confidence_threshold: float = 0.65

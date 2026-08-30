@@ -7,6 +7,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 
+from src.matrix.document_matrix import get_type
+from src.tools import cic, t24
 from src.utils.paths import PROJECT_ROOT
 from src.types import truncate_text
 
@@ -15,9 +17,17 @@ class SpecialistAgent:
     """Base wrapper for specialist direct chains or tool agents."""
 
     name = "specialist_agent"
+    # The route id this class answers to, as the matrix and the graph spell it.
+    # Distinct from `name`, which is what create_agent is told.
+    agent_id = ""
     structure_relative_path = ""
     guidance_relative_path = ""
     intro = ""
+    # Reference-data tools the PIPELINE calls before this agent runs — not the
+    # model. Deliberately NOT named `tools`: that name is the constructor
+    # argument feeding create_agent, and putting these there would flip every
+    # specialist from one direct call into an agent loop.
+    query_tools: list = []
     require_citations = True
 
     @staticmethod
@@ -337,6 +347,7 @@ class BusinessActivityAnalysis(SpecialistAgent):
     """Business activity analysis specialist."""
 
     name = "business_activity_agent"
+    agent_id = "BUSINESS_ACTIVITY_AGENT"
     structure_relative_path = "src/templates/business-activity-structure.md"
     guidance_relative_path = "src/templates/business-activity-guidance.md"
     intro = """You are an agent among a team of assistants. You are specialized 
@@ -357,6 +368,7 @@ class FinancialAnalysis(SpecialistAgent):
     """Financial analysis specialist."""
 
     name = "financial_analysis_agent"
+    agent_id = "FINANCIAL_ANALYSIS_AGENT"
     require_citations = False
     structure_relative_path = "src/templates/financial-analysis-structure.md"
     guidance_relative_path = "src/templates/financial-analysis-guidance.md"
@@ -383,14 +395,24 @@ class CreditRelationshipAnalysis(SpecialistAgent):
     """Credit relationship specialist using T24 and CIC database tools."""
 
     name = "credit_relationship_agent"
+    agent_id = "CREDIT_RELATIONSHIP_AGENT"
+    # Section 1 of the report is this bank's own relationship; section 2 is
+    # every other institution, from the bureau when no CIC file was uploaded.
+    query_tools = [
+        t24.get_internal_facilities,
+        t24.get_internal_credit_quality,
+        cic.get_bureau_credit_report,
+    ]
     structure_relative_path = "src/templates/credit-relationship-structure.md"
     guidance_relative_path = "src/templates/credit-relationship-guidance.md"
     intro = """You are an agent among a team of assistants. You are specialized
     for credit relationship analysis.
 
     INPUT DATA SOURCES:
-    - Internal T24 credit relationship data queried by database tools.
-    - CIC/bureau credit data queried by database tools.
+    - Internal credit relationship data, queried by the pipeline before you run
+    and handed to you in a labelled block. You do not call anything yourself.
+    - CIC/bureau credit data, either extracted from a report the customer
+    uploaded or queried the same way. The block says which.
 
     CORE RESPONSIBILITIES:
     - Assess current outstanding balance, credit limits, facility types, maturity,
@@ -407,6 +429,11 @@ class CreditProposalAnalysis(SpecialistAgent):
     """Credit proposal specialist."""
 
     name = "credit_proposal_agent"
+    agent_id = "CREDIT_PROPOSAL_AGENT"
+    # Only the existing-limit column: what this bank has already granted. The
+    # repayment history behind section 1.2 is the relationship agent's business,
+    # and splitting the queries per tool is what lets this one ask for less.
+    query_tools = [t24.get_internal_facilities]
     structure_relative_path = "src/templates/credit-proposal-structure.md"
     guidance_relative_path = "src/templates/credit-proposal-guidance.md"
     intro = """You are an agent among a team of assistants. You are specialized
@@ -423,3 +450,45 @@ class CreditProposalAnalysis(SpecialistAgent):
     - This is a PROPOSAL, not an approval. Never invent a limit, a valuation or a
     repayment source that the documents do not support.
     """
+
+
+SPECIALIST_BY_AGENT: dict[str, type[SpecialistAgent]] = {
+    cls.agent_id: cls
+    for cls in (
+        BusinessActivityAnalysis,
+        FinancialAnalysis,
+        CreditRelationshipAnalysis,
+        CreditProposalAnalysis,
+    )
+}
+
+
+# A declaration is only worth trusting if a bad one cannot reach a customer's
+# run, so it is checked when the module loads rather than when a query fires.
+if len(SPECIALIST_BY_AGENT) != 4:
+    raise ValueError(
+        f"SPECIALIST_BY_AGENT có {len(SPECIALIST_BY_AGENT)} mục cho 4 lớp — "
+        f"hai lớp khai trùng agent_id"
+    )
+for _agent_id, _cls in SPECIALIST_BY_AGENT.items():
+    for _query_tool in _cls.query_tools:
+        _extras = getattr(_query_tool, "extras", None) or {}
+        if not _extras.get("heading"):
+            raise ValueError(
+                f"{_agent_id} / {_query_tool.name!r}: thiếu extras['heading']"
+            )
+        for _type_id in _extras.get("superseded_by", ()):
+            if get_type(_type_id) is None:
+                raise ValueError(
+                    f"{_agent_id} / {_query_tool.name!r}: superseded_by "
+                    f"{_type_id!r} không phải document_type trong ma trận"
+                )
+        # Every argument must be injected. A tool that leaves one visible is one
+        # a model could fill in — and the argument in question decides whose
+        # credit history the query returns.
+        _visible = list(_query_tool.tool_call_schema.model_fields)
+        if _visible:
+            raise ValueError(
+                f"{_agent_id} / {_query_tool.name!r}: tham số {_visible} không "
+                f"phải InjectedToolArg — model nhìn thấy và điền được"
+            )

@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import asdict
+from typing import Any
 
 from src.agents.extraction.cic_s10a_extraction import merge_debt_series
 from src.agents.calculator.credit_need_calculator import build_credit_need_table
@@ -507,6 +508,36 @@ def _build_ledger_structured_block(
                 indent=2,
             )
         )
+    return "\n\n".join(parts)
+
+
+def _build_tool_result_block(
+    query_tool: Any,
+    record: dict[str, Any],
+    provenance: str = "",
+) -> str:
+    """Render one reference-data tool's result for the prompt.
+
+    One function for every tool, because a tool already carries what used to be
+    written out per block: the heading in ``extras``, and the reading rules in
+    its docstring, which is where LangChain puts a tool's description and where
+    a reader looks first.
+
+    The provenance line is the point of writing a header at all. Every other
+    block in this prompt is a model's reading of a page; this one is rows the
+    bank's own systems returned, for a customer identified by a tax code that
+    was itself read off a page. The agent should know both halves of that.
+    """
+
+    if not record:
+        return ""
+    extras = getattr(query_tool, "extras", None) or {}
+    parts = [extras.get("heading") or f"[{query_tool.name}]"]
+    if provenance:
+        parts.append(provenance)
+    if query_tool.description:
+        parts.append(query_tool.description.strip())
+    parts.append(json.dumps(record, ensure_ascii=False, indent=2))
     return "\n\n".join(parts)
 
 
