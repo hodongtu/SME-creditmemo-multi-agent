@@ -201,6 +201,10 @@ class Flowchart:
     edges: list[tuple[str, str, str]]
     # node id -> style, resolved from classDef/class/:::/style declarations.
     node_style: dict[str, dict[str, str]]
+    # node id -> "hexagon" for {{...}}, "rect" for everything else. Only two
+    # shapes because the reports only use two; mermaid's rounded, stadium and
+    # cylinder forms would be code nobody has asked for.
+    node_shape: dict[str, str]
     # (title, member node ids) for each subgraph, in declaration order.
     groups: list[tuple[str, list[str]]]
 
@@ -231,6 +235,7 @@ def _parse(source: str) -> Flowchart:
     class_styles: dict[str, dict[str, str]] = {}
     node_classes: dict[str, str] = {}
     node_style: dict[str, dict[str, str]] = {}
+    node_shape: dict[str, str] = {}
     groups: list[tuple[str, list[str]]] = []
     group_stack: list[tuple[str, list[str]]] = []
 
@@ -240,6 +245,14 @@ def _parse(source: str) -> Flowchart:
             order.append(node_id)
         elif raw_label:
             labels[node_id] = _clean_label(raw_label, labels[node_id])
+        # Read from the raw label before _clean_label strips the brackets off.
+        # A node written once with its shape and referenced bare afterwards —
+        # "KH{{Công ty A}}" then "V1 --> KH" — keeps the shape it was declared
+        # with, so only a label that carries brackets may set it.
+        if raw_label and raw_label.startswith("{{"):
+            node_shape[node_id] = "hexagon"
+        elif raw_label:
+            node_shape.setdefault(node_id, "rect")
         for _, members in group_stack:
             if node_id not in members:
                 members.append(node_id)
@@ -318,6 +331,7 @@ def _parse(source: str) -> Flowchart:
         labels=labels,
         edges=edges,
         node_style=node_style,
+        node_shape=node_shape,
         groups=[(title, members) for title, members in groups if members],
     )
 

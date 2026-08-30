@@ -13,6 +13,8 @@ Pure text analysis — no LLM call.
 import re
 import unicodedata
 
+from src.utils.report.citations import _mask_code_fences
+
 # Placeholders the model must substitute. The structure files write {{Name}};
 # ChatPromptTemplate unescapes that to {Name} before the model sees it, so a
 # leaked placeholder appears single-braced. Square-bracket placeholders are the
@@ -78,9 +80,20 @@ def check_template_leakage(report: str) -> list[str]:
     text = report or ""
     findings: list[str] = []
 
+    # Placeholders are looked for OUTSIDE code fences only. A mermaid hexagon
+    # node is written "KH{{Tên khách hàng}}", which is indistinguishable from an
+    # unfilled {{Placeholder}} when the name is a single word — the real sample
+    # customer is called VIMID, so "KH{{VIMID}}" produced a finding saying the
+    # report still had blanks in it. The marker scan below still reads the whole
+    # text: internal guidance leaks as prose, not inside a diagram.
+    # _mask_code_fences returns one flag per line, so join the unflagged ones.
+    outside_fences = "\n".join(
+        line for line, fenced in zip(text.splitlines(), _mask_code_fences(text))
+        if not fenced
+    )
     placeholders = sorted(
-        {match.group(0) for match in _CURLY_PLACEHOLDER.finditer(text)}
-        | {match.group(0) for match in _SQUARE_PLACEHOLDER.finditer(text)}
+        {match.group(0) for match in _CURLY_PLACEHOLDER.finditer(outside_fences)}
+        | {match.group(0) for match in _SQUARE_PLACEHOLDER.finditer(outside_fences)}
     )
     if placeholders:
         shown = ", ".join(placeholders[:6])

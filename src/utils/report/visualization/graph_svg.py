@@ -34,6 +34,10 @@ NODE_MAX_WIDTH = 190
 # looks calmer than what this drew before.
 NODE_PADDING_X = 14
 NODE_PADDING_Y = 11
+# How far a hexagon's points stick out past its flat middle. The label sits in
+# that middle, so this is added to the node's width on top of the usual padding
+# — without it the text runs into the slanted ends.
+HEX_INSET = NODE_PADDING_X
 LINE_HEIGHT = 17
 # SVG user units are CSS px, and WeasyPrint prints them at 72/96 — so a size
 # here is 0.75 of what lands on the page. Measured, not assumed: a 20px label
@@ -180,6 +184,8 @@ class _Node:
     fill: str
     stroke: str
     colour: str
+    # "hexagon" for a {{...}} node, "rect" for the rest.
+    shape: str = "rect"
     rank: int = 0
     order: float = 0.0
     # Which wrapped row this node sits in; 0 for every diagram that fits on one.
@@ -531,6 +537,8 @@ def _size_nodes(nodes: dict[str, _Node], max_width: float = NODE_MAX_WIDTH) -> N
 
     for node in nodes.values():
         width = max(text_width(line, FONT_SIZE) for line in node.lines) + 2 * NODE_PADDING_X
+        if node.shape == "hexagon":
+            width += 2 * HEX_INSET
         node.width = min(max_width, max(NODE_MIN_WIDTH, width))
         node.height = len(node.lines) * LINE_HEIGHT + 2 * NODE_PADDING_Y
 
@@ -771,12 +779,19 @@ def render_svg(chart) -> str | None:
         built: dict[str, _Node] = {}
         for node_id in chart.order:
             style = chart.node_style.get(node_id, {})
+            shape = chart.node_shape.get(node_id, "rect")
+            # A hexagon's label has to fit the flat middle, not the whole box,
+            # so it wraps against a narrower width. Widening the node is enough
+            # only until the label reaches max_width — past that the cap wins
+            # and the text would run out over the slanted ends.
+            wrap_width = max_width - 2 * HEX_INSET if shape == "hexagon" else max_width
             built[node_id] = _Node(
                 node_id=node_id,
-                lines=_text_lines(chart.labels[node_id], max_width),
+                lines=_text_lines(chart.labels[node_id], wrap_width),
                 fill=style.get("fill", DEFAULT_FILL),
                 stroke=style.get("stroke", DEFAULT_STROKE),
                 colour=style.get("color", DEFAULT_TEXT),
+                shape=shape,
             )
         built_edges = [
             _Edge(src, dst, label, _text_lines(label) if label else [])
@@ -950,6 +965,16 @@ def render_svg(chart) -> str | None:
                     f'text-anchor="{anchor}">{html.escape(line)}</text>'
                 )
 
+    def _hexagon(x: float, y: float, width: float, height: float) -> str:
+        """Six points: two on the vertical mid-line, four at the flat top/bottom."""
+
+        inset = min(HEX_INSET, width / 3)
+        mid = y + height / 2
+        return " ".join(f"{px:.1f},{py:.1f}" for px, py in (
+            (x, mid), (x + inset, y), (x + width - inset, y),
+            (x + width, mid), (x + width - inset, y + height), (x + inset, y + height),
+        ))
+
     for node in nodes.values():
         # The depth in the pen this styling came from is a box-shadow, and two
         # measurements decided how to get it here. WeasyPrint drops box-shadow
@@ -958,16 +983,29 @@ def render_svg(chart) -> str | None:
         # An offset rectangle behind the box is plain geometry, so it cannot be
         # dropped, and opacity does render: sampled from the PDF, an 0.13 fill
         # comes out at tone 228 against 41 for the same colour at full strength.
-        parts.append(
-            f'<rect x="{node.x + SHADOW_OFFSET:.1f}" y="{node.y + SHADOW_OFFSET:.1f}" '
-            f'width="{node.width:.1f}" height="{node.height:.1f}" rx="3" '
-            f'fill="{SHADOW_COLOUR}" opacity="{SHADOW_OPACITY}"/>'
-        )
-        parts.append(
-            f'<rect x="{node.x:.1f}" y="{node.y:.1f}" width="{node.width:.1f}" '
-            f'height="{node.height:.1f}" rx="3" fill="{node.fill}" '
-            f'stroke="{node.stroke}" stroke-width="1.2"/>'
-        )
+        # The shadow follows the same outline as the body — a rectangular
+        # shadow behind a hexagon shows at the corners.
+        if node.shape == "hexagon":
+            parts.append(
+                f'<polygon points="'
+                f'{_hexagon(node.x + SHADOW_OFFSET, node.y + SHADOW_OFFSET, node.width, node.height)}" '
+                f'fill="{SHADOW_COLOUR}" opacity="{SHADOW_OPACITY}"/>'
+            )
+            parts.append(
+                f'<polygon points="{_hexagon(node.x, node.y, node.width, node.height)}" '
+                f'fill="{node.fill}" stroke="{node.stroke}" stroke-width="1.2"/>'
+            )
+        else:
+            parts.append(
+                f'<rect x="{node.x + SHADOW_OFFSET:.1f}" y="{node.y + SHADOW_OFFSET:.1f}" '
+                f'width="{node.width:.1f}" height="{node.height:.1f}" rx="3" '
+                f'fill="{SHADOW_COLOUR}" opacity="{SHADOW_OPACITY}"/>'
+            )
+            parts.append(
+                f'<rect x="{node.x:.1f}" y="{node.y:.1f}" width="{node.width:.1f}" '
+                f'height="{node.height:.1f}" rx="3" fill="{node.fill}" '
+                f'stroke="{node.stroke}" stroke-width="1.2"/>'
+            )
         # Centred in the box rather than pinned to its top, now that every box
         # is as tall as the tallest label needs.
         block = len(node.lines) * LINE_HEIGHT

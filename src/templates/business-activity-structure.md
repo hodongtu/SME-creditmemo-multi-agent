@@ -18,7 +18,7 @@ flowchart LR
   SP3[{{SanPhamDauVao3}}] --> V3[{{DauVao3}}]
   SP4[{{SanPhamDauVao4}}] --> V4[{{DauVao4}}]
   SP5[{{SanPhamDauVao5}}] --> V5[{{DauVao5}}]
-  V1 -->|{{TyTrong}}| KH[{{TenKhachHang}}]
+  V1 -->|{{TyTrong}}| KH{{{{TenKhachHang}}}}
   V2 -->|{{TyTrong}}| KH
   V3 -->|{{TyTrong}}| KH
   V4 -->|{{TyTrong}}| KH

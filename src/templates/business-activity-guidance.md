@@ -50,6 +50,11 @@ description: >-
   tầng của hệ thống và trang báo cáo sẽ có hai ba bộ màu lẫn lộn.
     - Việc của bạn là ghi ĐÚNG tỷ trọng lên dây nối. Có số đúng thì phần tô màu tự
   xảy ra.
+  - HÌNH DẠNG KHỐI
+    - Khối doanh nghiệp được thẩm định (tầng giữa) viết bằng `{{{{Tên công ty}}}}` — hệ thống
+  vẽ nó thành hình lục giác để tách chủ thể khỏi các đối tác.
+    - MỌI khối còn lại — sản phẩm và đối tác, cả đầu vào lẫn đầu ra — viết bằng `[Tên]`. Nếu
+  khối nào cũng lục giác thì không còn gì nổi bật.
     - Ví dụ ĐÚNG — không một dòng màu nào, hàng rào ```mermaid KHÔNG thụt đầu dòng:
 
 ```mermaid
@@ -60,7 +65,7 @@ flowchart LR
   R1[Đối tác đầu vào A] -->|45%| KH
   R2[Đối tác đầu vào B] -->|20%| KH
   R3[Đối tác đầu vào C] -->|35%| KH
-  KH[Công ty ABC] -->|35%| P4
+  KH{{{{Công ty ABC}}}} -->|35%| P4
   KH -->|25%| P5
   KH -->|20%| P6
   P4[Sản phẩm đầu ra X] -->|30%| R4[Đối tác đầu ra X]
