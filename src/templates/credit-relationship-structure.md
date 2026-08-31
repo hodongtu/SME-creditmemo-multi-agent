@@ -23,12 +23,12 @@
 |---|---|
 | *Nhóm nợ hiện tại* |  |
 | *Số ngày quá hạn* |  |
-| *Số dư quá hạn* |  |
+| *Số dư quá hạn (tỷ VNĐ)* |  |
 | *Số lần quá hạn 12 tháng gần nhất* |  |
 | *Nhóm nợ xấu nhất 36 tháng gần nhất* |  |
 | *Đã cơ cấu lại nợ* |  |
 | *Quan hệ tín dụng từ* |  |
- 
+
 ## 2. Quan hệ tín dụng của khách hàng tại các TCTD
  
 ### 2.1 Chi tiết dư nợ/ nghĩa vụ tín dụng (ngày báo cáo: {{NgayBaoCaoDuLieu}})

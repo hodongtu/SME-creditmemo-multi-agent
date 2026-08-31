@@ -49,7 +49,7 @@ ORDER  BY rating_year DESC
 @tool(
     "get_bureau_credit_report",
     extras={
-        "heading": "[DỮ LIỆU CIC — TRUY VẤN HỆ THỐNG]",
+        "heading": "[BUREAU CREDIT REPORT]",
         # The customer's own CIC report beats a bureau lookup: a folder holding
         # one does not pay for the other, and the extracted version is what the
         # officer actually filed.

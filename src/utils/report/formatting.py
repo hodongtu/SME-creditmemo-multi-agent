@@ -7,6 +7,11 @@ VND_PER_BILLION = 1_000_000_000
 _AMOUNT_TOKEN = re.compile(r"[+-]?\d{1,3}(?:[.,]\d{3})+(?![\d.,])")
 _TRAILING_CURRENCY = re.compile(r"\s*(?:VN[ĐD]|đồng|VND)\b", re.IGNORECASE)
 _ALREADY_SCALED = re.compile(r"^\s*(?:tỷ|triệu|nghìn\s+tỷ|ngàn\s+tỷ)\b", re.IGNORECASE)
+# A markdown table row. Cells in one drop the "tỷ VNĐ" suffix because the table
+# already carries its unit on the line below it, and repeating it in all eighty
+# cells of a statement is noise. A figure standing in a sentence has no such
+# label, so it keeps the unit.
+_TABLE_ROW = re.compile(r"^\s*\|")
 
 
 def format_vn_number(value: float, decimals: int = 2) -> str:
@@ -15,9 +20,29 @@ def format_vn_number(value: float, decimals: int = 2) -> str:
     return formatted.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
 
 
-def to_billion_vnd(value: float, decimals: int = 2) -> str:
-    """Render a raw đồng amount as a 'tỷ VNĐ' string."""
-    return f"{format_vn_number(value / VND_PER_BILLION, decimals)} tỷ VNĐ"
+def render_money(value: float | None) -> str:
+    """A đồng amount the way every prompt block writes it.
+
+    One function so the blocks cannot drift apart on formatting, and no division
+    in it: đồng is what the extraction passes and the calculators produce, and
+    đồng is what the blocks say. Turning it into tỷ VNĐ belongs to
+    convert_amounts_in_text at the end of the run and to nobody else.
+
+    Grouped rather than bare on purpose — that final converter only recognises a
+    figure by its thousands separators, which is what keeps it off tax codes and
+    account numbers. A block writing 225510140846 would reach the report as a
+    number nothing downstream can read as money.
+    """
+
+    if value is None:
+        return "N/A"
+    return format_vn_number(value, 0)
+
+
+def to_billion_vnd(value: float, decimals: int = 2, suffix: bool = True) -> str:
+    """Render a raw đồng amount in tỷ VNĐ, with or without the unit written out."""
+    figure = format_vn_number(value / VND_PER_BILLION, decimals)
+    return f"{figure} tỷ VNĐ" if suffix else figure
 
 
 def _parse_grouped_amount(token: str) -> float | None:
@@ -46,10 +71,24 @@ def convert_amounts_in_text(text: str, decimals: int = 2) -> str:
 
     Skips percentages, values already expressed in tỷ/triệu/nghìn tỷ, and
     contiguous identifier digits (tax codes, registration numbers). Absorbs a
-    trailing "VNĐ"/"đồng" so the result is not double-labelled.
+    trailing "VNĐ"/"đồng" so the result is not double-labelled. Writes the unit
+    after figures in prose and leaves it off inside table cells — see _TABLE_ROW.
     """
     if not text:
         return text
+
+    # Line by line so each figure knows whether it is in a table. Safe because
+    # _AMOUNT_TOKEN matches only digits and separators, so no match can span a
+    # newline; split and join on the same character, so a trailing newline
+    # survives.
+    return "\n".join(
+        _convert_line(line, decimals, suffix=not _TABLE_ROW.match(line))
+        for line in text.split("\n")
+    )
+
+
+def _convert_line(text: str, decimals: int, suffix: bool) -> str:
+    """Convert every đồng amount on one line."""
 
     result = []
     cursor = 0
@@ -72,7 +111,7 @@ def convert_amounts_in_text(text: str, decimals: int = 2) -> str:
             continue
 
         currency = _TRAILING_CURRENCY.match(tail)
-        replacement = to_billion_vnd(value, decimals)
+        replacement = to_billion_vnd(value, decimals, suffix)
         # Preserve an explicit leading "+" (deltas / chênh lệch); the "-" sign is
         # already produced by number formatting for negative values.
         if token.lstrip()[:1] == "+" and value >= 0:

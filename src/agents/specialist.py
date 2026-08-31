@@ -111,7 +111,7 @@ class SpecialistAgent:
         document in the evidence. Take the page number or sheet name from the
         nearest "--- Page N ---" or "--- Sheet: ... ---" marker to that data in the
         document body; if the data came from the
-        [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT] block, use that line item's "page" field in
+        [EXTRACTED FINANCIAL STATEMENTS] block, use that line item's "page" field in
         the JSON, and if the line item has no "page", use the "page" of the
         statement containing it
         (balance_sheet/income_statement/cash_flow_statement).
@@ -119,8 +119,8 @@ class SpecialistAgent:
         source is the FILENAME listed under "NGUỒN SỐ LIỆU" in that block, for the
         year the number belongs to.
         - NEVER write an internal block label into the report. The strings
-        [PRE-COMPUTED FINANCIAL METRICS], [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT] and
-        [DỮ LIỆU ĐỀ NGHỊ CẤP TÍN DỤNG] are prompt-internal labels; a reader of the
+        [PRE-COMPUTED FINANCIAL METRICS], [EXTRACTED FINANCIAL STATEMENTS] and
+        [EXTRACTED CREDIT APPLICATION] are prompt-internal labels; a reader of the
         report has no idea what they are. Always cite the original document.
         - Never invent a page number, a filename or a marker — cite only what you
         can actually establish from the sources provided. Every [^N] used in the
@@ -184,7 +184,7 @@ class SpecialistAgent:
 
         EVIDENCE RULE (the most important one — it outranks filling in the layout):
         - Every number and every statement must be traceable to the evidence
-        supplied (document content, the [DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT] block, the
+        supplied (document content, the [EXTRACTED FINANCIAL STATEMENTS] block, the
         [PRE-COMPUTED FINANCIAL METRICS] block, or a tool result). Never use
         knowledge from outside the dossier.
         - Where a figure or a piece of information is NOT in the dossier, write
@@ -272,7 +272,7 @@ class SpecialistAgent:
         NEVER leave {{{{ }}}} in your answer.
         - The "Hồ sơ"/"Nguồn dữ liệu" field at the top of the report: the system
         has already prepared that list in the
-        [DANH SÁCH NGUỒN — CHÉP NGUYÊN VĂN] block in the evidence. COPY those
+        [SOURCE LIST — COPY VERBATIM] block in the evidence. COPY those
         lines exactly, one sub-line each. NEVER merge them, shorten them, or add
         or drop a line — the grouping and the period collapsing were computed by
         the system, and redoing them yourself produces the wrong document count.

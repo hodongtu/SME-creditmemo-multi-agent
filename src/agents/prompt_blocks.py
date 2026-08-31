@@ -7,6 +7,7 @@ from typing import Any
 from src.agents.extraction.cic_s10a_extraction import merge_debt_series
 from src.agents.calculator.credit_need_calculator import build_credit_need_table
 from src.agents.calculator.financial_ratio_calculator import (
+    METRICS_BLOCK_HEADING,
     FinancialRatioCalculator,
     _format_number,
 )
@@ -38,10 +39,10 @@ def _vat_revenue_from_xml(
 def _format_credit_need_value(value: float | None, unit: str) -> str:
     """One cell of the credit-need table.
 
-    Money goes through the metrics block's own formatter (đồng -> tỷ VNĐ,
-    Vietnamese separators). The other two units do not: percentages in this
-    table are already on a 0-100 scale, and _format_number would multiply them
-    by 100 again.
+    Money goes through the metrics block's own formatter (đồng, Vietnamese
+    separators). The other two units do not: percentages in this table are
+    already on a 0-100 scale, and _format_number would multiply them by 100
+    again.
     """
 
     if value is None:
@@ -58,18 +59,23 @@ METRICS_BLOCK_AGENTS = (
 )
 
 CREDIT_NEED_BLOCK_AGENTS = ("CREDIT_PROPOSAL_AGENT",)
-CREDIT_NEED_BLOCK_HEADING = "[BẢNG TÍNH NHU CẦU TÍN DỤNG]"
+# Every block name is declared exactly once here. Three of them used to be
+# typed out in two files apiece, which is how two copies of one label drift
+# apart without anything failing.
+FINANCIAL_STATEMENT_BLOCK_HEADING = "[EXTRACTED FINANCIAL STATEMENTS]"
+PROPOSAL_BLOCK_HEADING = "[EXTRACTED CREDIT APPLICATION]"
+CREDIT_NEED_BLOCK_HEADING = "[CREDIT NEED CALCULATION]"
 CIC_S10A_BLOCK_HEADING = "[EXTRACTED CIC S10A REPORT]"
 CIC_R21_BLOCK_HEADING = "[EXTRACTED CIC R21 REPORT]"
 SITEVISIT_BLOCK_HEADING = "[EXTRACTED SITE VISIT REPORT]"
-LEDGER_BLOCK_HEADING = "[DỮ LIỆU SỔ CHI TIẾT ĐÃ ĐỌC TỪ FILE EXCEL]"
+LEDGER_BLOCK_HEADING = "[EXTRACTED DETAIL LEDGER]"
 DEBT_CHART_TITLE = "Diễn biến dư nợ và doanh thu VAT 12 tháng gần nhất"
 DEBT_CHART_TITLE_DEBT_ONLY = "Diễn biến dư nợ 12 tháng gần nhất"
 DEBT_CHART_COLUMNS = ("Tổng dư nợ (CIC)", "Doanh thu VAT")
 VAT_ESTIMATE_NOTE = (
     "Một số tháng là số ước lượng, chia đều từ doanh thu khai theo quý."
 )
-SOURCE_LIST_BLOCK_HEADING = "[DANH SÁCH NGUỒN — CHÉP NGUYÊN VĂN]"
+SOURCE_LIST_BLOCK_HEADING = "[SOURCE LIST — COPY VERBATIM]"
 
 
 def _document_block_header(
@@ -226,7 +232,7 @@ def _build_credit_need_block(
              if d.is_cic_s10a and d.cic_s10a_extraction],
         )
     except Exception as exc:
-        return f"[BẢNG TÍNH NHU CẦU TÍN DỤNG unavailable: {exc}]"
+        return f"{CREDIT_NEED_BLOCK_HEADING} unavailable: {exc}"
 
     if not table.rows:
         return ""
@@ -234,9 +240,9 @@ def _build_credit_need_block(
         CREDIT_NEED_BLOCK_HEADING,
         "Bảng dưới đã được hệ thống TÍNH SẴN bằng công thức cố định. Dùng "
         "thẳng các con số này, TUYỆT ĐỐI không tự tính lại từ số liệu thô.",
-        "ĐƠN VỊ: các dòng tiền ghi bằng **tỷ VNĐ** (giống khối "
-        "[PRE-COMPUTED FINANCIAL METRICS]); dòng ghi % và ngày giữ nguyên "
-        "đơn vị của nó. Giữ đúng đơn vị này khi trình bày.",
+        "ĐƠN VỊ: các dòng tiền ghi bằng **ĐỒNG**, giống mọi khối dữ liệu khác "
+        "trong prompt này; dòng ghi % và ngày giữ nguyên đơn vị của nó. Chép "
+        "nguyên con số, chương trình tự quy đổi khi dựng báo cáo.",
         "CỘT \"Nguồn\" cho biết con số đến từ đâu và BẮT BUỘC phải nêu lại "
         "khi diễn giải: \"mặc định\" nghĩa là hồ sơ KHÔNG nêu và hệ thống "
         "dùng tỷ lệ chính sách — không được trình bày như số liệu của khách "
@@ -301,7 +307,7 @@ def _build_proposal_structured_block(
 
     return _render_structured_records(
         selected, "is_proposal", "proposal_extraction",
-        "[DỮ LIỆU ĐỀ NGHỊ CẤP TÍN DỤNG]",
+        PROPOSAL_BLOCK_HEADING,
         [
             "Trích xuất từ mục B (phương án sử dụng vốn, kế hoạch kinh doanh, "
             "hiệu quả, phương án trả nợ), mục C (tài sản bảo đảm) và mục D "
@@ -591,7 +597,7 @@ def _build_financial_statement_block(
     ]
     if not financial_statement_docs:
         return ""
-    parts = ["[DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT]"]
+    parts = [FINANCIAL_STATEMENT_BLOCK_HEADING]
     for doc in financial_statement_docs:
         extraction = doc.financial_statement_extraction
         if statements is not None:

@@ -44,6 +44,13 @@ LEDGER_BLOCK_CHAR_BUDGET = 40_000
 # Label of the row standing in for everything the budget left out. It carries
 # the summed figures of those rows, so visible rows still add up to the total.
 RESIDUAL_LABEL = "Các đối tác còn lại"
+# Which canonical fields hold money and which hold a count. Read off the field
+# name rather than the value: a magnitude threshold is a guess, and the names
+# are the thing the column mapping already established. One "units" value for a
+# whole account said "vnd" over an inventory sheet whose vehicle counts —
+# 705, 3.059, 2.206, 1.558 — are not đồng at all.
+QUANTITY_SUFFIX = "_quantity"
+MONEY_SUFFIXES = ("_debit", "_credit", "_movement", "_value")
 # A header row needs this many distinct text cells.
 MIN_HEADER_CELLS = 4
 # Sums are compared against the printed total at this tolerance, in đồng.
@@ -539,6 +546,25 @@ def _sheet_rows(sheet: dict[str, Any], fields: dict[str, str]) -> list[dict[str,
     return out
 
 
+def _field_units(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """The unit of every numeric field present, by its canonical name.
+
+    Fields outside the column map keep their Vietnamese header and get no unit:
+    an unrecognised column could be money or a count, and saying the wrong one
+    is worse by a factor of a billion than saying nothing.
+    """
+
+    units = {}
+    for field in {k for row in rows for k in row if k != "name"}:
+        if field.endswith(QUANTITY_SUFFIX):
+            units[field] = "quantity"
+        elif field.endswith(MONEY_SUFFIXES):
+            units[field] = "vnd"
+        else:
+            units[field] = "unknown"
+    return dict(sorted(units.items()))
+
+
 def merge_accounts(
     profiles: list[tuple[str, dict[str, Any]]],
     labels: dict[str, Any] | None = None,
@@ -612,11 +638,7 @@ def merge_accounts(
                 "source_files": [filename],
                 "period": sheet.get("ky", ""),
                 "source_columns": {v: k for k, v in fields.items()},
-                # One unit for the account, not one per column. These sheets
-                # print no unit anywhere, and đồng is what they hold; the
-                # inventory columns say "_quantity" or "_value" in their own
-                # names, so the distinction survives without a second table.
-                "units": "vnd",
+                "units": _field_units(rows),
                 "totals": totals_raw,
                 "item_count": len(rows),
                 "items": rows,
@@ -635,6 +657,7 @@ def merge_accounts(
             existing["item_count"] = len(existing["items"])
             existing["source_files"].append(filename)
             existing["source_columns"].update(entry["source_columns"])
+            existing["units"].update(entry["units"])
             for field, value in entry["totals"].items():
                 existing["totals"][field] = round(
                     existing["totals"].get(field, 0) + value, 2

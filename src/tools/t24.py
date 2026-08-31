@@ -57,7 +57,7 @@ WHERE  tax_code = :tax_code
 
 @tool(
     "get_internal_facilities",
-    extras={"heading": "[HẠN MỨC TÍN DỤNG NỘI BỘ — TRUY VẤN HỆ THỐNG]"},
+    extras={"heading": "[INTERNAL CREDIT FACILITIES]"},
 )
 def get_internal_facilities(
     tax_code: Annotated[str, InjectedToolArg],
@@ -89,7 +89,7 @@ def get_internal_facilities(
 
 @tool(
     "get_internal_credit_quality",
-    extras={"heading": "[CHẤT LƯỢNG QUAN HỆ TÍN DỤNG NỘI BỘ — TRUY VẤN HỆ THỐNG]"},
+    extras={"heading": "[INTERNAL CREDIT QUALITY]"},
 )
 def get_internal_credit_quality(
     tax_code: Annotated[str, InjectedToolArg],

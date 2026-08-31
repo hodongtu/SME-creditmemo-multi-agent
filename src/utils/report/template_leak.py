@@ -56,10 +56,26 @@ SCAFFOLD_MARKERS = (
     # reads the memo. _strip_accents lowercases and drops accents but keeps
     # punctuation, so these are written in that form.
     "[pre-computed financial metrics]",
-    "[du lieu bctc da trich xuat]",
-    "[du lieu de nghi cap tin dung]",
+    "[extracted financial statements]",
+    "[extracted credit application]",
     "[extracted cic s10a report]",
     "[extracted cic r21 report]",
+    "[extracted site visit report]",
+    "[extracted detail ledger]",
+    "[credit need calculation]",
+    "[source list",
+    "[internal credit facilities]",
+    "[internal credit quality]",
+    "[bureau credit report]",
+    # The Vietnamese names these blocks carried before. Kept for the same reason
+    # as the renamed rule above: a cached response or an older prompt revision
+    # can still put one in a report, and a marker that matches nothing costs a
+    # substring scan.
+    "[du lieu bctc da trich xuat]",
+    "[du lieu de nghi cap tin dung]",
+    "[bang tinh nhu cau tin dung]",
+    "[du lieu so chi tiet",
+    "[danh sach nguon",
 )
 
 

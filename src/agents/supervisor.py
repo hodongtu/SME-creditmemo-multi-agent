@@ -158,7 +158,7 @@ EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
         build_chain=build_financial_statement_extraction_chain,
         extract=extract_financial_statement_data,
         build_block=prompt_blocks._build_financial_statement_block,
-        heading="[DỮ LIỆU BCTC ĐÃ TRÍCH XUẤT]",
+        heading=prompt_blocks.FINANCIAL_STATEMENT_BLOCK_HEADING,
         json_agents={
             "FINANCIAL_ANALYSIS_AGENT": None,
             "CREDIT_PROPOSAL_AGENT": ("income_statement",),
@@ -176,7 +176,7 @@ EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
         build_chain=build_proposal_extraction_chain,
         extract=extract_proposal_structured_data,
         build_block=prompt_blocks._build_proposal_structured_block,
-        heading="[DỮ LIỆU ĐỀ NGHỊ CẤP TÍN DỤNG]",
+        heading=prompt_blocks.PROPOSAL_BLOCK_HEADING,
         json_agents=("CREDIT_PROPOSAL_AGENT",),
     ),
     ExtractionPass(

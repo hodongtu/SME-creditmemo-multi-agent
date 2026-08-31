@@ -4,7 +4,11 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from src.utils.report.formatting import VND_PER_BILLION, format_vn_number
+from src.utils.report.formatting import format_vn_number, render_money
+
+# Declared here rather than imported from prompt_blocks: that module imports
+# this one, so the constant has to live on the side that has no dependency.
+METRICS_BLOCK_HEADING = "[PRE-COMPUTED FINANCIAL METRICS]"
 from src.agents.extraction.financial_statement_extraction import (
     normalize_period_label,
     resolve_report_years,
@@ -698,12 +702,13 @@ class FinancialRatioCalculator:
         """Format extracted metrics and computed ratios as markdown for the agent."""
         years = sorted(yearly_metrics)
         lines = [
-            "[PRE-COMPUTED FINANCIAL METRICS]",
+            METRICS_BLOCK_HEADING,
             "The following figures were calculated deterministically from extracted documents before LLM analysis.",
             "Use these values as the primary source for ratio tables when available.",
             "If a value is missing, say it is unavailable instead of estimating it.",
-            "Đơn vị mọi giá trị tiền tệ (line items) trong block này: **tỷ VNĐ** "
-            "(đã chia 10^9, 2 chữ số thập phân). Giữ nguyên đơn vị này khi trình bày.",
+            "Đơn vị mọi giá trị tiền tệ (line items) trong block này: **ĐỒNG**, "
+            "giống mọi khối dữ liệu khác trong prompt. Chép nguyên con số, "
+            "chương trình tự quy đổi khi dựng báo cáo.",
             "",
         ]
         # Above the numbers, not below them: a reader who has already worked
@@ -754,7 +759,7 @@ class FinancialRatioCalculator:
             ]
         )
 
-        lines.append("[/PRE-COMPUTED FINANCIAL METRICS]")
+        lines.append(f"[/{METRICS_BLOCK_HEADING.strip('[]')}]")
         return "\n".join(lines)
 
     @staticmethod
@@ -902,6 +907,7 @@ def _format_number(value: float | None, unit: str) -> str:
         return f"{value:.1f} ngày"
     if unit == "x":
         return f"{value:.2f}x"
-    # Money: đồng in, tỷ VNĐ out, Vietnamese separators. The block header states
-    # the unit once so the figure itself carries none.
-    return format_vn_number(value / VND_PER_BILLION, 2)
+    # Money stays in đồng, formatted the one way every block formats it. The
+    # division that used to be here made this the second of three places that
+    # knew about tỷ VNĐ; now only _finalize does.
+    return render_money(value)
