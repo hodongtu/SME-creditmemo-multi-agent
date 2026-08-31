@@ -337,6 +337,17 @@ groups:
           - "so kho"
           - "so phu"
           - "so chi tiet cong no"
+          - "bao cao can doi phat sinh cong no"
+          - "can doi phat sinh cong no"
+          - "phat sinh cong no"
+          - "pthu"
+          - "ptra"
+          - "p thu khac"
+          - "p tra khac"
+          - "phai thu khac"
+          - "phai tra khac"
+          - "tk vay"
+          - "so chi tiet vay"
           
   # ===========================================================================
   - id: ho_so_vay_von
