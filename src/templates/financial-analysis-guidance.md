@@ -23,7 +23,28 @@ description: >-
   số của kỳ khác điền vào.
  
 #### TRỌNG TÂM PHÂN TÍCH
-- Mục 1: xác định xu hướng doanh thu, giá vốn, chi phí, lợi nhuận. Tỷ trọng tính trên doanh thu thuần, lấy số tuyệt đối.
+- Mục 1: xác định xu hướng doanh thu, giá vốn, chi phí, lợi nhuận. Lấy số tuyệt đối.
+  - CỘT "% DTT" — BẮT BUỘC TÍNH VÀ ĐIỀN:
+    - MỌI dòng từ "Giá vốn hàng bán" trở xuống PHẢI có số phần trăm ở cột này,
+    ở MỌI cột năm có dữ liệu. Khung để trống các ô đó vì chúng là việc của bạn,
+    không phải vì chúng được phép bỏ trống. Chỉ để trống khi chính ô giá trị
+    tiền của dòng đó cũng trống.
+    - Mẫu số là DOANH THU THUẦN CỦA CHÍNH KỲ ĐÓ. Không dùng doanh thu bán hàng,
+    không dùng tổng doanh thu, không mượn doanh thu thuần của kỳ khác.
+    - Ba dòng đầu bảng đã được điền sẵn trong khung ("—", "—", "100%"). Đó là
+    ba dòng DUY NHẤT được điền sẵn; chúng không có nghĩa là cả cột đã xong.
+    - Dòng "Doanh thu thuần" luôn là 100% — khung đã điền sẵn, giữ nguyên. Nếu
+    một phép tính của bạn làm dòng này khác 100% thì bạn đã dùng sai mẫu số.
+    - Hai dòng phía trên nó ("Doanh thu bán hàng và cung cấp dịch vụ", "Các khoản
+    giảm trừ doanh thu") giữ nguyên dấu "—" của khung. Dấu này nghĩa là PHÉP TÍNH
+    KHÔNG ÁP DỤNG cho dòng đó — nó không phải số 0, cũng không phải thiếu dữ liệu,
+    nên KHÔNG thay bằng "-", không để trống, và không ghi "Không có dữ liệu trong
+    hồ sơ" vào đó.
+    - Câu văn ở mục 1.1–1.3 khi nhắc một tỷ lệ phải dùng đúng con số đã ghi ở cột
+    "% DTT" của bảng, không tính lại bằng mẫu số khác. Viết rõ "trên doanh thu
+    thuần" khi nêu tỷ lệ.
+    - "% DTT" của dòng "Lợi nhuận gộp" và "Biên lợi nhuận gộp" ở mục 1.4 là CÙNG
+    MỘT tỷ lệ. Hai chỗ lệch nhau là mâu thuẫn nội bộ trong cùng một trang báo cáo.
   - Mục 1.1:
     - Liệt kê top 5 sản phẩm/dịch vụ lớn nhất dựa trên hàng tồn kho (dùng số liệu phát sinh có/doanh số xuất trong kỳ), 
     ưu tiên sử dụng nguồn thông tin như sau:
@@ -37,6 +58,23 @@ description: >-
   - Mục 1.3: các khoản mục phát sinh hoặc biến động lớn trong kỳ.
   - Mục 1.4: nhận định về chỉ số sinh lời.
  
+- Mục 2.1 — CỘT "% TTS" và "% TNV", BẮT BUỘC TÍNH VÀ ĐIỀN:
+    - MỌI dòng có số tiền PHẢI có phần trăm ở cột bên cạnh, ở mọi cột năm có dữ
+    liệu. Khung để trống các ô đó vì chúng là việc của bạn.
+    - Bên TÀI SẢN mẫu số là TỔNG TÀI SẢN của chính kỳ đó; bên NGUỒN VỐN mẫu số là
+    TỔNG NGUỒN VỐN của chính kỳ đó. Hai dòng tổng đã được điền sẵn 100% trong
+    khung — đó là hai dòng duy nhất được điền sẵn, giữ nguyên.
+    - MỘT mẫu số cho cả cột. Các dòng chi tiết ("Tiền và các khoản tương đương
+    tiền", "Hàng tồn kho", "Phải thu ngắn hạn của khách hàng"...) vẫn chia cho
+    TỔNG TÀI SẢN, KHÔNG chia cho "Tài sản ngắn hạn" hay bất kỳ dòng tiểu tổng nào.
+    Tương tự bên nguồn vốn: không chia cho "Nợ ngắn hạn".
+    - Vì bảng có cả dòng tiểu tổng ("Tài sản ngắn hạn", "Tài sản dài hạn", "Nợ
+    ngắn hạn", "Nợ dài hạn", "Vốn chủ sở hữu") lẫn các dòng chi tiết nằm trong
+    chúng, cộng cả cột phần trăm sẽ ra khoảng 200%. Đó là ĐÚNG với bố cục này —
+    không được co giãn các con số cho tổng thành 100%.
+    - "Tổng tài sản" và "Tổng nguồn vốn" phải bằng nhau. Nếu số của bạn làm hai
+    dòng đó khác nhau thì số liệu chưa cân, nêu rõ chứ không sửa số cho khớp.
+
 - Mục 2.2.1: 
     - a. Dựa trên sổ/tài khoản 131, liệt kê top 5 khách hàng có *dư nợ cuối kỳ* lớn nhất trong năm báo cáo. Cảnh báo dấu hiệu tồn đọng, chậm luân chuyển nếu có các signals sau:
       - Giá trị thu hồi công nợ < Số dư phải thu đầu kỳ.

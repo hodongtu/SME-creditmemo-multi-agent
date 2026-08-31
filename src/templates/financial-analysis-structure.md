@@ -14,11 +14,11 @@
  
 ## 1. Đánh giá kết quả kinh doanh
  
-| Chỉ tiêu | {{Nam1}} | Tỷ trọng | {{Nam2}} | Tỷ trọng | {{Nam3}} | Tỷ trọng |
+| Chỉ tiêu | {{Nam1}} | % DTT | {{Nam2}} | % DTT | {{Nam3}} | % DTT |
 |---|---:|---:|---:|---:|---:|---:|
-| Doanh thu bán hàng và cung cấp dịch vụ | | | | | | |
-| Các khoản giảm trừ doanh thu | | | | | | |
-| Doanh thu thuần | | | | | | |
+| Doanh thu bán hàng và cung cấp dịch vụ | | — | | — | | — |
+| Các khoản giảm trừ doanh thu | | — | | — | | — |
+| Doanh thu thuần | | 100% | | 100% | | 100% |
 | Giá vốn hàng bán | | | | | | |
 | Lợi nhuận gộp | | | | | | |
 | Doanh thu hoạt động tài chính | | | | | | |
@@ -29,7 +29,7 @@
 | Lợi nhuận từ hoạt động kinh doanh | | | | | | |
 | Lợi nhuận sau thuế | | | | | | |
  
-(Đơn vị: tỷ VNĐ)
+(Đơn vị: tỷ VNĐ — cột "% DTT" là tỷ lệ trên doanh thu thuần của cùng kỳ)
  
  
 ### 1.1. Đánh giá doanh thu
@@ -65,7 +65,7 @@
  
 ### 2.1. Cơ cấu tài sản - nguồn vốn
  
-| TÀI SẢN | {{Nam1}} | Tỷ trọng | {{Nam2}} | Tỷ trọng | {{Nam3}} | Tỷ trọng | NGUỒN VỐN | {{Nam1}} | Tỷ trọng | {{Nam2}} | Tỷ trọng | {{Nam3}} | Tỷ trọng |
+| TÀI SẢN | {{Nam1}} | % TTS | {{Nam2}} | % TTS | {{Nam3}} | % TTS | NGUỒN VỐN | {{Nam1}} | % TNV | {{Nam2}} | % TNV | {{Nam3}} | % TNV |
 |---|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|
 | Tài sản ngắn hạn | | | | | | | Nợ ngắn hạn | | | | | | |
 | Tiền và các khoản tương đương tiền | | | | | | | Phải trả người bán ngắn hạn | | | | | | |
@@ -80,9 +80,9 @@
 | Chi phí xây dựng cơ bản dở dang | | | | | | | Vốn góp chủ sở hữu | | | | | | |
 | Đầu tư tài chính dài hạn | | | | | | | Lợi nhuận sau thuế chưa phân phối | | | | | | |
 | Tài sản dài hạn khác | | | | | | |Nguồn kinh phí và quỹ khác | | | | | | |
-| *Tổng tài sản* | | | | | | | *Tổng nguồn vốn* | | | | | | |
+| *Tổng tài sản* |  | 100% |  | 100% |  | 100% | *Tổng nguồn vốn* |  | 100% |  | 100% |  | 100% |
  
-(Đơn vị: tỷ VNĐ)
+(Đơn vị: tỷ VNĐ — "% TTS" là tỷ lệ trên tổng tài sản, "% TNV" là tỷ lệ trên tổng nguồn vốn)
  
  
 ### 2.2. Các khoản mục chi tiết
