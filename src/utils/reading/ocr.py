@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import re
-import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -391,12 +390,24 @@ def _file_sha256(path: str) -> str:
     return sha256.hexdigest()
 
 
-def _cache_dir(settings: dict[str, object]) -> Path:
-    configured = str(settings.get("cache_dir") or "")
-    if configured:
-        directory = Path(configured)
-    else:
-        directory = Path(tempfile.gettempdir()) / "sme_ocr_cache"
+def _cache_dir(settings: dict[str, object]) -> Path | None:
+    """Where OCR results are cached, or None when caching is off.
+
+    Off is the default, and it has to be: the cache holds the full text of a
+    customer's financial statements. This used to fall back to the system temp
+    directory when OCR_CACHE_DIR was unset — outside the project, so .gitignore
+    never applied, with no retention limit and nothing to clean it up. The
+    documented contract (see .env.example) always said empty meant no caching;
+    the code did the opposite, so an operator who left it empty believing they
+    had disabled it was wrong with no way to notice.
+
+    An operator who wants the speed sets a path they own and can wipe.
+    """
+
+    configured = str(settings.get("cache_dir") or "").strip()
+    if not configured:
+        return None
+    directory = Path(configured)
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
@@ -522,8 +533,12 @@ def ocr_pdf(pdf_path: str, timeout_seconds: float | None = None) -> str:
     timeout = int(timeout_seconds) if timeout_seconds else None
 
     cache_directory = _cache_dir(settings)
-    cache_file = cache_directory / f"{_cache_key(pdf_path, settings)}.txt"
-    if cache_file.is_file():
+    cache_file = (
+        cache_directory / f"{_cache_key(pdf_path, settings)}.txt"
+        if cache_directory is not None
+        else None
+    )
+    if cache_file is not None and cache_file.is_file():
         return cache_file.read_text(encoding="utf-8")
 
     tess_config = f"--oem {settings['oem']} --psm {settings['psm']}"
@@ -570,8 +585,9 @@ def ocr_pdf(pdf_path: str, timeout_seconds: float | None = None) -> str:
         for index, text in enumerate(page_texts)
     )
 
-    try:
-        cache_file.write_text(full_text, encoding="utf-8")
-    except OSError:
-        pass
+    if cache_file is not None:
+        try:
+            cache_file.write_text(full_text, encoding="utf-8")
+        except OSError:
+            pass
     return full_text

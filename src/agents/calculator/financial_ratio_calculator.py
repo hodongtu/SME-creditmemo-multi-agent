@@ -1,7 +1,7 @@
 """Pre-compute financial ratios from FS structured-extraction JSON"""
 
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
 from src.utils.report.formatting import format_vn_number, render_money
@@ -145,6 +145,17 @@ class FinancialRatioCalculator:
             "Tổng tài sản",
             ("tổng cộng tài sản", "tổng tài sản"),
             codes=("270",),
+        ),
+        # The other side of the same identity. Without it the block offered no
+        # figure for "Tổng nguồn vốn" at all, and the agent filled that row with
+        # "Nợ phải trả" — the only number it had that looked like a total on the
+        # capital side. Equal to total_assets by construction, so a report where
+        # the two rows differ is reporting a misread, not a business fact.
+        MetricDefinition(
+            "total_capital",
+            "Tổng cộng nguồn vốn",
+            ("tổng cộng nguồn vốn", "tổng nguồn vốn"),
+            codes=("440",),
         ),
         MetricDefinition(
             "current_liabilities",
@@ -366,9 +377,27 @@ class FinancialRatioCalculator:
         ),
     )
 
+    @classmethod
+    def metrics_from_documents(cls, documents: list[Any]) -> dict[str, dict[str, float]]:
+        """Yearly metrics for a list of ClassifiedDocument or their dicts.
+
+        The three lines this replaces — build a calculator, asdict the
+        documents, extract — were written out at four call sites across two
+        modules. The arithmetic is cheap, so the duplication cost nothing at
+        runtime; what it cost was a single place to change. Any filter or
+        correction applied to the metrics had to be applied four times, and the
+        first time three of the four were updated, the metrics block and the
+        credit-need block would disagree inside one report with nothing raising.
+        """
+
+        payload = [
+            doc if isinstance(doc, dict) else asdict(doc) for doc in documents
+        ]
+        return cls().extract_yearly_metrics(payload)
+
     def build_analysis_block(self, documents: list[dict[str, Any]]) -> str:
         """Return a markdown block with extracted line items and computed ratios."""
-        yearly_metrics = self.extract_yearly_metrics(documents)
+        yearly_metrics = self.metrics_from_documents(documents)
         if not yearly_metrics:
             return ""
 

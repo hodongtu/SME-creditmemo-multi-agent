@@ -1,6 +1,7 @@
 import inspect
 import json
 import os
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -13,6 +14,7 @@ from src.agents.calculator.financial_ratio_calculator import FinancialRatioCalcu
 from src.utils.common import normalize_text
 from src.utils.reading.extractors import extract_document_text
 from src.utils.report.formatting import convert_amounts_in_text
+from src.utils.report.injection import check_injection_markers
 from src.utils.report.template_leak import check_template_leakage
 from src.utils.report.citations import (
     AGENT_LABEL_PREFIXES,
@@ -274,6 +276,47 @@ for _pass in EXTRACTION_PASSES:
 _PASS_BY_LABEL = {pass_.label: pass_ for pass_ in EXTRACTION_PASSES}
 
 
+class _ExtractionBudget:
+    """What one run may still spend on extraction.
+
+    Shared across every pass in a run, because the limit is on the run and not
+    on any one pass: six passes each staying under their own ceiling is exactly
+    the case a per-pass limit fails to catch. A batch pass is one call however
+    many documents it reads, so calls and characters are counted separately.
+
+    Refuses rather than truncates. A dossier trimmed silently is the failure
+    this system already has too many of; a named skip can be acted on.
+    """
+
+    __slots__ = ("calls_left", "chars_left", "skipped", "limit_hit")
+
+    def __init__(self, max_calls: int, max_chars: int) -> None:
+        self.calls_left = max_calls
+        self.chars_left = max_chars
+        self.skipped: list[str] = []
+        self.limit_hit = ""
+
+    def take(self, calls: int, chars: int, names: list[str]) -> bool:
+        """Charge the budget, or record the skip and return False."""
+
+        if calls > self.calls_left:
+            self.limit_hit = self.limit_hit or "max_extraction_calls"
+        elif chars > self.chars_left:
+            self.limit_hit = self.limit_hit or "max_extraction_input_chars"
+        else:
+            self.calls_left -= calls
+            self.chars_left -= chars
+            return True
+        self.skipped.extend(names)
+        return False
+
+
+# Evidence whose absence stops a run rather than thinning it.
+_BLOCKING_EVIDENCE = frozenset(
+    {"financial_documents", "credit_relationship_documents"}
+)
+
+
 class Supervisor:
     """Local  supervisor without API, cache, or database dependencies."""
 
@@ -299,6 +342,27 @@ class Supervisor:
 
     DOC_SECTION_HEADER = "Uploaded document extracted content:\n\n"
     DOC_BLOCK_SEPARATOR = "\n\n---\n\n"
+    # The boundary between what the pipeline says and what the customer's own
+    # files say. "---" alone was the old boundary and is not one: it appears 86
+    # times inside a single sample statement. The fence token is stripped from
+    # content before the content is wrapped, so a document cannot close its own
+    # fence and continue as if it were the pipeline talking. Paired with
+    # SOURCE DATA RULE in specialist.py, which tells the model what it means.
+    DOC_FENCE_OPEN = "<<<SOURCE_DOCUMENT {index}>>>"
+    DOC_FENCE_CLOSE = "<<</SOURCE_DOCUMENT {index}>>>"
+    _FENCE_PATTERN = re.compile(r"<<</?SOURCE_DOCUMENT[^>]*>>>")
+
+    @classmethod
+    def _fence(cls, index: int, content: str) -> str:
+        """Wrap one document's text so its boundary cannot be forged."""
+
+        return "\n".join(
+            [
+                cls.DOC_FENCE_OPEN.format(index=index),
+                cls._FENCE_PATTERN.sub("[fence marker removed]", content),
+                cls.DOC_FENCE_CLOSE.format(index=index),
+            ]
+        )
 
     # ── Construction ──────────────────────────────────────────────────────
 
@@ -498,6 +562,10 @@ class Supervisor:
         steps = state.get("steps", [])
         route = (state.get("decision") or {}).get("route", DEFAULT_ROUTE)
         needed = self._passes_needed_for_route(route)
+        budget = _ExtractionBudget(
+            self.config.max_extraction_calls,
+            self.config.max_extraction_input_chars,
+        )
 
         for pass_ in EXTRACTION_PASSES:
             if pass_.label not in needed:
@@ -513,6 +581,15 @@ class Supervisor:
                 label=pass_.label,
                 missing_llm_message=f"No {pass_.llm_attr} configured.",
                 batch=pass_.batch,
+                budget=budget,
+            )
+
+        if budget.skipped:
+            steps.append(
+                f"Extraction budget {budget.limit_hit} reached — "
+                f"{len(budget.skipped)} document(s) not extracted: "
+                f"{', '.join(sorted(set(budget.skipped)))}. Raise the limit in "
+                f"Config or submit fewer files."
             )
 
         skipped = self._describe_skipped_passes(documents, needed)
@@ -1067,6 +1144,7 @@ class Supervisor:
         label: str,
         missing_llm_message: str,
         batch: bool = False,
+        budget: "_ExtractionBudget | None" = None,
     ) -> None:
         """Run one structured-extraction pass over the documents it applies to.
 
@@ -1096,6 +1174,21 @@ class Supervisor:
                 f"{missing_llm_message}"
             )
             return
+
+        # Charged before the call, not after: the point is to not make it.
+        if budget is not None:
+            names = [d.filename for d in targets]
+            chars = sum(len(d.content) for d in targets)
+            # A batch pass is one call for all of its documents; the rest are
+            # one call each.
+            if not budget.take(1 if batch else len(targets), chars, names):
+                for doc in targets:
+                    setattr(doc, error_attr, f"Skipped: {budget.limit_hit} reached.")
+                steps.append(
+                    f"Skipped {label} extraction for {len(targets)} document(s): "
+                    f"{budget.limit_hit} reached."
+                )
+                return
 
         # A batch pass sees every matching document at once and returns one
         # answer per document, in order. Its record can therefore span files —
@@ -1195,9 +1288,16 @@ class Supervisor:
                 bucket = agent_to_bucket.get(agent, "general_context")
                 inventory[bucket].append(doc.filename)
 
+        # Credit relationship joined this list when the matrix stopped routing
+        # financial statements to it. Before that it always had *something* —
+        # a BCTC it could not read properly but could still fill a page from —
+        # so an empty dossier never surfaced. Without an entry here the route
+        # answers with a blank report instead of naming what is missing, and a
+        # blank report is the one outcome this gate exists to prevent.
         required = {
             "FINANCIAL_ANALYSIS_AGENT": ["financial_documents"],
             "BUSINESS_ACTIVITY_AGENT": ["business_activity_documents"],
+            "CREDIT_RELATIONSHIP_AGENT": ["credit_relationship_documents"],
         }.get(route, [])
 
         missing = []
@@ -1207,13 +1307,17 @@ class Supervisor:
             missing.append(
                 {
                     "type": evidence_type,
+                    # A credit-relationship report with neither a CIC file nor
+                    # a tool result has no subject at all, so it blocks like
+                    # financial analysis rather than degrading like business
+                    # activity.
                     "severity": (
                         "high"
-                        if evidence_type == "financial_documents"
+                        if evidence_type in _BLOCKING_EVIDENCE
                         else "medium"
                     ),
                     "can_continue_without_it": (
-                        evidence_type != "financial_documents"
+                        evidence_type not in _BLOCKING_EVIDENCE
                     ),
                     "reason": self._gap_reason(evidence_type),
                 }
@@ -1478,6 +1582,11 @@ class Supervisor:
         # resolve, rather than quietly dropping or inventing them.
         response += self._format_footnote_findings(footnote_audit)
         response += self._format_template_findings(response)
+        # SOURCE DATA RULE tells the model to report a document that tries to
+        # instruct it. This checks the documents directly, because a rule in a
+        # prompt is a request — and the model least likely to report an injected
+        # instruction is the one that followed it.
+        response += self._format_injection_findings(documents)
         # Last, and deliberately so: everything above this line reads or edits
         # what the *model* wrote, and this block is written by the pipeline from
         # extracted JSON. It is not the checkers' business, and the text rewriter
@@ -1564,6 +1673,19 @@ class Supervisor:
             f"{response}\n\n## {title}\n\n{block}\n",
             "appended",
         )
+
+    @staticmethod
+    def _format_injection_findings(documents: list[ClassifiedDocument]) -> str:
+        """Flag source documents whose own text reads as an instruction."""
+
+        findings = check_injection_markers(
+            [(doc.filename, doc.content) for doc in documents]
+        )
+        if not findings:
+            return ""
+        lines = ["", "**Tài liệu nguồn có dấu hiệu chèn chỉ thị:**", ""]
+        lines += [f"- {finding}" for finding in findings]
+        return "\n".join(lines) + "\n"
 
     @staticmethod
     def _format_template_findings(response: str) -> str:
@@ -1750,7 +1872,7 @@ class Supervisor:
             return max(1_000, int(unit_budget * weight))
 
         blocks = []
-        for doc in usable:
+        for index, doc in enumerate(usable, start=1):
             # A successfully-extracted BCTC doc is represented by its
             # structured JSON (see financial_statement_block above), not its raw OCR dump —
             # that's the whole point of the extraction pass. Gated on the same
@@ -1777,7 +1899,9 @@ class Supervisor:
                 content_section = "\n".join(
                     [
                         "Extracted document content:",
-                        truncate_text(doc.content, _doc_budget(doc)),
+                        self._fence(
+                            index, truncate_text(doc.content, _doc_budget(doc))
+                        ),
                     ]
                 )
             blocks.append(
@@ -1856,8 +1980,7 @@ class Supervisor:
             return {}
         try:
             calculator = FinancialRatioCalculator()
-            payload = [asdict(doc) for doc in usable]
-            yearly_metrics = calculator.extract_yearly_metrics(payload)
+            yearly_metrics = calculator.metrics_from_documents(usable)
             if not yearly_metrics:
                 return {}
             years = sorted(yearly_metrics)
@@ -1891,8 +2014,7 @@ class Supervisor:
             return {}
         try:
             calculator = FinancialRatioCalculator()
-            payload = [asdict(doc) for doc in usable]
-            yearly_metrics = calculator.extract_yearly_metrics(payload)
+            yearly_metrics = calculator.metrics_from_documents(usable)
             if not yearly_metrics:
                 return {}
             return build_credit_need_table(

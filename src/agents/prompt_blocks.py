@@ -211,8 +211,7 @@ def _build_credit_need_block(
         return ""
     try:
         calculator = FinancialRatioCalculator()
-        payload = [asdict(doc) for doc in usable]
-        yearly_metrics = calculator.extract_yearly_metrics(payload)
+        yearly_metrics = calculator.metrics_from_documents(usable)
         if not yearly_metrics:
             return ""
         table = build_credit_need_table(

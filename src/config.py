@@ -58,6 +58,14 @@ class Config:
     query_executor: Any = None
     max_files: int = 50
     max_chars_per_document: int = 120_000
+    # A ceiling on what ONE run may spend on extraction. The analysis prompt has
+    # always been capped (agent_input_char_budgets); extraction was capped per
+    # document only, so total spend scaled with file count with no limit — a
+    # 50-file dossier is 50 extraction calls and ~2M input tokens. Reached, the
+    # run stops starting new extractions and says which documents it skipped,
+    # rather than quietly billing for a dossier nobody meant to submit.
+    max_extraction_calls: int = 30
+    max_extraction_input_chars: int = 2_000_000
     document_classifier_rule_confidence_threshold: float = 0.65
     document_classifier_grouped_confidence_threshold: float = 0.65
     enable_plan_and_execute: bool = True

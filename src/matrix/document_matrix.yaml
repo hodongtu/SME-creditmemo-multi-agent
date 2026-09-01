@@ -167,7 +167,6 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
-          CREDIT_RELATIONSHIP_AGENT: R
         keywords:
           - "bctc"
           - "bao cao tai chinh"
@@ -188,7 +187,6 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
-          CREDIT_RELATIONSHIP_AGENT: R
         keywords:
           - "bang can doi ke toan"
           - "can doi ke toan"
@@ -207,7 +205,6 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
-          CREDIT_RELATIONSHIP_AGENT: R
         keywords:
           - "bao cao ket qua hoat dong kinh doanh"
           - "bao cao ket qua kinh doanh"
