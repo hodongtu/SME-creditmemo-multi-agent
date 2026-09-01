@@ -69,9 +69,17 @@ description: >-
     TỔNG TÀI SẢN, KHÔNG chia cho "Tài sản ngắn hạn" hay bất kỳ dòng tiểu tổng nào.
     Tương tự bên nguồn vốn: không chia cho "Nợ ngắn hạn".
     - Vì bảng có cả dòng tiểu tổng ("Tài sản ngắn hạn", "Tài sản dài hạn", "Nợ
-    ngắn hạn", "Nợ dài hạn", "Vốn chủ sở hữu") lẫn các dòng chi tiết nằm trong
-    chúng, cộng cả cột phần trăm sẽ ra khoảng 200%. Đó là ĐÚNG với bố cục này —
-    không được co giãn các con số cho tổng thành 100%.
+    phải trả", "Nợ ngắn hạn", "Nợ dài hạn", "Vốn chủ sở hữu") lẫn các dòng chi
+    tiết nằm trong chúng, cộng cả cột phần trăm sẽ ra hơn 200%. Đó là ĐÚNG với bố
+    cục này — không được co giãn các con số cho tổng thành 100%.
+    - BÊN NGUỒN VỐN có ba mức, đừng lẫn vào nhau:
+      - "Nợ phải trả" là mã 300 — tổng của Nợ ngắn hạn (310) và Nợ dài hạn (330).
+      - "Vốn chủ sở hữu" là mã 400.
+      - "Tổng nguồn vốn" là mã 440, KHÔNG phải mã 300. Đồng nhất thức:
+      Nợ phải trả + Vốn chủ sở hữu = Tổng nguồn vốn = Tổng tài sản.
+    - Khối [PRE-COMPUTED FINANCIAL METRICS] có sẵn cả "Nợ phải trả" lẫn "Tổng
+    cộng nguồn vốn" thành hai dòng riêng. Chép đúng dòng vào đúng ô; đừng lấy Nợ
+    phải trả điền vào ô Tổng nguồn vốn.
     - "Tổng tài sản" và "Tổng nguồn vốn" phải bằng nhau. Nếu số của bạn làm hai
     dòng đó khác nhau thì số liệu chưa cân, nêu rõ chứ không sửa số cho khớp.
 

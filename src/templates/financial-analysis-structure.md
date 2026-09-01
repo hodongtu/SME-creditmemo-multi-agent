@@ -67,19 +67,20 @@
  
 | TÀI SẢN | {{Nam1}} | % TTS | {{Nam2}} | % TTS | {{Nam3}} | % TTS | NGUỒN VỐN | {{Nam1}} | % TNV | {{Nam2}} | % TNV | {{Nam3}} | % TNV |
 |---|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|
-| Tài sản ngắn hạn | | | | | | | Nợ ngắn hạn | | | | | | |
-| Tiền và các khoản tương đương tiền | | | | | | | Phải trả người bán ngắn hạn | | | | | | |
-| Đầu tư tài chính ngắn hạn | | | | | | | Người mua trả tiền trước ngắn hạn | | | | | | |
-| Phải thu ngắn hạn của khách hàng | | | | | | | Vay và nợ thuê tài chính ngắn hạn | | | | | | |
-| Trả trước cho người bán ngắn hạn | | | | | | | Phải trả ngắn hạn khác | | | | | | |
-| Phải thu ngắn hạn khác | | | | | | | Nợ dài hạn | | | | | | |
-| Hàng tồn kho | | | | | | | Phải trả dài hạn người bán | | | | | | |
-| Tài sản ngắn hạn khác | | | | | | | Doanh thu chưa thực hiện dài hạn | | | | | | |
-| Tài sản dài hạn | | | | | | | Vay và nợ thuê tài chính dài hạn | | | | | | |
-| Tài sản cố định hữu hình | | | | | | | Vốn chủ sở hữu | | | | | | |
-| Chi phí xây dựng cơ bản dở dang | | | | | | | Vốn góp chủ sở hữu | | | | | | |
-| Đầu tư tài chính dài hạn | | | | | | | Lợi nhuận sau thuế chưa phân phối | | | | | | |
-| Tài sản dài hạn khác | | | | | | |Nguồn kinh phí và quỹ khác | | | | | | |
+| Tài sản ngắn hạn | | | | | | | Nợ phải trả | | | | | | |
+| Tiền và các khoản tương đương tiền | | | | | | | Nợ ngắn hạn | | | | | | |
+| Đầu tư tài chính ngắn hạn | | | | | | | Phải trả người bán ngắn hạn | | | | | | |
+| Phải thu ngắn hạn của khách hàng | | | | | | | Người mua trả tiền trước ngắn hạn | | | | | | |
+| Trả trước cho người bán ngắn hạn | | | | | | | Vay và nợ thuê tài chính ngắn hạn | | | | | | |
+| Phải thu ngắn hạn khác | | | | | | | Phải trả ngắn hạn khác | | | | | | |
+| Hàng tồn kho | | | | | | | Nợ dài hạn | | | | | | |
+| Tài sản ngắn hạn khác | | | | | | | Phải trả dài hạn người bán | | | | | | |
+| Tài sản dài hạn | | | | | | | Doanh thu chưa thực hiện dài hạn | | | | | | |
+| Tài sản cố định hữu hình | | | | | | | Vay và nợ thuê tài chính dài hạn | | | | | | |
+| Chi phí xây dựng cơ bản dở dang | | | | | | | Vốn chủ sở hữu | | | | | | |
+| Đầu tư tài chính dài hạn | | | | | | | Vốn góp chủ sở hữu | | | | | | |
+| Tài sản dài hạn khác | | | | | | | Lợi nhuận sau thuế chưa phân phối | | | | | | |
+||||||||Nguồn kinh phí và quỹ khác | | | | | | |
 | *Tổng tài sản* |  | 100% |  | 100% |  | 100% | *Tổng nguồn vốn* |  | 100% |  | 100% |  | 100% |
  
 (Đơn vị: tỷ VNĐ — "% TTS" là tỷ lệ trên tổng tài sản, "% TNV" là tỷ lệ trên tổng nguồn vốn)
