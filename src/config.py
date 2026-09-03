@@ -66,6 +66,14 @@ class Config:
     # rather than quietly billing for a dossier nobody meant to submit.
     max_extraction_calls: int = 30
     max_extraction_input_chars: int = 2_000_000
+    # How much of a document's OCR text survives into result["document_
+    # classifications"]. The pipeline keeps the whole text in memory and feeds
+    # the whole text to the prompts; this bounds only what leaves the process,
+    # because the caller exports that payload and a 22-file dossier put it past
+    # the size limit on the other side. Head truncation keeps the cover page and
+    # loses the middle, which is where the financial tables are — when OCR is
+    # what needs investigating, set OCR_CACHE_DIR and read the cached text.
+    result_content_char_limit: int = 2_000
     document_classifier_rule_confidence_threshold: float = 0.65
     document_classifier_grouped_confidence_threshold: float = 0.65
     enable_plan_and_execute: bool = True

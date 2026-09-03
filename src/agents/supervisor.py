@@ -2062,8 +2062,33 @@ class Supervisor:
             }
         return selections
 
-    @staticmethod
+    def _classifications_for_state(
+        self,
+        documents: list[ClassifiedDocument],
+    ) -> list[dict[str, Any]]:
+        """Documents as data, with the OCR text bounded.
+
+        The one place a ClassifiedDocument becomes part of the returned payload,
+        so bounding it here bounds every caller of _build_state at once. The
+        pipeline itself is untouched: prompts and the injection check read
+        doc.content directly and still see the whole document. Only what leaves
+        the process is cut, because that is what gets exported and what hit a
+        size limit on the far side — a 22-file dossier put the payload at
+        ~1.6 MB, of which the OCR text was half.
+        """
+
+        limit = self.config.result_content_char_limit
+        records = to_dict_list(documents)
+        if limit <= 0:
+            return records
+        for record in records:
+            content = record.get("content")
+            if isinstance(content, str):
+                record["content"] = truncate_text(content, limit)
+        return records
+
     def _build_state(
+        self,
         response: str,
         agent_name: str,
         decision: dict[str, Any] | None = None,
@@ -2083,7 +2108,9 @@ class Supervisor:
             "agent_name": agent_name,
             "decision": decision or {},
             "loan_program": loan_program,
-            "document_classifications": to_dict_list(documents or []),
+            "document_classifications": self._classifications_for_state(
+                documents or []
+            ),
             "document_selections": document_selections or {},
             "financial_metrics": financial_metrics or {},
             "credit_need": credit_need or {},

@@ -9,7 +9,7 @@ drafts it.
 | **Repository** | `SME-creditmemo-multi-agent` |
 | **Entry point** | `local_underwriting_agents.ipynb` (notebook driver); all logic in `src/` |
 | **Runtime** | Python 3.11+, Tesseract OCR, an OpenAI-compatible inference endpoint |
-| **Size** | 12,895 lines of Python across 5 packages |
+| **Size** | 12,930 lines of Python across 5 packages |
 | **Status** | Proof of concept. Production gaps are named in §2.4 and §3. |
 
 ---
@@ -180,15 +180,16 @@ startup naming the variable rather than failing mid-run with an API 400.
 
 | Variable | Used by | Temperature |
 |---|---|---|
-| `MODEL_DOCUMENT` | Document classification (LLM fallback only) | 0.5 |
+| `MODEL_PREMIUM` | Document classification (LLM fallback) and BCTC extraction | 0.5 / 0.0 |
 | `MODEL_ANALYZER` | The specialist agent | 0.1 |
-| `MODEL_PREMIUM` | BCTC extraction | 0.0 |
 | `MODEL_ECONOMY` | The other five extraction passes | 0.0 |
 
-BCTC extraction sits on its own variable because every financial figure in the report is
-computed from that one pass's output — §3.6 L2 shows what a misread there costs. Each pass
-is bound to a variable in `Config`, so any of them can move between tiers without a code
-change.
+Two decisions carry the rest of the run and sit on the premium tier: which type a document
+is, and what the financial statements say. A classification error routes a file to the
+wrong agent or to none; a BCTC misread propagates into every computed figure — §3.6 L2
+shows what that costs. `MODEL_DOCUMENT` remains a valid variable name for the classifier;
+the notebook currently points it at the premium tier. Each pass binds to a variable in
+`Config`, so any of them moves between tiers without a code change.
 
 **Spend limits**, all in `Config`:
 
@@ -199,6 +200,7 @@ change.
 | `agent_input_char_budgets` | 120,000 | The analysis prompt |
 | `max_extraction_calls` | 30 | LLM calls spent on extraction per run |
 | `max_extraction_input_chars` | 2,000,000 | Characters sent to extraction per run |
+| `result_content_char_limit` | 2,000 | OCR text per document in the returned payload — bounds the exported `result`, not what the prompts read |
 
 ### 1.4. Data Architecture Design
 
@@ -259,9 +261,30 @@ a missing figure and a zero figure were indistinguishable:
 | `—` | The calculation does not apply to this row | Pre-filled in the template skeleton |
 
 **Persistence.** Each run writes `logs/<testcase>_<timestamp>/` holding the report
-(MD + PDF), the full state, the per-document classification, the per-agent document
+(MD + PDF), the run state, the per-document classification, the per-agent document
 selection, and one JSON per extraction pass. This is the audit trail. It is also
 unencrypted customer data on local disk — see §2.4.
+
+**Each fact is written once.** `result.json` used to repeat almost every file beside it —
+the OCR text, each pass's extraction JSON, the metrics, the credit need, the selections.
+180 KB of a 288 KB file was a second copy, and a 22-file dossier put the payload past the
+size limit of the system it was exported to.
+
+| | 3-file run | 22-file dossier |
+|---|---:|---:|
+| Before | 256,736 | 1,637,440 |
+| OCR text truncated to `result_content_char_limit` | 144,120 | 811,590 |
+| …and the duplicated keys dropped | **39,812** | **127,756** |
+
+Truncation alone only halves it; the duplication is the larger half. `result.json` now
+carries what exists nowhere else — status, route, steps, plan, gaps, the response and the
+sub-agent outputs — and an `artifacts` line naming its siblings. The exclusion set is
+derived from the same list that decides which key goes to which file, so adding a sibling
+cannot leave `result.json` duplicating it.
+
+> **What this costs.** No artifact carries the full OCR text any more; it is truncated
+> head-first, and the middle of a statement is where the tables are. When OCR is what
+> needs investigating — §3.6 L2 — set `OCR_CACHE_DIR` and read the cached text.
 
 ### 1.5. Repository Structure
 
@@ -293,7 +316,7 @@ src/
 
 | Package | Lines | Owns |
 |---|---:|---|
-| `agents` | 7,262 | Orchestration, the four specialists, extraction, calculators |
+| `agents` | 7,289 | Orchestration, the four specialists, extraction, calculators |
 | `utils` | 4,657 | OCR and readers; report assembly and checking |
 | `matrix` | 1,022 | The routing matrix and its validation |
 | `templates` | 763 | Output structure and analysis guidance, per agent |
