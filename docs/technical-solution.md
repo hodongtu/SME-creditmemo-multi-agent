@@ -9,7 +9,7 @@ drafts it.
 | **Repository** | `SME-creditmemo-multi-agent` |
 | **Entry point** | `local_underwriting_agents.ipynb` (notebook driver); all logic in `src/` |
 | **Runtime** | Python 3.11+, Tesseract OCR, an OpenAI-compatible inference endpoint |
-| **Size** | 13,034 lines of Python across 5 packages |
+| **Size** | 13,070 lines of Python across 5 packages |
 | **Status** | Proof of concept. Production gaps are named in §2.4 and §3. |
 
 ---
@@ -287,6 +287,11 @@ cannot leave `result.json` duplicating it.
 > head-first, and the middle of a statement is where the tables are. When OCR is what
 > needs investigating — §3.6 L2 — set `OCR_CACHE_DIR` and read the cached text.
 
+The detail-ledger record is deliberately **not** truncated. `fit_to_budget` bounds it for
+the prompt, where an aggregate row in place of the long tail is the right trade; the stored
+copy is the audit trail for figures the report is built on, and there the trade runs the
+other way. Storing it once instead of once per file already removed the multiplication.
+
 ### 1.5. Repository Structure
 
 ```
@@ -317,7 +322,7 @@ src/
 
 | Package | Lines | Owns |
 |---|---:|---|
-| `agents` | 7,393 | Orchestration, the four specialists, extraction, calculators |
+| `agents` | 7,429 | Orchestration, the four specialists, extraction, calculators |
 | `utils` | 4,657 | OCR and readers; report assembly and checking |
 | `matrix` | 1,022 | The routing matrix and its validation |
 | `templates` | 763 | Output structure and analysis guidance, per agent |
@@ -510,6 +515,20 @@ flowchart TD
 | CIC R21 | `is_cic_r21` | `[EXTRACTED CIC R21 REPORT]` | no | CR |
 | Sitevisit | `is_sitevisit` | `[EXTRACTED SITE VISIT REPORT]` | no | all four |
 | Ledger | `is_ledger` | `[EXTRACTED DETAIL LEDGER]` | **yes** | BA, FA, CR |
+
+**The ledger pass is batch, and that has two consequences worth stating.** It merges every
+workbook into one record keyed by account code, then hands the *same object* to each ledger
+document. The prompt block de-duplicates by identity so it renders once; the stored payload
+did not, so five ledger files serialised the same 59 KB five times — 294,560 characters
+where 58,912 were needed. `_classifications_for_state` now keeps the record on the first
+document and gives the rest `{"same_as": "<filename>"}`.
+
+Merging also happens **per sheet**, not per file, because a Vietnamese ledger normally
+splits one account across sheets by month or product group. Summing them is correct. The
+warning that fires when two files meet on one account counts **distinct files** and is
+emitted once per account after the merge — it used to fire inside the loop, so six sheets
+of one workbook produced five warnings saying "merged from 2, 3, 4, 5, 6 files" about a
+single file.
 
 **A failed extraction stops the run — it does not fall back to raw OCR.** Sending the
 model the raw text is right for a document with no pass at all; nothing else could be

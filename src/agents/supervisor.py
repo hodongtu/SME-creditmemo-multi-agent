@@ -2183,6 +2183,21 @@ class Supervisor:
 
         limit = self.config.result_content_char_limit
         records = to_dict_list(documents)
+        # The ledger pass is batch: it merges every workbook into ONE record and
+        # hands the same object to each ledger document, so five files used to
+        # serialise the same 59 KB five times. The prompt block already
+        # de-duplicates by identity, so only the stored copy multiplied. Keyed
+        # by id() because it is the same object by construction — comparing
+        # 59 KB dicts for equality would be work done to learn what is already
+        # known.
+        seen: dict[int, str] = {}
+        for doc, record in zip(documents, records):
+            shared = getattr(doc, "ledger_extraction", None)
+            if shared is None:
+                continue
+            owner = seen.setdefault(id(shared), doc.filename)
+            if owner != doc.filename:
+                record["ledger_extraction"] = {"same_as": owner}
         if limit <= 0:
             return records
         for record in records:

@@ -90,17 +90,25 @@ ACCOUNT_CODES = {
     "411": "equity", "421": "equity",
 }
 # Phrases to fall back on when no code is printed. Matched against
-# normalize_text output, which turns "P.TRA KHAC" into "p tra khac". Longest
-# first at match time, so "phai thu khac" is not swallowed by "phai thu".
-CATEGORY_PHRASES = {
-    "xuat nhap ton": "inventory", "ton kho": "inventory", "nxt": "inventory",
-    "phai thu khac": "other_receivable", "pthu khac": "other_receivable",
-    "phai tra khac": "other_payable", "p tra khac": "other_payable",
-    "ptra khac": "other_payable",
-    "nguoi ban": "payable", "phai tra": "payable",
-    "khach hang": "receivable", "phai thu": "receivable",
-    "vay": "borrowing",
-}
+# normalize_text output, which turns "P.TRA KHAC" into "p tra khac".
+#
+# IN DECLARED ORDER, most specific first — the first match wins. Length was the
+# old tiebreak and it ranked the wrong things: "khach hang" (10) beat "phai tra"
+# (8), so a payables sheet naming its counterparty was filed as receivables. A
+# word naming the ACCOUNT has to outrank a word naming the party, and length
+# does not know the difference. Counterparty words sit last for that reason.
+CATEGORY_PHRASES: tuple[tuple[str, str], ...] = (
+    ("xuat nhap ton", "inventory"),
+    ("phai thu khac", "other_receivable"), ("pthu khac", "other_receivable"),
+    ("phai tra khac", "other_payable"), ("p tra khac", "other_payable"),
+    ("ptra khac", "other_payable"),
+    ("nguoi ban", "payable"),
+    ("phai tra", "payable"), ("phai thu", "receivable"),
+    ("ton kho", "inventory"), ("nxt", "inventory"), ("vay", "borrowing"),
+    # Names the counterparty, not the account. Only reached when nothing above
+    # matched, so "phai tra khach hang" resolves as a payable rather than here.
+    ("khach hang", "receivable"),
+)
 # The code to file a category under when the file prints none. Conventional, not
 # read — every use is stamped code_source="convention" so the two never look
 # alike in the output.
@@ -465,10 +473,12 @@ def label_sheet(
                         f"{source} {text!r}")
 
     joined = normalize_text(" ".join([filename, sheet_name, title]))
-    # Longest phrase first: "phai thu khac" must not lose to "phai thu".
-    for phrase in sorted(CATEGORY_PHRASES, key=len, reverse=True):
-        if phrase in joined:
-            category = CATEGORY_PHRASES[phrase]
+    # On word boundaries, not as a bare substring: "phai thu khac" is a prefix
+    # of "phai thu khach hang", so plain containment filed a customer-receivable
+    # sheet under other-receivables. normalize_text leaves only [a-z0-9 ], so
+    # the two lookarounds are the whole of word boundary here.
+    for phrase, category in CATEGORY_PHRASES:
+        if re.search(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", joined):
             return (category, CONVENTIONAL_CODE[category], "convention",
                     f"phrase {phrase!r}, no code printed")
     return "unknown", "", "none", "no account code or keyword found"
@@ -655,19 +665,30 @@ def merge_accounts(
             existing = accounts[key]
             existing["items"] += entry["items"]
             existing["item_count"] = len(existing["items"])
-            existing["source_files"].append(filename)
+            if filename not in existing["source_files"]:
+                existing["source_files"].append(filename)
             existing["source_columns"].update(entry["source_columns"])
             existing["units"].update(entry["units"])
             for field, value in entry["totals"].items():
                 existing["totals"][field] = round(
                     existing["totals"].get(field, 0) + value, 2
                 )
-            warnings.append(
-                f"Tài khoản {key} gộp từ {len(existing['source_files'])} file "
-                f"({', '.join(existing['source_files'])}): tổng đã được cộng lại. "
-                f"Nếu các file trùng dữ liệu thay vì bổ sung nhau thì tổng bị cộng đôi."
-            )
 
+    # One warning per account, and only when two or more FILES really met. The
+    # warning used to fire inside the merge branch, so it went off once per
+    # sheet and carried the whole list each time — six sheets of one workbook
+    # produced five warnings saying "merged from 2, 3, 4, 5, 6 files" about a
+    # single file. Several sheets in one workbook is the normal shape of a
+    # Vietnamese ledger; a warning that fires on the normal case teaches the
+    # reader to skip it, and the case worth reading — two files that duplicate
+    # each other instead of continuing each other — goes with it.
+    warnings += [
+        f"Tài khoản {key} gộp từ {len(account['source_files'])} file "
+        f"({', '.join(account['source_files'])}): tổng đã được cộng lại. "
+        f"Nếu các file trùng dữ liệu thay vì bổ sung nhau thì tổng bị cộng đôi."
+        for key, account in accounts.items()
+        if len(account["source_files"]) > 1
+    ]
     warnings += [note for _, p in profiles for note in (p.get("canh_bao") or [])]
     return {
         "accounts": accounts,
