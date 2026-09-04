@@ -4,7 +4,9 @@ Customers submit these as one workbook of many sheets, or as many files of one
 sheet each — the same six accounts either way. The output is the same shape in
 both cases: one record for the whole folder, keyed by account code, so a report
 asking for "phải thu khách hàng" looks in one place regardless of how the files
-arrived.
+arrived. A key gains its period — "131@2024" — only when the folder holds more
+than one period for that account, because balances from different periods are
+two facts and adding them produces a third that is not one.
 
 Unlike the other five passes, the input is not a scan. ``openpyxl`` hands back
 exact typed cells, so there is nothing for a model to read off a page — asking
@@ -13,10 +15,12 @@ And the account a sheet holds is usually stated too, in the sheet name or the
 file name. So the split is:
 
 * **code** opens the workbook, flattens multi-tier headers, finds the totals
-  row, sums each column, names the account, and maps the Vietnamese headers to
-  canonical fields;
-* **the LLM** is asked only about sheets code could not place — and on the real
-  sample workbook that is none of them, so the pass costs zero LLM calls.
+  row, sums each column, and reads every cell;
+* **the LLM** is asked, in ONE call for the whole folder, what each sheet *is*:
+  the account, the reporting period, and which column header is which field.
+  It used to be asked only about sheets the keyword rules could not place, which
+  on the sample workbook is none of them — but those rules place that workbook
+  and stop short of the general case, so every sheet goes now.
 
 ``merge_accounts`` reads only label fields out of the model's answer. Any figure
 it emits is discarded, so a hallucinated number cannot reach the report.
@@ -139,12 +143,18 @@ LEDGER_EXTRACTION_SYSTEM_PROMPT = """
 You name the account behind a sheet of a Vietnamese accounting detail ledger
 (sổ chi tiết / bảng cân đối phát sinh công nợ), for SME credit underwriting.
 
-You are only asked about the sheets a keyword pass could not place. Everything
-else has already been decided, and you are NOT given the figures — the program
-read every cell exactly. Producing a number here changes nothing; it is discarded.
+You are asked about EVERY sheet. A keyword pass has its own answer for each of
+them and will be used wherever yours does not check out, so answer only what you
+can read — "unknown" and "" are proper answers.
+
+You are NOT the source of any figure. The program reads every cell of the
+workbook itself, exactly. Producing a number here changes nothing; it is
+discarded. You get a few sample rows so you can tell a balance column from a
+movement column, not so you can read them back.
 
 For each sheet you get the FILE NAME it came from, the sheet name, the report
-title printed above the table, the period, and the column headers.
+title, the BANNER lines printed above the table, the column headers, the row
+count, and up to three sample rows.
 
 THE FILE NAME IS OFTEN THE STRONGEST SIGNAL. Customers export one account per
 file, leaving the sheet called "Sheet1" while the file is called
@@ -169,6 +179,25 @@ one: the analyst can read an unnamed sheet, but will trust a wrong name.
 Never infer a number that is not written down — the program fills those in
 itself and marks them as conventional.
 
+"period" is the reporting period, read from the banner. Give ISO dates in "from"
+and "to", and the banner line you read them from in "as_printed". Vietnamese
+ledgers write this many ways — "Từ ngày 01/01/2025 đến ngày 31/12/2025",
+"Kỳ báo cáo: 01/01/2025 - 31/12/2025", "Năm 2024", "Quý 4/2024", "Tháng 12 năm
+2024". Expand a bare year or quarter to its first and last day. When no banner
+line states a period, use "" for all three rather than guessing from a file name
+that merely contains a year.
+
+"columns" maps each column header EXACTLY AS GIVEN to one of these field names:
+  counterparty_code counterparty_name item_name booking_unit
+  opening_debit opening_credit debit_movement credit_movement
+  closing_debit closing_credit
+  opening_quantity opening_value inflow_quantity inflow_value
+  outflow_quantity outflow_value closing_quantity closing_value
+Use the *_quantity / *_value pair for stock sheets (nhập xuất tồn) and the
+debit/credit set for payable and receivable sheets. Omit a header you cannot
+place — do not invent a field name, and do not map two headers to the same
+field. A row counter ("Stt", "TT") is not a field; omit it.
+
 Return EXACTLY this JSON schema and no other text:
 {{
   "sheets": [
@@ -176,12 +205,16 @@ Return EXACTLY this JSON schema and no other text:
       "sheet": "the sheet name exactly as given",
       "category": "one of the values above",
       "account_code": "the printed code, or ''",
+      "period": {{"from": "YYYY-MM-DD or ''", "to": "YYYY-MM-DD or ''",
+                 "as_printed": "the banner line, or ''"}},
+      "columns": {{"header exactly as given": "field name"}},
       "description": "one line in Vietnamese saying what the sheet holds"}}
   ],
   "extraction_notes": ["sheets you could not place, and why"]
 }}
 """
 
+# ── Reading the workbook — openpyxl only, no model ────────────────────────
 
 def _value_grid(worksheet: Any) -> list[list[Any]]:
     """The sheet's cells, with merged ranges filled across every cell they span.
@@ -270,23 +303,35 @@ def _profile_sheet(worksheet: Any) -> dict[str, Any]:
     """One sheet as headers, printed total, computed totals and its top rows."""
 
     grid = _value_grid(worksheet)
+    span = _find_header(grid)
+    # Above the table only. Reading a fixed twelve rows swept the column headers
+    # into the banner, where they said nothing the "column_headers" list does not already
+    # say and cost more of the labelling payload than the banner itself.
     banner = [
         str(cell).strip()
-        for row in grid[:12] for cell in row
+        for row in grid[: span[0] if span else 12] for cell in row
         if isinstance(cell, str) and cell.strip()
     ]
     profile: dict[str, Any] = {
         "sheet": worksheet.title,
-        "tieu_de": next((t for t in banner if "BÁO CÁO" in t.upper()), ""),
-        "ky": next((t for t in banner if t.lower().startswith("từ ngày")), ""),
+        "title": next((t for t in banner if "BÁO CÁO" in t.upper()), ""),
+        "period_line": next((t for t in banner if t.lower().startswith("từ ngày")), ""),
+        # The banner lines the two fields above were derived from, kept rather
+        # than discarded. "period_line" only recognises one phrasing — measured, 2 of 10
+        # common ones — and parsing that line is exactly what the labelling call
+        # is asked to do. It cannot do it from a field that came back empty.
+        # De-duplicated in order: a merged banner cell repeats its text across
+        # every column it spans, so the raw list was the company name six times
+        # before anything else. Bounded because a banner is a heading, not a
+        # page.
+        "banner": list(dict.fromkeys(banner))[:12],
     }
 
-    span = _find_header(grid)
     if span is None:
         # Kept rather than dropped: the LLM may still recognise the sheet, and a
         # sheet we cannot parse is information the reader should have.
         profile["error"] = "Không tìm được dòng tiêu đề bảng"
-        profile["dong_dau"] = [
+        profile["first_rows"] = [
             [str(c) for c in row if c is not None][:6] for row in grid[:5]
         ]
         return profile
@@ -321,10 +366,10 @@ def _profile_sheet(worksheet: Any) -> dict[str, Any]:
     }
 
     profile.update({
-        "cot": [name for name in headers if name],
-        "so_dong": len(details),
-        "tong_tinh_duoc": computed,
-        "tong_in_tren_file": (
+        "column_headers": [name for name in headers if name],
+        "row_count": len(details),
+        "computed_total": computed,
+        "printed_total": (
             {k: v for k, v in printed_total.items()
              if isinstance(v, (int, float)) and not isinstance(v, bool)}
             if printed_total else None
@@ -337,12 +382,12 @@ def _profile_sheet(worksheet: Any) -> dict[str, Any]:
 def _reconcile(profile: dict[str, Any]) -> list[str]:
     """Disagreements between what we summed and what the file printed."""
 
-    printed = profile.get("tong_in_tren_file")
+    printed = profile.get("printed_total")
     if not printed:
         return []
     notes = []
     for column, value in printed.items():
-        ours = profile.get("tong_tinh_duoc", {}).get(column)
+        ours = profile.get("computed_total", {}).get(column)
         if ours is None or abs(ours - value) <= TOTAL_TOLERANCE:
             continue
         notes.append(
@@ -362,26 +407,10 @@ def profile_workbook(path: str) -> dict[str, Any]:
         workbook.close()
     return {
         "sheets": sheets,
-        "canh_bao": [note for sheet in sheets for note in _reconcile(sheet)],
+        "reconcile_notes": [note for sheet in sheets for note in _reconcile(sheet)],
     }
 
-
-def profile_for_prompt(profile: dict[str, Any]) -> str:
-    """The profile with row data dropped — what the labelling LLM is shown.
-
-    Sending the grid would defeat the point: the model is being asked which
-    account a sheet is, and the headers and title answer that.
-    """
-
-    return json.dumps(
-        {"sheets": [
-            {k: v for k, v in sheet.items() if k not in ("_rows", "tong_tinh_duoc")}
-            for sheet in profile["sheets"]
-        ]},
-        ensure_ascii=False,
-        indent=1,
-    )
-
+# ── Naming a sheet by rule — the floor the model answer falls back to ─────
 
 def _counter_columns(rows: list[dict], columns: list[str]) -> set[str]:
     """Columns that are just a row counter (1, 2, 3, …).
@@ -500,6 +529,7 @@ def canonical_columns(headers: list[str]) -> tuple[dict[str, str], list[str]]:
         mapping[header] = field or header
     return mapping, unmapped
 
+# ── Turning a sheet into rows and units ───────────────────────────────────
 
 def _sheet_rows(sheet: dict[str, Any], fields: dict[str, str]) -> list[dict[str, Any]]:
     """Every detail row of a sheet, under canonical field names.
@@ -513,7 +543,7 @@ def _sheet_rows(sheet: dict[str, Any], fields: dict[str, str]) -> list[dict[str,
     """
 
     rows = sheet.get("_rows") or []
-    columns = sheet.get("cot", [])
+    columns = sheet.get("column_headers", [])
     counters = _counter_columns(rows, columns)
     label_column = _label_column(rows, columns, counters)
     # A column counts as numeric when any row puts a number in it; the rest of
@@ -575,6 +605,151 @@ def _field_units(rows: list[dict[str, Any]]) -> dict[str, str]:
     return dict(sorted(units.items()))
 
 
+# Every canonical field name a column may be mapped to. Built from the rule
+# table so the two can never list different things.
+CANONICAL_FIELDS = frozenset(COLUMN_FIELDS.values())
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# ── Checking the model's answer before any of it is used ──────────────────
+
+def _checked_account(
+    said: dict[str, Any], sheet_text: str = ""
+) -> tuple[str, str, str] | None:
+    """(category, code, evidence) from a model answer, or None to use the rule.
+
+    A wrongly named account is worse than an unnamed one — the analyst can read
+    an unnamed sheet but will trust a wrong name — so both halves have to hold
+    up: the category must be one this system defines, and a code, if given, must
+    be a real account number rather than a year or a customer id.
+
+    A valid code is not enough: it also has to be IN the sheet. The prompt lists
+    example codes per category ("borrowing - ... TK 311, 341, 343"), and on a
+    sheet called "TK VAY" that prints no number at all the model answered 311 —
+    a real account code, copied out of the prompt rather than read off the file.
+    It passed every check there was. "Never infer a number that is not written
+    down" is in the prompt too, and this is the third time in this project that
+    a rule living only there was not followed.
+
+    A code the model produced but the sheet does not contain is dropped, and the
+    category falls through to its conventional code, which is exactly what
+    code_source="convention" was built to say.
+    """
+
+    category = str(said.get("category") or "")
+    if category not in CONVENTIONAL_CODE:
+        return None
+    printed = re.sub(r"\D", "", str(said.get("account_code") or ""))
+    if printed and (len(printed) < 3 or len(printed) > 5
+                    or printed[:3] not in ACCOUNT_CODES
+                    or (sheet_text and printed not in re.sub(r"\D", " ", sheet_text))):
+        printed = ""
+    code = printed or CONVENTIONAL_CODE[category]
+    said_what = str(said.get("description") or category)
+    return category, code, f"LLM: {said_what}"
+
+
+def _checked_period(said: dict[str, Any], fallback: str) -> dict[str, Any]:
+    """The period as ISO dates when the model gave usable ones, else the banner.
+
+    Kept as a dict rather than a bare string because the string is what the code
+    already had and could do nothing with: two files cannot be compared, so a
+    2024 ledger and a 2025 one merge into one account and their balances are
+    summed. Dates make that answerable. Nothing here acts on it yet.
+    """
+
+    period = said.get("period")
+    raw = fallback
+    if isinstance(period, dict):
+        raw = str(period.get("as_printed") or "") or fallback
+        tu, den = str(period.get("from") or ""), str(period.get("to") or "")
+        if _ISO_DATE.match(tu) and _ISO_DATE.match(den) and tu <= den:
+            return {"from": tu, "to": den, "as_printed": raw, "source": "llm"}
+    return {"from": "", "to": "", "as_printed": raw,
+            "source": "banner" if raw else "none"}
+
+
+def _checked_columns(
+    said: dict[str, Any], headers: list[str]
+) -> tuple[dict[str, str], list[str]]:
+    """(header -> field, headers the model did not place) for one sheet.
+
+    Per header, not per sheet: a model that names three columns correctly and
+    invents a fourth keeps the three. The invented one goes to the rule table,
+    and if that has no name for it either the header keeps its own — the
+    behaviour canonical_columns already had.
+
+    The check that matters is that a field name exists. Everything downstream
+    reads "opening_debit", "closing_credit" and the rest BY NAME, so a plausible
+    invention like "so_du_dau" would not raise anywhere; it would quietly empty
+    a column of the report.
+    """
+
+    mapping = said.get("columns")
+    if not isinstance(mapping, dict):
+        return {}, list(headers)
+    taken: set[str] = set()
+    placed: dict[str, str] = {}
+    for header in headers:
+        field = mapping.get(header)
+        # Two headers on one field would silently drop one of them.
+        if isinstance(field, str) and field in CANONICAL_FIELDS and field not in taken:
+            placed[header] = field
+            taken.add(field)
+    return placed, [h for h in headers if h not in placed]
+
+# ── Merging into one entry per account and period ─────────────────────────
+
+def _period_key(period: dict[str, Any]) -> str:
+    """What makes two entries the same reporting period, or "" when unknown."""
+
+    frm, to = period.get("from") or "", period.get("to") or ""
+    if frm and to:
+        return f"{frm}..{to}"
+    return normalize_text(period.get("as_printed") or "")
+
+
+def _period_label(period_key: str) -> str:
+    """The period as it goes into a display key.
+
+    A whole calendar year gets written as the year, because "131@2024" is what
+    an analyst would write and "131@2024-01-01..2024-12-31" is the same fact
+    spelled at four times the length. Anything else keeps its span — a ledger
+    covering July to June is not a year and should not read as one.
+    """
+
+    if not period_key:
+        return "unknown-period"
+    frm, _, to = period_key.partition("..")
+    if _ISO_DATE.match(frm) and _ISO_DATE.match(to):
+        year = frm[:4]
+        if to[:4] == year and frm[5:] == "01-01" and to[5:] == "12-31":
+            return year
+        return period_key
+    return period_key
+
+
+def _display_keys(grouped: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
+    """Public account keys: bare code when unambiguous, code@period when not.
+
+    A dossier holding one period per account — the ordinary case — keeps the
+    keys it has always had. The period only appears where the alternative is two
+    entries fighting over one name, which is the situation this whole split
+    exists to stop: summing a 2024 closing balance with a 2025 one produced a
+    figure that never existed in either file.
+    """
+
+    periods_per_code: dict[str, set[str]] = {}
+    for code, period_key in grouped:
+        periods_per_code.setdefault(code, set()).add(period_key)
+    out: dict[str, Any] = {}
+    for (code, period_key), entry in grouped.items():
+        key = code if len(periods_per_code[code]) == 1 else (
+            f"{code}@{_period_label(period_key)}"
+        )
+        out[key] = entry
+    return out
+
+
 def merge_accounts(
     profiles: list[tuple[str, dict[str, Any]]],
     labels: dict[str, Any] | None = None,
@@ -596,40 +771,55 @@ def merge_accounts(
         for item in ((labels or {}).get("sheets") or [])
         if isinstance(item, dict)
     }
-    accounts: dict[str, dict[str, Any]] = {}
+    # Keyed by (account code, period) while merging. Two files covering the same
+    # account but different years are two different things: their movements
+    # could arguably be added, their balances cannot — a closing balance plus
+    # another closing balance is a number neither file contains.
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
     warnings: list[str] = []
     unmapped: list[str] = []
 
     for filename, profile in profiles:
         for sheet in profile.get("sheets", []):
             name = sheet.get("sheet", "")
-            category, code, code_source, evidence = label_sheet(
-                filename, name, sheet.get("tieu_de", "")
-            )
-            if category == "unknown":
-                said = from_model.get((filename, name), {})
-                if said.get("category") in CONVENTIONAL_CODE:
-                    category = said["category"]
-                    printed = str(said.get("account_code") or "")
-                    code = printed or CONVENTIONAL_CODE[category]
-                    code_source = "printed" if printed else "convention"
-                    evidence = f"LLM: {said.get('description') or category}"
+            said = from_model.get((filename, name), {})
+            # The model answers first and the rules catch what it drops, which
+            # is the reverse of how this used to run. The rules place the sample
+            # workbook and stop short of the general case; the model is asked
+            # about every sheet precisely because those rules do not carry.
+            # Everything the sheet says about itself, for the code check above.
+            sheet_text = " ".join([
+                filename, name, sheet.get("title", ""),
+                *(sheet.get("banner") or []),
+            ])
+            checked = _checked_account(said, sheet_text)
+            if checked is not None:
+                category, code, evidence = checked
+                code_source = "llm"
+            else:
+                category, code, code_source, evidence = label_sheet(
+                    filename, name, sheet.get("title", "")
+                )
 
             key = code or f"unknown_{name}"
             # Row counters are dropped before mapping: "Stt" is not a field the
             # report ever wants, and listing it as unmapped would send someone
             # looking for an English name it should never have.
-            counters = _counter_columns(sheet.get("_rows") or [], sheet.get("cot", []))
-            fields, missing = canonical_columns(
-                [c for c in sheet.get("cot", []) if c not in counters]
-            )
+            counters = _counter_columns(sheet.get("_rows") or [], sheet.get("column_headers", []))
+            headers = [c for c in sheet.get("column_headers", []) if c not in counters]
+            # Same shape for columns: take what the model placed, send the rest
+            # to the rule table. Per header, so one invented field name costs
+            # one column rather than the sheet.
+            fields, left = _checked_columns(said, headers)
+            by_rule, missing = canonical_columns(left)
+            fields.update(by_rule)
             unmapped += [c for c in missing if c not in unmapped]
             rows = _sheet_rows(sheet, fields)
             totals_raw = {
                 fields.get(k, k): round(v) if isinstance(v, (int, float))
                 and not isinstance(v, bool) else v
-                for k, v in (sheet.get("tong_in_tren_file")
-                             or sheet.get("tong_tinh_duoc") or {}).items()
+                for k, v in (sheet.get("printed_total")
+                             or sheet.get("computed_total") or {}).items()
                 # Counters dropped here as well as from the rows. Summing "Stt"
                 # gives 153 for a 17-row sheet, which reads as a figure and is
                 # not one; it only stayed hidden while the printed total row
@@ -646,7 +836,7 @@ def merge_accounts(
                 "code_source": code_source,
                 "code_evidence": evidence,
                 "source_files": [filename],
-                "period": sheet.get("ky", ""),
+                "period": _checked_period(said, sheet.get("period_line", "")),
                 "source_columns": {v: k for k, v in fields.items()},
                 "units": _field_units(rows),
                 "totals": totals_raw,
@@ -656,13 +846,15 @@ def merge_accounts(
             if "error" in sheet:
                 entry["error"] = sheet["error"]
 
-            if key not in accounts:
-                accounts[key] = entry
+            slot = (key, _period_key(entry["period"]))
+            if slot not in grouped:
+                grouped[slot] = entry
                 continue
-            # Same account from a second file: join rather than overwrite, and
-            # say so. Two files that duplicate each other rather than continuing
-            # each other would double the totals, and that has to be visible.
-            existing = accounts[key]
+            # Same account, same period, another sheet or another file: join
+            # rather than overwrite. Sheets of one workbook split an account by
+            # month or product group and belong together; two files on one
+            # period might instead be duplicates, which the warning below says.
+            existing = grouped[slot]
             existing["items"] += entry["items"]
             existing["item_count"] = len(existing["items"])
             if filename not in existing["source_files"]:
@@ -674,22 +866,38 @@ def merge_accounts(
                     existing["totals"].get(field, 0) + value, 2
                 )
 
-    # One warning per account, and only when two or more FILES really met. The
-    # warning used to fire inside the merge branch, so it went off once per
-    # sheet and carried the whole list each time — six sheets of one workbook
-    # produced five warnings saying "merged from 2, 3, 4, 5, 6 files" about a
-    # single file. Several sheets in one workbook is the normal shape of a
-    # Vietnamese ledger; a warning that fires on the normal case teaches the
-    # reader to skip it, and the case worth reading — two files that duplicate
-    # each other instead of continuing each other — goes with it.
+    accounts = _display_keys(grouped)
+
+    # Two notes, about two different things.
+    #
+    # A split is information: the dossier covers more than one period for this
+    # account, so it is two entries rather than one. It used to be a warning
+    # saying the balances had been added together, which is what happened before
+    # the split and would be a lie now.
+    #
+    # Two files on ONE period is the case still worth flagging: they may be
+    # continuing each other, or they may be the same data twice, and only the
+    # reader can tell. Emitted once per account after the merge — it used to
+    # fire inside the loop, so six sheets of one workbook produced five warnings
+    # saying "merged from 2, 3, 4, 5, 6 files" about a single file.
+    by_code: dict[str, list[str]] = {}
+    for key in accounts:
+        by_code.setdefault(key.split("@")[0], []).append(key)
+    warnings += [
+        f"Tài khoản {code} được TÁCH thành {len(keys)} mục theo kỳ báo cáo "
+        f"({', '.join(sorted(keys))}): số dư của các kỳ khác nhau không được "
+        f"cộng vào nhau."
+        for code, keys in by_code.items() if len(keys) > 1
+    ]
     warnings += [
         f"Tài khoản {key} gộp từ {len(account['source_files'])} file "
-        f"({', '.join(account['source_files'])}): tổng đã được cộng lại. "
-        f"Nếu các file trùng dữ liệu thay vì bổ sung nhau thì tổng bị cộng đôi."
+        f"({', '.join(account['source_files'])}) trong CÙNG một kỳ: tổng đã "
+        f"được cộng lại. Nếu các file trùng dữ liệu thay vì bổ sung nhau thì "
+        f"tổng bị cộng đôi."
         for key, account in accounts.items()
         if len(account["source_files"]) > 1
     ]
-    warnings += [note for _, p in profiles for note in (p.get("canh_bao") or [])]
+    warnings += [note for _, p in profiles for note in (p.get("reconcile_notes") or [])]
     return {
         "accounts": accounts,
         "unmapped_columns": unmapped,
@@ -697,6 +905,7 @@ def merge_accounts(
         "extraction_notes": [str(n) for n in ((labels or {}).get("extraction_notes") or [])],
     }
 
+# ── Fitting the record to the prompt's character budget ───────────────────
 
 def _magnitude(row: dict[str, Any]) -> float:
     """How big this row is, across every column rather than one of them."""
@@ -767,6 +976,7 @@ def fit_to_budget(
             high = mid - 1
     return shrink(low)
 
+# ── The pass itself: profile every file, one labelling call, merge ────────
 
 def build_ledger_extraction_chain(llm: Any):
     """Build the JSON-output labelling chain for detail-ledger workbooks."""
@@ -774,17 +984,44 @@ def build_ledger_extraction_chain(llm: Any):
     return build_extraction_chain(LEDGER_EXTRACTION_SYSTEM_PROMPT, llm)
 
 
-def _unplaced(profiles: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
-    """The sheets the keyword pass could not name — the only ones worth a call."""
+# How many detail rows go with each sheet in the labelling payload. Enough to
+# tell a balance column from a movement column when the header alone is
+# ambiguous — a "Số dư" that never changes across rows reads differently from a
+# "Phát sinh" that does. Not enough to be worth transcribing: the figures in the
+# record come from openpyxl, and these rows are there so the model can NAME the
+# columns, not so it can read them back.
+SAMPLE_ROWS_FOR_LABELLING = 3
+
+
+def _labelling_payload(
+    profiles: list[tuple[str, dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Every sheet, as the labelling call sees it.
+
+    Every sheet, not only the ones the keyword pass could not place. The rules
+    handle the sample workbook and stop short of the general case: the account
+    falls back to convention on 4 of 6 sheets, the period line is recognised in
+    2 of 10 common phrasings, and the column names are 18 hard-coded strings
+    that another accounting package will not match. One call per run buys all
+    three, and the figures never leave openpyxl.
+
+    ``banner`` goes in raw. The parsed ``ky`` beside it is exactly the field
+    that comes back empty when the phrasing is unfamiliar, so sending only that
+    would ask the model to fix a problem with the evidence removed.
+    """
 
     return [
-        {"file": filename, "sheet": sheet.get("sheet", ""),
-         "tieu_de": sheet.get("tieu_de", ""), "ky": sheet.get("ky", ""),
-         "cot": sheet.get("cot", []), "so_dong": sheet.get("so_dong")}
+        {
+            "file": filename,
+            "sheet": sheet.get("sheet", ""),
+            "title": sheet.get("title", ""),
+            "banner": sheet.get("banner", []),
+            "column_headers": sheet.get("column_headers", []),
+            "row_count": sheet.get("row_count"),
+            "sample_rows": (sheet.get("_rows") or [])[:SAMPLE_ROWS_FOR_LABELLING],
+        }
         for filename, profile in profiles
         for sheet in profile.get("sheets", [])
-        if label_sheet(filename, sheet.get("sheet", ""),
-                       sheet.get("tieu_de", ""))[0] == "unknown"
     ]
 
 
@@ -815,23 +1052,27 @@ def extract_ledger_batch(
         reason = "; ".join(failures) or "Không có file nào đọc được"
         return [(None, f"Không đọc được workbook: {reason}"[:500]) for _ in documents]
 
-    labels: dict[str, Any] = {}
-    # Only pay for a call when the keyword pass left something unnamed. On the
-    # sample workbook it names all six sheets, so this pass costs nothing.
-    unplaced = _unplaced(profiles)
-    if unplaced:
-        labels, error = run_extraction(
-            chain,
-            ", ".join(name for name, _ in profiles),
-            json.dumps({"sheets": unplaced}, ensure_ascii=False, indent=1),
-            REQUIRED_TOP_LEVEL_KEYS,
-            "No ledger extraction LLM configured.",
-        )
-        if labels is None:
-            # The figures are already in hand; losing the labels is not worth
-            # losing them over.
-            labels = {"sheets": [],
-                      "extraction_notes": [f"Không gán nhãn được: {error}"]}
+    # One call for every sheet of every ledger file. It used to fire only for
+    # sheets the keyword pass could not place, which on the sample workbook is
+    # never — and the rules that placed them are the ones that do not carry to
+    # other accounting packages.
+    labels, error = run_extraction(
+        chain,
+        ", ".join(name for name, _ in profiles),
+        # Compact: indentation is 21% of this payload and the model reads it the
+        # same either way — measured on the sample workbook, same six answers.
+        json.dumps({"sheets": _labelling_payload(profiles)},
+                   ensure_ascii=False, separators=(",", ":")),
+        REQUIRED_TOP_LEVEL_KEYS,
+        "No ledger extraction LLM configured.",
+    )
+    if labels is None:
+        # The figures are already in hand; losing the labels is not worth losing
+        # them over. Everything falls back to the keyword rules, and the record
+        # says so through code_source — this is the degraded path, not the
+        # normal one, and it has to be legible as such.
+        labels = {"sheets": [],
+                  "extraction_notes": [f"Không gán nhãn được: {error}"]}
 
     record = merge_accounts(profiles, labels)
     record["extraction_notes"] += failures

@@ -473,8 +473,13 @@ def _build_ledger_structured_block(
     parts = [
         LEDGER_BLOCK_HEADING,
         "Trích từ sổ chi tiết / bảng cân đối phát sinh công nợ khách hàng nộp "
-        "dưới dạng Excel, gộp mọi file thành một bản: khoá của \"accounts\" là "
-        "số hiệu tài khoản.",
+        "dưới dạng Excel, gộp mọi file thành một bản. Khoá của \"accounts\" là "
+        "số hiệu tài khoản; nếu hồ sơ có NHIỀU KỲ cho cùng một tài khoản thì "
+        "khoá mang thêm kỳ sau dấu @ (ví dụ \"131@2024\" và \"131@2025\") và "
+        "đó là hai mục riêng — số dư của hai kỳ KHÔNG được cộng vào nhau. "
+        "Kỳ chuẩn để đối chiếu là \"period\": \"from\"/\"to\" là ngày đầu và "
+        "cuối kỳ, \"as_printed\" là dòng in trên file. Dùng \"period\" để xếp "
+        "số liệu vào đúng cột năm, đừng đọc năm từ tên khoá.",
         "SỐ LIỆU ĐỌC THẲNG TỪ Ô EXCEL, không qua OCR và không do mô hình nào "
         "chép lại — đúng nguyên văn con số trong file. \"units\" ghi đơn vị "
         "từng trường: \"vnd\" là ĐỒNG, \"quantity\" là số lượng.",

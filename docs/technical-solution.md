@@ -9,7 +9,7 @@ drafts it.
 | **Repository** | `SME-creditmemo-multi-agent` |
 | **Entry point** | `local_underwriting_agents.ipynb` (notebook driver); all logic in `src/` |
 | **Runtime** | Python 3.11+, Tesseract OCR, an OpenAI-compatible inference endpoint |
-| **Size** | 13,070 lines of Python across 5 packages |
+| **Size** | 13,300 lines of Python across 5 packages |
 | **Status** | Proof of concept. Production gaps are named in §2.4 and §3. |
 
 ---
@@ -322,7 +322,7 @@ src/
 
 | Package | Lines | Owns |
 |---|---:|---|
-| `agents` | 7,429 | Orchestration, the four specialists, extraction, calculators |
+| `agents` | 7,659 | Orchestration, the four specialists, extraction, calculators |
 | `utils` | 4,657 | OCR and readers; report assembly and checking |
 | `matrix` | 1,022 | The routing matrix and its validation |
 | `templates` | 763 | Output structure and analysis guidance, per agent |
@@ -497,12 +497,9 @@ flowchart TD
     B -->|no| C["Skip; step log names<br/>the calls saved"]
     B -->|yes| D{"batch?"}
     D -->|"False — 5 passes"| E["One LLM call<br/>per matching document"]
-    D -->|"True — Ledger"| F["openpyxl reads every sheet<br/>deterministically"]
-    F --> G{"Sheet placed by<br/>account code + headers?"}
-    G -->|yes| H["No LLM call"]
-    G -->|no| I["One LLM call to label<br/>the unplaced sheets"]
+    D -->|"True — Ledger"| F["openpyxl reads every cell<br/>of every sheet"]
+    F --> I["One LLM call, every sheet:<br/>account, period, column names<br/>never a figure"]
     E --> J["Extraction JSON<br/>on the ClassifiedDocument"]
-    H --> J
     I --> J
     J --> K["prompt_blocks renders<br/>the labelled block"]
 ```
@@ -516,6 +513,27 @@ flowchart TD
 | Sitevisit | `is_sitevisit` | `[EXTRACTED SITE VISIT REPORT]` | no | all four |
 | Ledger | `is_ledger` | `[EXTRACTED DETAIL LEDGER]` | **yes** | BA, FA, CR |
 
+**What the model does and does not do in the ledger pass.** It reads *labels*; openpyxl
+reads *figures*. One call per run covers every sheet of every ledger file and returns four
+things — the account category, its code, the reporting period as ISO dates, and which
+column header is which field. Every one is validated before use and falls back to the
+keyword rules when it does not hold up:
+
+| Answer | Guard | Falls back to |
+|---|---|---|
+| `category` | one of the 9 defined | `label_sheet` |
+| `account_code` | 3–5 digits, prefix in the 39 known codes | `label_sheet` |
+| `period.tu/den` | ISO dates, `tu <= den` | the raw banner line |
+| `columns` | value is one of the 18 canonical fields, no field claimed twice | `COLUMN_FIELDS`, per header |
+
+It used to be called only for sheets the keyword pass could not place — zero calls on the
+sample workbook. The rules place that workbook and stop short of the general case: the
+account resolves only by convention on 4 of 6 sheets, the period line is recognised in 2 of
+10 common phrasings, and the column names are 18 hard-coded strings another accounting
+package will not match. The call costs ≈ **15,800 input tokens for five ledger files**, and
+`merge_accounts` reads exactly four keys from the answer — a model returning `totals` or
+`items` has them ignored.
+
 **The ledger pass is batch, and that has two consequences worth stating.** It merges every
 workbook into one record keyed by account code, then hands the *same object* to each ledger
 document. The prompt block de-duplicates by identity so it renders once; the stored payload
@@ -523,12 +541,22 @@ did not, so five ledger files serialised the same 59 KB five times — 294,560 c
 where 58,912 were needed. `_classifications_for_state` now keeps the record on the first
 document and gives the rest `{"same_as": "<filename>"}`.
 
-Merging also happens **per sheet**, not per file, because a Vietnamese ledger normally
-splits one account across sheets by month or product group. Summing them is correct. The
-warning that fires when two files meet on one account counts **distinct files** and is
-emitted once per account after the merge — it used to fire inside the loop, so six sheets
-of one workbook produced five warnings saying "merged from 2, 3, 4, 5, 6 files" about a
-single file.
+Merging happens **per sheet and per period**, not per file. A Vietnamese ledger normally
+splits one account across sheets by month or product group, so those are summed. Two files
+covering *different* periods are not: a 2024 closing balance added to a 2025 one is a
+figure neither file contains, and the record used to carry exactly that while its `period`
+field still said "Năm 2024".
+
+| Periods found for an account | Key |
+|---|---|
+| one | `131` — the ordinary case, unchanged |
+| several whole years | `131@2024`, `131@2025` |
+| several, not year-aligned | `131@2024-07-01..2025-06-30` |
+| one with no readable period | `131@unknown-period` beside the others |
+
+`period.from` / `period.to` are the dates to sort by; the key is for telling two entries
+apart, not for reading a year out of. Two files on the *same* period still merge and still
+warn — that one may be duplication, and only the reader can tell.
 
 **A failed extraction stops the run — it does not fall back to raw OCR.** Sending the
 model the raw text is right for a document with no pass at all; nothing else could be
@@ -912,8 +940,9 @@ rather than the 101 it was before the ceiling existed.
 
 Two things move this number: a dossier with several files of one type multiplies that
 pass (two BCTCs cost two BCTC calls), and a poorly named file adds a classification
-call. The Ledger pass is the exception — it is deterministic `openpyxl` reading and
-calls the model only for sheets it cannot place.
+call. The Ledger pass is the exception in the other direction — however many ledger files
+a dossier holds, it spends exactly **one** call, because it reads them all with `openpyxl`
+and asks the model only to name what it read (§2.1 Stage 4).
 
 ### 3.2. Measured reference run
 
