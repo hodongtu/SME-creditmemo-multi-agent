@@ -9,7 +9,7 @@ drafts it.
 | **Repository** | `SME-creditmemo-multi-agent` |
 | **Entry point** | `local_underwriting_agents.ipynb` (notebook driver); all logic in `src/` |
 | **Runtime** | Python 3.11+, Tesseract OCR, an OpenAI-compatible inference endpoint |
-| **Size** | 12,930 lines of Python across 5 packages |
+| **Size** | 13,034 lines of Python across 5 packages |
 | **Status** | Proof of concept. Production gaps are named in §2.4 and §3. |
 
 ---
@@ -99,7 +99,8 @@ flowchart TD
     B --> C[evidence_gap_check]
     C -->|blocked| E1(["END — names the missing documents"])
     C -->|continue| D[extract_documents]
-    D --> F[fetch_reference_data]
+    D -->|"a required extraction failed"| E3(["END — names the failed documents"])
+    D -->|continue| F[fetch_reference_data]
     F --> R{"Route<br/>(dict lookup, no LLM)"}
     R --> G1[single_business_activity]
     R --> G2[single_credit_relationship]
@@ -316,7 +317,7 @@ src/
 
 | Package | Lines | Owns |
 |---|---:|---|
-| `agents` | 7,289 | Orchestration, the four specialists, extraction, calculators |
+| `agents` | 7,393 | Orchestration, the four specialists, extraction, calculators |
 | `utils` | 4,657 | OCR and readers; report assembly and checking |
 | `matrix` | 1,022 | The routing matrix and its validation |
 | `templates` | 763 | Output structure and analysis guidance, per agent |
@@ -509,6 +510,27 @@ flowchart TD
 | CIC R21 | `is_cic_r21` | `[EXTRACTED CIC R21 REPORT]` | no | CR |
 | Sitevisit | `is_sitevisit` | `[EXTRACTED SITE VISIT REPORT]` | no | all four |
 | Ledger | `is_ledger` | `[EXTRACTED DETAIL LEDGER]` | **yes** | BA, FA, CR |
+
+**A failed extraction stops the run — it does not fall back to raw OCR.** Sending the
+model the raw text is right for a document with no pass at all; nothing else could be
+sent. It is wrong once a pass has run and failed, because the pipeline then *knows* the
+structured read did not work and hands over exactly the input the pass exists to avoid.
+Three BCTC extractions failing that way produced a report written off unreadable OCR
+figures, and a payload large enough to break the export.
+
+| Pass | `required` | On failure |
+|---|---|---|
+| BCTC, Proposal, Sitevisit | **yes** | Run ends, naming each file and why |
+| CIC S10A, CIC R21, Ledger | no | Raw OCR, as before |
+
+Three causes count as failure, because all three end with no JSON and raw OCR in the
+prompt: the chain raised, no LLM is configured for that pass, or the extraction budget cut
+it. The stored error says which, and each points at a different fix — retry, edit `.env`,
+or submit fewer files. One failed document out of three is enough to stop: a report mixing
+structured data with OCR noise is two grades of evidence in one table.
+
+A pass with no matching documents never runs and never fails, so an absent site-visit
+report stays the gap check's business rather than becoming an extraction failure.
 
 **A ceiling on what one run may spend.** The analysis prompt has always been capped;
 extraction was capped per document only, so total spend scaled with file count with no

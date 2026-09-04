@@ -131,6 +131,33 @@ class ExtractionPass:
     # split across two of them — per-document extraction cannot see the whole
     # set. Changes the extract signature, which the guard below checks.
     batch: bool = False
+    # A pass whose failure stops the run instead of falling back to raw OCR.
+    # The fallback is right for a document with no pass at all — nothing else
+    # could be sent. It is wrong once a pass has run and failed: the pipeline
+    # then knows the structured read did not work, and hands the model exactly
+    # the input the pass exists to avoid. Three BCTC extractions failing that
+    # way produced a report written off unreadable OCR numbers, and a payload
+    # large enough to break the export.
+    #
+    # Ledger, CIC S10A and CIC R21 keep the fallback deliberately.
+    required: bool = False
+
+    def failures(
+        self, docs: list[ClassifiedDocument]
+    ) -> list[tuple[ClassifiedDocument, str]]:
+        """Documents this pass applies to that came back with no JSON.
+
+        Covers all three ways that happens — the chain raised, no LLM was
+        configured for the pass, or the run's extraction budget cut it — because
+        each ends the same way: no structured data, raw OCR in the prompt. The
+        stored error says which, and each points at a different fix.
+        """
+
+        return [
+            (doc, getattr(doc, self.error_attr, "") or "Không rõ lý do.")
+            for doc in docs
+            if getattr(doc, self.flag_attr) and not getattr(doc, self.result_attr)
+        ]
 
     @property
     def chain_attr(self) -> str:
@@ -167,6 +194,7 @@ EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
         },
         extra_consumers=prompt_blocks.METRICS_BLOCK_AGENTS,
         per_agent_block_args=True,
+        required=True,
     ),
     ExtractionPass(
         label="Proposal",
@@ -180,6 +208,7 @@ EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
         build_block=prompt_blocks._build_proposal_structured_block,
         heading=prompt_blocks.PROPOSAL_BLOCK_HEADING,
         json_agents=("CREDIT_PROPOSAL_AGENT",),
+        required=True,
     ),
     ExtractionPass(
         label="CIC S10A",
@@ -225,6 +254,7 @@ EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
             "CREDIT_RELATIONSHIP_AGENT",
             "CREDIT_PROPOSAL_AGENT",
         ),
+        required=True,
     ),
     ExtractionPass(
         label="Ledger",
@@ -411,12 +441,18 @@ class Supervisor:
         workflow.add_edge("classify_documents", "evidence_gap_check")
         workflow.add_conditional_edges(
             "evidence_gap_check",
-            self._graph_after_evidence_gap_check,
+            self._graph_stop_if_answered,
             {"blocked": END, "continue": "extract_documents"},
         )
         # After extraction, not before: the customer key is read out of the
         # extraction results, so there is nothing to query with until they exist.
-        workflow.add_edge("extract_documents", "fetch_reference_data")
+        # Conditional because a required pass that failed ends the run here —
+        # see ExtractionPass.required.
+        workflow.add_conditional_edges(
+            "extract_documents",
+            self._graph_stop_if_answered,
+            {"blocked": END, "continue": "fetch_reference_data"},
+        )
         workflow.add_conditional_edges(
             "fetch_reference_data",
             self._graph_select_workflow_branch,
@@ -534,10 +570,15 @@ class Supervisor:
         }
 
     @staticmethod
-    def _graph_after_evidence_gap_check(
+    def _graph_stop_if_answered(
         state: UnderwritingGraphState,
     ) -> str:
-        """Choose whether missing required evidence blocks execution."""
+        """Whether a node has already produced the run's answer.
+
+        Two nodes can end the run early — the evidence gap check, and the
+        extraction step when a required pass failed. Both say so the same way,
+        by putting output_state into the state, so both edges ask this.
+        """
 
         return "blocked" if state.get("output_state") else "continue"
 
@@ -599,6 +640,42 @@ class Supervisor:
             steps.append(
                 f"Saved LLM calls — no agent on route {route} reads: {skipped}"
             )
+        # A required pass that ran and produced nothing stops the run. The
+        # alternative — the old behaviour — is to send the raw OCR the pass
+        # exists to replace, and let the agent write a credit opinion off it.
+        failed = [
+            (pass_, doc, why)
+            for pass_ in EXTRACTION_PASSES
+            if pass_.required and pass_.label in needed
+            for doc, why in pass_.failures(documents)
+        ]
+        if failed:
+            steps.append(
+                f"Stopped after extraction: {len(failed)} required "
+                f"extraction(s) failed and raw OCR was not used instead"
+            )
+            return {
+                **state,
+                "documents": documents,
+                # Same keys the normal return sets. A branch that drops one
+                # leaves the state a different shape depending on which way it
+                # went, and the next reader of document_summary gets a KeyError
+                # instead of a report — which is exactly what svbase caught.
+                "document_summary": self._format_document_summary(documents),
+                "steps": steps,
+                "output_state": self._build_state(
+                    self._failed_extraction_response(failed),
+                    "EXTRACTION_FAILED",
+                    state.get("decision") or {},
+                    documents,
+                    {},
+                    state.get("execution_plan") or {},
+                    state.get("gap_analysis") or {},
+                    steps,
+                    loan_program=state.get("loan_program", ""),
+                ),
+            }
+
         return {
             **state,
             "documents": documents,
@@ -1437,6 +1514,33 @@ class Supervisor:
             ),
         }
         return reasons.get(evidence_type, "Relevant evidence was not found.")
+
+    @staticmethod
+    def _failed_extraction_response(
+        failed: list[tuple[Any, ClassifiedDocument, str]],
+    ) -> str:
+        """The answer when a required extraction produced nothing.
+
+        Names every file and the reason stored against it, because the three
+        causes need three different fixes: a timeout is worth retrying, an
+        unconfigured model is a .env edit, and a budget cut means the dossier
+        was larger than the run allows.
+        """
+
+        lines = [
+            f"- **{doc.filename}** ({pass_.label}): {why}"
+            for pass_, doc, why in failed
+        ]
+        return (
+            "## Không thể lập báo cáo\n\n"
+            "Việc trích xuất dữ liệu có cấu trúc thất bại với các tài liệu "
+            "dưới đây. Hệ thống **không dùng văn bản OCR thô thay thế** — số "
+            "liệu đọc từ OCR chưa qua trích xuất không đủ tin cậy để đưa vào "
+            "báo cáo thẩm định.\n\n"
+            "### Tài liệu trích xuất thất bại\n"
+            + "\n".join(lines)
+            + "\n\nXử lý xong nguyên nhân ở trên rồi chạy lại."
+        )
 
     @staticmethod
     def _missing_evidence_response(gap_analysis: dict[str, Any]) -> str:
