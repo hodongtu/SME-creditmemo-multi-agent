@@ -39,11 +39,12 @@ from src.types import (
     truncate_text,
 )
 from src.agents.documents.document_classification import (
+    FILENAME_KEYWORD_WEIGHT,
     build_document_classification_prompt,
-    filename_keyword_owner,
     rule_classify_document,
 )
 from src.agents.documents.document_discovery import (
+    box_ids,
     compute_file_hash,
     discover_documents,
     group_from_path,
@@ -485,13 +486,40 @@ class Supervisor:
         files = discover_documents(input_paths, self.config.max_files)
         steps = state.get("steps", [])
         steps.append(f"Discovered {len(files)} supported file(s)")
+
+        # The screen puts every file in one of the six upload boxes, so a file
+        # under none of them did not come from the screen — it is an integration
+        # fault, and classifying it would launder that fault into a report.
+        #
+        # Dropped here rather than in the classify loop because OCR happens
+        # there: a file discarded before extract_document_text costs nothing,
+        # one discarded after has already been paid for. And not inside
+        # discover_documents, which finds files on disk and holds no notion of
+        # a box — every other caller still sees everything.
+        in_box: list[str] = []
+        outside: list[str] = []
+        for path in files:
+            if group_from_path(path):
+                in_box.append(path)
+            else:
+                outside.append(os.path.basename(path))
+        if outside:
+            steps.append(
+                f"WARNING: bỏ qua {len(outside)} file không nằm trong hộp "
+                f"upload nào: {', '.join(sorted(outside)[:10])}"
+                f"{' …' if len(outside) > 10 else ''}. Mỗi file phải nằm trong "
+                f"một trong {len(box_ids())} thư mục hộp: "
+                f"{', '.join(sorted(box_ids()))}."
+            )
+
         # No out-of-scope branch: the screen picked an agent, so there is always
         # something being asked for. A dossier with no readable file goes on to
         # the evidence gap check, which names the documents it is missing —
         # more use than the constant this used to answer with.
         return {
             **state,
-            "files": files,
+            "files": in_box,
+            "skipped_outside_box": outside,
             "steps": steps,
         }
 
@@ -540,7 +568,15 @@ class Supervisor:
         steps.append("Built Self-Ask evidence gap analysis")
         steps.append("Built LangGraph execution plan")
         if not execution_plan.get("can_answer_now", True):
-            response = self._missing_evidence_response(gap_analysis)
+            response = self._missing_evidence_response(
+                gap_analysis,
+                # Only when nothing survived. With some documents through, the
+                # gap is about what the dossier actually lacks, and blaming the
+                # boxes would send the officer looking in the wrong place.
+                state.get("skipped_outside_box") or []
+                if not documents
+                else [],
+            )
             output_state = self._build_state(
                 response,
                 "EVIDENCE_GAP_CHECK",
@@ -946,17 +982,28 @@ class Supervisor:
             document_type = classification.get("document_type", "")
             # A declared box is trusted, which means a file dropped in the wrong
             # one can never be corrected — the types that would have won are not
-            # even scored. So say so. The filename is scored against all 22 types
-            # here, purely to notice the disagreement; the label is left alone,
-            # because only the person who uploaded it knows which of the two they
-            # meant.
+            # even scored. So say so. Scored against all 22 types here, purely to
+            # notice the disagreement; the label is left alone, because only the
+            # person who uploaded it knows which of the two they meant.
+            #
+            # Content, not just the filename. The filename-only version was
+            # silent on exactly the files that need it most: with a real balance
+            # sheet's text dropped into ho_so_phap_ly, "BCTC_VVS_2024.pdf" warned
+            # but "scan001.pdf", "Document1.pdf" and "IMG_2024.pdf" said nothing
+            # at all — and a scanner's default name is the normal case, not the
+            # edge one. The body scores bao_cao_tai_chinh at 6 in each of them.
+            # Measured at 27ms for an 89k-character document, against tens of
+            # seconds of OCR already spent on the same text.
             if declared_group:
-                owner = filename_keyword_owner(filename)
-                owner_type = get_type(owner) if owner else None
-                if owner_type and owner_type.group_id != declared_group:
+                owner_type = self._cross_box_owner(
+                    filename,
+                    content,
+                    declared_group,
+                )
+                if owner_type:
                     steps.append(
                         f"Possible wrong upload box: {filename} was put in "
-                        f"'{declared_group}' but its name matches "
+                        f"'{declared_group}' but its content matches "
                         f"'{owner_type.short_label}' from "
                         f"'{owner_type.group_id}'."
                     )
@@ -1038,6 +1085,30 @@ class Supervisor:
         middle = text[mid_start:mid_start + chunk]
         tail = text[-chunk:]
         return f"{head}\n...\n{middle}\n...\n{tail}"
+
+    @staticmethod
+    def _cross_box_owner(filename: str, content: str, declared_group: str):
+        """The type the file's own content points at, when that is another box.
+
+        None when the content agrees with the declared box, or when it is too
+        weak to disagree with anything.
+
+        Runs the ordinary rule classifier with no box restriction rather than
+        re-deriving a winner from raw scores, so the two answers are produced by
+        one tie-break. A second ranking here would eventually disagree with the
+        real one and report a conflict that does not exist.
+        """
+
+        unrestricted = rule_classify_document(filename, content, "")
+        owner_type = get_type(unrestricted.get("document_type", ""))
+        if not owner_type or owner_type.group_id == declared_group:
+            return None
+        # The floor rule_classify_document already uses to distrust its own
+        # answer. Below one filename keyword's worth of evidence a
+        # "disagreement" is noise, and a warning nobody can act on is worse
+        # than saying nothing.
+        best = max(unrestricted.get("scores", {}).values(), default=0)
+        return owner_type if best >= FILENAME_KEYWORD_WEIGHT else None
 
     def _classify_document(
         self,
@@ -1543,13 +1614,37 @@ class Supervisor:
         )
 
     @staticmethod
-    def _missing_evidence_response(gap_analysis: dict[str, Any]) -> str:
+    def _missing_evidence_response(
+        gap_analysis: dict[str, Any],
+        skipped_outside_box: list[str] | None = None,
+    ) -> str:
         """The answer when required evidence is missing.
 
         Always Vietnamese: the screen has no free-text box, so there is no
         request whose language could be matched, and every report this system
         writes is Vietnamese anyway.
+
+        ``skipped_outside_box`` overrides the wording entirely, because the two
+        situations call for opposite actions. The evidence list below says
+        "send us a financial statement" — useless advice to somebody who did
+        send one, into a folder the screen never labelled. Naming the shortfall
+        there would have the officer hunting for a document already uploaded.
         """
+
+        skipped = skipped_outside_box or []
+        if skipped:
+            shown = ", ".join(sorted(skipped)[:10])
+            return (
+                "## Không thể lập báo cáo — hồ sơ chưa được gắn hộp upload\n\n"
+                f"Đã tìm thấy {len(skipped)} file nhưng không file nào nằm "
+                "trong hộp upload nào, nên không file nào được xử lý. Đây là "
+                "lỗi ở bước nộp hồ sơ, **không phải do thiếu tài liệu**.\n\n"
+                f"### File bị bỏ qua\n- {shown}"
+                f"{' …' if len(skipped) > 10 else ''}\n\n"
+                "### Cách xử lý\n"
+                "Nộp lại qua màn hình upload để mỗi file được gắn đúng hộp. "
+                f"Sáu hộp hợp lệ: {', '.join(sorted(box_ids()))}."
+            )
 
         missing = gap_analysis.get("missing_evidence", [])
         lines = [
@@ -1732,9 +1827,9 @@ class Supervisor:
             gap_analysis,
             steps + ["Built final response"],
             self._build_document_selections(documents),
-            self._build_financial_metrics_data(documents),
+            self._build_financial_metrics_data(documents, agent_name),
             loan_program=applied,
-            credit_need=self._build_credit_need_data(documents),
+            credit_need=self._build_credit_need_data(documents, agent_name),
         )
 
     @classmethod
@@ -1898,7 +1993,9 @@ class Supervisor:
         # the merged set (e.g. 2 files -> 3 years) does not match the sample
         # column count in the layout. Telling the agent removes the guesswork.
         if target_agent in _PASS_BY_LABEL["BCTC"].json_agents:
-            periods = (self._build_financial_metrics_data(usable) or {}).get("years")
+            periods = (
+                self._build_financial_metrics_data(usable, target_agent) or {}
+            ).get("years")
             if periods:
                 base += (
                     "\n\nCác kỳ báo cáo có dữ liệu (dùng đúng số cột này cho mọi "
@@ -2069,14 +2166,24 @@ class Supervisor:
     @staticmethod
     def _build_financial_metrics_data(
         documents: list[ClassifiedDocument],
+        target_agent: str,
     ) -> dict[str, Any]:
         """Structured form of the deterministic ratio computation.
 
         The agent gets the markdown block; this returns the same numbers as data
         so a run can be audited afterwards (which line items were matched, what
         the ratios came out as, which sanity checks failed).
+
+        Gated by the same tuple as that block, and read from it rather than
+        copied. Without the gate this only stayed quiet on the other two routes
+        by accident: the BCTC pass does not run there, so there was no input to
+        compute from. That is luck, not design — the day BCTC joins another
+        route's json_agents, this would start writing a metrics artefact for a
+        route that never asked for one.
         """
 
+        if target_agent not in prompt_blocks.METRICS_BLOCK_AGENTS:
+            return {}
         usable = [
             doc for doc in documents if doc.extraction_status == "success"
         ]
@@ -2104,6 +2211,7 @@ class Supervisor:
     def _build_credit_need_data(
         cls,
         documents: list[ClassifiedDocument],
+        target_agent: str,
     ) -> dict[str, Any]:
         """The credit-need table as data, for the run log rather than a prompt.
 
@@ -2111,8 +2219,16 @@ class Supervisor:
         how _build_financial_metrics_block and _build_financial_metrics_data
         already work: the two are called from different places in the graph, and
         the arithmetic is free next to the LLM calls around it.
+
+        Gated by the same tuple as that twin, and read from it rather than
+        copied: this table belongs to the credit proposal, and without the gate
+        every route wrote a credit_need.json for a proposal it never ran. Two
+        copies of the list is how the two gates would drift apart — which is the
+        shape of the bug this fixes, one twin gated and the other not.
         """
 
+        if target_agent not in prompt_blocks.CREDIT_NEED_BLOCK_AGENTS:
+            return {}
         usable = [doc for doc in documents if doc.extraction_status == "success"]
         if not usable:
             return {}

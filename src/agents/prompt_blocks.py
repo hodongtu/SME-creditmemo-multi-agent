@@ -473,16 +473,18 @@ def _build_ledger_structured_block(
     parts = [
         LEDGER_BLOCK_HEADING,
         "Trích từ sổ chi tiết / bảng cân đối phát sinh công nợ khách hàng nộp "
-        "dưới dạng Excel, gộp mọi file thành một bản. Khoá của \"accounts\" là "
-        "số hiệu tài khoản; nếu hồ sơ có NHIỀU KỲ cho cùng một tài khoản thì "
-        "khoá mang thêm kỳ sau dấu @ (ví dụ \"131@2024\" và \"131@2025\") và "
-        "đó là hai mục riêng — số dư của hai kỳ KHÔNG được cộng vào nhau. "
+        "dưới dạng Excel, gộp mọi file thành một bản. Khoá của \"accounts\" "
+        "luôn có dạng <số hiệu tài khoản>@<YYYYMMDD>-<YYYYMMDD>, ví dụ "
+        "\"131@20250101-20251231\". Mỗi khoá là MỘT kỳ; hai khoá cùng số hiệu "
+        "khác kỳ là hai mục riêng — số dư của chúng KHÔNG được cộng vào nhau. "
         "Kỳ chuẩn để đối chiếu là \"period\": \"from\"/\"to\" là ngày đầu và "
         "cuối kỳ, \"as_printed\" là dòng in trên file. Dùng \"period\" để xếp "
         "số liệu vào đúng cột năm, đừng đọc năm từ tên khoá.",
-        "SỐ LIỆU ĐỌC THẲNG TỪ Ô EXCEL, không qua OCR và không do mô hình nào "
-        "chép lại — đúng nguyên văn con số trong file. \"units\" ghi đơn vị "
-        "từng trường: \"vnd\" là ĐỒNG, \"quantity\" là số lượng.",
+        "SỐ LIỆU ĐƯỢC ĐỌC LẠI TỪ NỘI DUNG FILE EXCEL, không qua OCR ảnh. Đây "
+        "là bản chép của bảng gốc chứ không phải trích xuất từng ô, nên khi một "
+        "con số quyết định kết luận tín dụng thì hãy nêu rõ nó lấy từ file nào, "
+        "tài khoản nào, để người thẩm định đối chiếu lại bảng gốc. \"units\" "
+        "ghi đơn vị từng trường: \"vnd\" là ĐỒNG, \"quantity\" là số lượng.",
         'Báo cáo trình bày theo TỶ VNĐ. Khi chép một số "vnd" vào báo cáo, hãy '
         'GHI NGUYÊN SỐ ĐỒNG CÓ DẤU PHÂN CÁCH NGHÌN (ví dụ 225.510.140.846) và '
         'để chương trình tự quy đổi — đừng tự chia cho một tỷ. Một lượt chạy '

@@ -31,14 +31,24 @@ def extract_csv_text(
                 except csv.Error:
                     dialect = csv.excel
 
-                rows = []
-                for row_index, row in enumerate(csv.reader(csv_file, dialect)):
-                    if row_index >= max_rows:
-                        rows.append([f"... truncated after {max_rows} rows ..."])
-                        break
-                    rows.append([cell.strip() for cell in row])
+                rows = [
+                    [cell.strip() for cell in row]
+                    for row in csv.reader(csv_file, dialect)
+                ]
 
-            content = "\n".join("\t".join(row) for row in rows)
+            # Read in full, then de-duplicate, then cut — the cut used to happen
+            # during the read, which meant a file whose pasted block came before
+            # the real data spent its whole allowance on copies. Reading it all
+            # is affordable here: a CSV row is a list of short strings, and the
+            # upload size is bounded before the file reaches this point.
+            rows, duplicates = _dedup_rows(rows)
+            body = rows[:max_rows]
+            if len(rows) > max_rows:
+                body = body + [[f"... truncated after {max_rows} rows ..."]]
+            if duplicates:
+                body = [[f"... đã bỏ {duplicates} dòng trùng lặp ..."]] + body
+
+            content = "\n".join("\t".join(row) for row in body)
             return content[:max_chars]
         except UnicodeDecodeError as exc:
             last_error = exc
@@ -148,6 +158,48 @@ def _clean_grid(grid: list[list[str]]) -> tuple[list[list[str]], list[int]]:
     return cleaned, kept_columns
 
 
+def _dedup_rows(grid: list[list[str]]) -> tuple[list[list[str]], int]:
+    """Keep the first occurrence of each distinct row; also return how many went.
+
+    Customers paste a block down a sheet — one workbook arrived with the same two
+    columns repeated past a million rows — and every copy after the first tells
+    the model nothing it has not already read. On one such file 498 of the 500
+    rows that reached the prompt were copies of the other two.
+
+    Global rather than run-length: the paste usually repeats a *block*, so
+    consecutive rows differ and collapsing equal neighbours catches nothing. A
+    50-row block pasted 100 times measured 5,001 rows either way under
+    run-length, and 51 under this.
+
+    Order is preserved. Row order carries meaning in a Vietnamese ledger — the
+    printed total sits at the bottom — so the rows may be dropped but never
+    rearranged.
+    """
+
+    seen: set[tuple[str, ...]] = set()
+    kept: list[list[str]] = []
+    for row in grid:
+        key = tuple(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(row)
+    return kept, len(grid) - len(kept)
+
+
+def _sheet_header(title: str, rows: int, columns: int, duplicates: int) -> str:
+    """The "--- Sheet: … ---" line, naming duplicates when any were dropped.
+
+    Said out loud rather than trimmed in silence: this line is also the only
+    thing that would surface the rare case where dedup is wrong — two genuinely
+    identical detail rows. A summary ledger keyed by counterparty should not
+    have them, but if it does, the count says so.
+    """
+
+    dropped = f", đã bỏ {duplicates} dòng trùng lặp" if duplicates else ""
+    return f"--- Sheet: {title} ({rows} dòng x {columns} cột{dropped}) ---"
+
+
 def _grid_to_tsv(
     grid: list[list[str]],
     kept_columns: list[int],
@@ -194,10 +246,15 @@ def extract_excel_text(
             if not grid:
                 blocks.append(f"--- Sheet: {worksheet.title} (trống) ---")
                 continue
+            # Before the row cap, not after: a sheet whose pasted block sits
+            # ahead of the real data would otherwise spend the whole 500-row
+            # window on copies and drop every real row behind them.
+            grid, duplicates = _dedup_rows(grid)
             body = _grid_to_tsv(grid, kept_columns, max_rows_per_sheet)
             blocks.append(
-                f"--- Sheet: {worksheet.title} "
-                f"({len(grid)} dòng x {len(kept_columns)} cột) ---\n{body}"
+                _sheet_header(worksheet.title, len(grid), len(kept_columns),
+                              duplicates)
+                + f"\n{body}"
             )
     finally:
         workbook.close()
@@ -226,10 +283,11 @@ def _extract_legacy_xls_text(
         if not grid:
             blocks.append(f"--- Sheet: {sheet_name} (trống) ---")
             continue
+        grid, duplicates = _dedup_rows(grid)
         body = _grid_to_tsv(grid, kept_columns, max_rows_per_sheet)
         blocks.append(
-            f"--- Sheet: {sheet_name} "
-            f"({len(grid)} dòng x {len(kept_columns)} cột) ---\n{body}"
+            _sheet_header(sheet_name, len(grid), len(kept_columns), duplicates)
+            + f"\n{body}"
         )
 
     return _join_sheet_blocks(blocks, max_chars)

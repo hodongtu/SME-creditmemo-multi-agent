@@ -414,6 +414,18 @@ sequenceDiagram
 | Walk input paths | Recursive; extensions `.pdf .xlsx .xls .csv .pptx .txt .md .xml` | An unsupported extension is **named in a warning**, not dropped silently — a folder of twelve XML tax returns once produced a report built on nothing, with no line saying so |
 | Cap | `max_files` = 50 | Excess files reported |
 | Deduplicate | By path, then by content hash | Second copy dropped, counted |
+| De-duplicate spreadsheet rows | First occurrence of each distinct row kept, order preserved, before the 500-row cap | Repeat count named in the sheet header. A pasted block repeated past a million rows left only 2 distinct rows among the 500 that reached the prompt; global rather than run-length, because a repeated *block* leaves consecutive rows different |
+| Require an upload box | Every ancestor folder checked; nearest box wins | A file under **none of the six boxes is dropped and named**. The screen files every upload into a box, so a loose file is an integration fault, and classifying it would launder that fault into a report |
+
+The box check sits in `_graph_discover_documents`, before Stage 2, because Stage 2 is where
+OCR runs: a file discarded before `extract_document_text` costs nothing, one discarded after
+has already been paid for. It is not inside `discover_documents` itself, which finds files on
+disk and holds no notion of a box — every other caller still sees everything.
+
+When the check empties the dossier the run stops at the evidence gap check, and the wording
+changes to match: *"Không thể lập báo cáo — hồ sơ chưa được gắn hộp upload"* rather than the
+usual missing-evidence list. The two situations call for opposite actions. "Send us a financial
+statement" is useless advice to somebody who sent one into a folder the screen never labelled.
 
 #### Stage 2 — Classification
 
@@ -445,6 +457,28 @@ flowchart TD
 | Keyword in **filename** | ×3 | A well-named file states its own type |
 | Keyword in **body** | ×1 | Corroboration; a BCTC quotes its neighbours' vocabulary |
 | Upload folder | Restricts candidates before scoring | The folder a file sits in *is* its declared group |
+
+**Wrong-box detection.** Because the box is trusted, a file dropped in the wrong one can never
+be corrected — the type that would have won is not even scored. So each file is *also* scored
+against all 22 types, and a disagreement is reported in the step log. The label is left alone:
+only the person who uploaded the file knows which of the two they meant.
+
+This scores the **body**, not just the filename, and the difference is not marginal. With a real
+balance sheet's text filed under `ho_so_phap_ly`:
+
+| Filename | Filename-only check | Body check | Label the box produced |
+|---|---|---|---|
+| `BCTC_VVS_2024.pdf` | warns | warns | `giay_dang_ky_kinh_doanh`, confidence 0.72 |
+| `scan001.pdf` | **silent** | warns | `giay_dang_ky_kinh_doanh`, confidence 0.72 |
+| `Document1.pdf` | **silent** | warns | `giay_dang_ky_kinh_doanh`, confidence 0.72 |
+| `IMG_2024.pdf` | **silent** | warns | `giay_dang_ky_kinh_doanh`, confidence 0.72 |
+
+The failure was not "no match, confidence 0.00" — it was a *confident wrong label* entering the
+report with nothing said, and a scanner's default filename is the normal case rather than the
+edge one. Cost measured at 27 ms for an 89,000-character document, against the tens of seconds
+of OCR already spent on the same text. Warned only when the winning score clears
+`FILENAME_KEYWORD_WEIGHT` (3) — the same floor `rule_classify_document` uses to distrust its own
+answer, which keeps empty and boilerplate text silent.
 
 The two escape hatches below the threshold exist because in both cases the LLM could not
 change anything that matters: `routing_unambiguous` means every plausible type routes to
@@ -497,8 +531,8 @@ flowchart TD
     B -->|no| C["Skip; step log names<br/>the calls saved"]
     B -->|yes| D{"batch?"}
     D -->|"False — 5 passes"| E["One LLM call<br/>per matching document"]
-    D -->|"True — Ledger"| F["openpyxl reads every cell<br/>of every sheet"]
-    F --> I["One LLM call, every sheet:<br/>account, period, column names<br/>never a figure"]
+    D -->|"True — Ledger"| F["Sheet-split text of every<br/>ledger file, fenced per file"]
+    F --> I["One LLM call:<br/>the whole record, figures included"]
     E --> J["Extraction JSON<br/>on the ClassifiedDocument"]
     I --> J
     J --> K["prompt_blocks renders<br/>the labelled block"]
@@ -513,18 +547,38 @@ flowchart TD
 | Sitevisit | `is_sitevisit` | `[EXTRACTED SITE VISIT REPORT]` | no | all four |
 | Ledger | `is_ledger` | `[EXTRACTED DETAIL LEDGER]` | **yes** | BA, FA, CR |
 
-**What the model does and does not do in the ledger pass.** It reads *labels*; openpyxl
-reads *figures*. One call per run covers every sheet of every ledger file and returns four
-things — the account category, its code, the reporting period as ISO dates, and which
-column header is which field. Every one is validated before use and falls back to the
-keyword rules when it does not hold up:
+**The ledger pass is the one place the model produces the figures.** Every other pass
+turns a scan into JSON; this one turns an already-readable spreadsheet into JSON, and it
+does the whole job — account, period, column mapping *and* every number. `extract_excel_text`
+has already split the workbook by sheet and kept the `.xlsx` number formats, so the pass
+feeds that text back with a `=== FILE i/N ===` fence around each file and asks for the
+finished record in one call.
 
-| Answer | Guard | Falls back to |
+The earlier design had `openpyxl` read every cell and asked the model only to name things.
+That read the sample workbook exactly, but it could not open `.xls` or `.csv` at all, and
+its header/total heuristics were tuned to one accounting package. The trade was made
+knowingly: `.xls` and `.csv` ledgers work now, and no figure is guaranteed exact.
+
+Nothing checks the numbers. Three structural guards remain, and they are about shape, not
+arithmetic:
+
+| Guard | What it catches |
+|---|---|
+| Sheet count | Input sheets vs accounts returned; a shortfall is written into `extraction_notes`, because the model drops whole sheets in silence |
+| Total-row removal | A printed `Tổng` row left among `items`, which would have every figure of that account counted twice |
+| Nesting repair | `unmapped_columns` / `extraction_notes` returned inside `accounts`, where they read as two more accounts |
+
+**Measured accuracy**, `VIMID_so_chi_tiet.xlsx` (6 sheets, 48 detail rows, 338 comparable
+figures), against the `openpyxl` record as ground truth:
+
+| Model | Runs | Result |
 |---|---|---|
-| `category` | one of the 9 defined | `label_sheet` |
-| `account_code` | 3–5 digits, prefix in the 39 known codes | `label_sheet` |
-| `period.tu/den` | ISO dates, `tu <= den` | the raw banner line |
-| `columns` | value is one of the 18 canonical fields, no field claimed twice | `COLUMN_FIELDS`, per header |
+| `MODEL_ECONOMY` (gpt-4o-mini) | 2 | 4/6 accounts, 205/338 figures, 4 wrong — one closing balance of 82,036,126,740 returned as `0` |
+| `MODEL_PREMIUM` (gpt-5.4-mini) | 4 | 2 runs exact (338/338, 0 wrong); 1 run dropped a sheet with 4 wrong figures; 1 run failed the shape check |
+
+`MODEL_ECONOMY` is not usable for this pass. `MODEL_PREMIUM` is right about half the time
+and wrong the rest, so the sheet-count note is the difference between a short record that
+says so and a credit opinion written on half a ledger.
 
 It used to be called only for sheets the keyword pass could not place — zero calls on the
 sample workbook. The rules place that workbook and stop short of the general case: the
@@ -941,8 +995,8 @@ rather than the 101 it was before the ceiling existed.
 Two things move this number: a dossier with several files of one type multiplies that
 pass (two BCTCs cost two BCTC calls), and a poorly named file adds a classification
 call. The Ledger pass is the exception in the other direction — however many ledger files
-a dossier holds, it spends exactly **one** call, because it reads them all with `openpyxl`
-and asks the model only to name what it read (§2.1 Stage 4).
+a dossier holds, it spends exactly **one** call, because every file goes into that call
+together (§2.1 Stage 4).
 
 ### 3.2. Measured reference run
 

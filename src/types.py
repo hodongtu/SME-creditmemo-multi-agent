@@ -82,6 +82,11 @@ class UnderwritingGraphState(TypedDict, total=False):
 
     input_paths: list[str]
     files: list[str]
+    # Filenames dropped for sitting under none of the six upload boxes. Carried
+    # so the evidence gap check can name the real cause: a dossier emptied this
+    # way is missing nothing the customer failed to send, only files the screen
+    # failed to file.
+    skipped_outside_box: list[str]
     loan_program: str
     documents: list[ClassifiedDocument]
     document_routes: set[str]

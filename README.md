@@ -96,12 +96,38 @@ unsupported extension are **named in a warning** rather than dropped in silence 
 twelve XML tax returns once produced a report built on nothing at all, with no line saying so.
 Duplicates are removed by path, then by content hash.
 
+Spreadsheet rows that repeat are **de-duplicated before the 500-row cap**, keeping the first
+occurrence of each distinct row. Pasting a block down a sheet is a common habit — one upload
+arrived with the same two columns repeated past a million rows, and 498 of the 500 rows that
+reached the prompt were copies of the other two. De-duplication runs *before* the cap, not
+after: a file whose pasted block sits ahead of the real data would otherwise spend the whole
+window on copies and drop every real row behind them. The count is named in the sheet header
+(`đã bỏ N dòng trùng lặp`) rather than trimmed in silence — that line is also the only thing
+that would surface the rare case where two genuinely identical detail rows exist.
+
+A file under **none of the six upload boxes is dropped**, named in a warning of its own. The screen
+files every upload into a box, so a loose file did not come from the screen — it is an integration
+fault, and classifying it would launder that fault into a report. The drop happens here rather than
+in the classify loop because OCR runs there: discarded before `extract_document_text` costs nothing,
+discarded after has already been paid for. When this empties the dossier the run stops and says so
+directly — *"hồ sơ chưa được gắn hộp upload"*, not "missing financial statements", which would send
+the officer hunting for a document they already uploaded.
+
 **2. `classify_documents`** — For each file:
 
 - **Upload box** — the folder a file sits in *is* its group. The screen creates six folders and
   the user drops files into them, so `ho_so_tai_chinh/BCTC_2025.pdf` declares its own group with no
   guessing involved. Every ancestor is checked, not just the parent, so `ho_so_tai_chinh/2025/BCTC.pdf`
   keeps its box.
+
+  The box is trusted, so a file dropped in the wrong one cannot be corrected — the type that would
+  have won is never scored. The file is therefore **also scored against all 22 types, on its body as
+  well as its name**, purely to report the disagreement; the label is left alone, because only the
+  person who uploaded it knows which of the two they meant. Body text matters here: with a balance
+  sheet's text filed under `ho_so_phap_ly`, `BCTC_VVS_2024.pdf` disagreed on its name alone, but
+  `scan001.pdf` was labelled `giay_dang_ky_kinh_doanh` at 0.72 confidence with nothing said — and a
+  scanner's default filename is the normal case, not the edge one. Warned only when the winning score
+  clears `FILENAME_KEYWORD_WEIGHT`, the same floor the classifier uses to distrust its own answer.
 
   | Folder | Group | Types |
   |---|---|---|
@@ -175,15 +201,29 @@ consumes are run:
 
 | Agent | Passes run |
 |---|---|
-| `BUSINESS_ACTIVITY_AGENT` | site visit |
-| `FINANCIAL_ANALYSIS_AGENT` | BCTC, site visit |
-| `CREDIT_RELATIONSHIP_AGENT` | CIC S10A, CIC R21, site visit |
+| `BUSINESS_ACTIVITY_AGENT` | site visit, ledger |
+| `FINANCIAL_ANALYSIS_AGENT` | BCTC, site visit, ledger |
+| `CREDIT_RELATIONSHIP_AGENT` | CIC S10A, CIC R21, site visit, ledger |
 | `CREDIT_PROPOSAL_AGENT` | BCTC, CIC S10A, proposal, site visit |
 
-The five passes are declared **once**, as the `EXTRACTION_PASSES` table in
+The six passes are declared **once**, as the `EXTRACTION_PASSES` table in
 [supervisor.py](src/agents/supervisor.py). One row carries a pass's label, its per-document flags,
 its chain, its extractor, the prompt block it produces and the agents that read it — so which
 agents read which block cannot drift from the gate that decides whether to run it.
+
+The **ledger** pass is the odd one out twice over. It is `batch=True`, so however many detail
+ledgers a dossier holds it costs exactly **one** call, not one per file — the same account can
+arrive split across two files, and a single call sees the whole set. And its input is not a scan:
+`extract_excel_text` has already split the workbook by sheet and kept the `.xlsx` number formats,
+so the pass feeds that text back and asks for the finished record, **figures included**.
+
+That last part is a deliberate trade. `.xls` and `.csv` ledgers work now, where the previous
+`openpyxl` reader could not open them at all — but no figure is guaranteed exact any more.
+Measured on the sample workbook (338 comparable figures): `gpt-5.4-mini` got every figure right
+in two runs of four, dropped a sheet with four wrong figures in a third, and returned an
+unusable shape in the fourth. `gpt-4o-mini` is not usable for this pass — it returned one
+closing balance of 82,036,126,740 as `0`. Three structural guards remain (sheet count, printed
+total row, misplaced top-level keys); none of them checks arithmetic.
 
 The site-visit report is the one every specialist reads, because it is the only document
 describing the business itself rather than one facet of it — industry and GSO code, main products,

@@ -27,7 +27,7 @@ def compute_file_hash(path: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _group_ids() -> frozenset[str]:
+def box_ids() -> frozenset[str]:
     """The upload box ids, which are verbatim the folder names the screen makes."""
     return frozenset(doc.group_id for doc in load_matrix().types.values())
 
@@ -40,7 +40,7 @@ def group_from_path(path: str) -> str:
     Nearest ancestor wins. "" restores the pre-upload-box behaviour exactly.
     """
 
-    ids = _group_ids()
+    ids = box_ids()
     for parent in Path(path).parents:
         if parent.name in ids:
             return parent.name
