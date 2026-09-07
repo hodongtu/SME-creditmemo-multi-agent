@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Any
 
-from src.matrix.document_matrix import (
+from src.agents.documents.document_matrix import (
     describe_types_for_prompt,
     document_type_keywords,
     load_matrix,

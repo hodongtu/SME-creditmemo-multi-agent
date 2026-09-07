@@ -303,11 +303,10 @@ src/
 │   ├── specialist.py            # The 4 specialist agents + their query_tools
 │   ├── prompt_blocks.py         # Extraction JSON -> labelled prompt blocks
 │   ├── documents/               # document_discovery.py, document_classification.py
+│   │   ├── document_matrix.py   # Loads and validates the YAML
+│   │   └── document_matrix.yaml # 22 document types -> agents, R/O, per loan program
 │   ├── calculator/              # financial_ratio_calculator.py, credit_need_calculator.py
 │   └── extraction/              # 6 passes + structured_extraction.py, vat_revenue.py
-├── matrix/
-│   ├── document_matrix.py       # Loads and validates the YAML
-│   └── document_matrix.yaml     # 22 document types -> agents, R/O, per loan program
 ├── tools/
 │   ├── t24.py                   # Internal facilities + credit quality
 │   ├── cic.py                   # Bureau credit report

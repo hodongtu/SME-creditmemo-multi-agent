@@ -11,7 +11,7 @@ from src.agents.calculator.financial_ratio_calculator import (
     FinancialRatioCalculator,
     _format_number,
 )
-from src.matrix.document_matrix import get_type
+from src.agents.documents.document_matrix import get_type
 from src.agents.extraction import ledger_extraction
 from src.types import ClassifiedDocument
 from src.agents.extraction.vat_revenue import merge_vat_series, parse_vat_revenue_block

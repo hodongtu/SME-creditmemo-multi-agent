@@ -50,7 +50,7 @@ from src.agents.documents.document_discovery import (
     group_from_path,
 )
 from src.types import VALID_DOCUMENT_AGENTS
-from src.matrix.document_matrix import (
+from src.agents.documents.document_matrix import (
     resolve_loan_program,
     agent_relevance_for_type,
     get_type,

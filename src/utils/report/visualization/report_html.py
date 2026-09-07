@@ -12,9 +12,9 @@ is source code and neither a browser nor a markdown viewer runs mermaid.js:
   any viewer — with pictures instead of source.
 
 The second one does NOT look like the PDF and cannot: the printed appearance is
-twenty-nine CSS rules (type sizes, table borders, the wide-table shrink, the
-bullet indent, 8pt footnotes) and a markdown viewer applies its own stylesheet
-instead. What carries over is the drawing.
+twenty-six CSS rules (type sizes, table borders, the wide-table shrink, 8pt
+footnotes) and a markdown viewer applies its own stylesheet instead. What
+carries over is the drawing.
 """
 
 import base64

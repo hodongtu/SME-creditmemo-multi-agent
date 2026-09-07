@@ -23,7 +23,7 @@ Two rules follow from what that failure was:
   the matrix. Never a guess assembled from a filename.
 """
 
-from src.matrix.document_matrix import get_type
+from src.agents.documents.document_matrix import get_type
 
 # The classifier is asked for at most twenty words. Anything longer is not
 # shortened here — it is dropped in favour of the type's name. Cutting a caption

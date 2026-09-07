@@ -4,7 +4,7 @@ import hashlib
 from functools import lru_cache
 from pathlib import Path
 
-from src.matrix.document_matrix import load_matrix
+from src.agents.documents.document_matrix import load_matrix
 from src.utils.common import SUPPORTED_EXTENSIONS
 from src.utils.paths import PROJECT_ROOT
 

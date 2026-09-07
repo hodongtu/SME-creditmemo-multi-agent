@@ -49,7 +49,7 @@ all agent logic lives in the importable package [src/](src/).
 |---|---|
 | [src/agents/supervisor.py](src/agents/supervisor.py) | **Orchestrator** — builds and runs the LangGraph, prepares documents, gates extraction, finalizes the report |
 | [src/agents/documents/](src/agents/documents/) | File discovery (`document_discovery.py`) and keyword classification (`document_classification.py`) |
-| [src/matrix/document_matrix.py](src/matrix/document_matrix.py) | Loads `document_matrix.yaml` — which agents consume which document type, per loan program |
+| [src/agents/documents/document_matrix.py](src/agents/documents/document_matrix.py) | Loads `document_matrix.yaml` — which agents consume which document type, per loan program |
 | [src/agents/specialist.py](src/agents/specialist.py) | The four specialist agents |
 | [src/agents/prompt_blocks.py](src/agents/prompt_blocks.py) | Turns extracted JSON + computed figures into the labelled blocks an agent's prompt carries |
 | [src/agents/calculator/](src/agents/calculator/) | Deterministic financial ratios and credit-need computation |
@@ -142,7 +142,7 @@ the officer hunting for a document they already uploaded.
   cached by file hash); XLSX/CSV → tabular read via pandas; XML → tax-return parsing.
 
 - **Classification** — identifies *which of the 22 `document_type` rows* in the routing matrix
-  (`src/matrix/document_matrix.yaml`) the file is, by scoring that type's keywords against the
+  (`src/agents/documents/document_matrix.yaml`) the file is, by scoring that type's keywords against the
   filename and body (a filename hit counts triple — a well-named file states its own type).
   Knowing the upload box restricts the candidates to that group first. If confidence clears the
   threshold (0.65, `document_classifier_grouped_confidence_threshold` when the box is known,
@@ -172,7 +172,7 @@ the officer hunting for a document they already uploaded.
 argument; empty falls back to `DEFAULT_LOAN_PROGRAM` (**PLO**) and an unknown id raises. Nothing is
 detected or inferred. The program actually applied is reported in `result["loan_program"]`.
 
-**Editing the routing matrix**: `src/matrix/document_matrix.yaml` is the single source of truth
+**Editing the routing matrix**: `src/agents/documents/document_matrix.yaml` is the single source of truth
 (transcribed from `docs/document_matrix.xlsx`). Changing which agents see a kind of document is a
 YAML edit, not a code change. It is validated on load — an unknown agent name, a bad `R`/`O` value,
 or a per-loan-program map missing one of the four programs raises immediately.
@@ -288,12 +288,11 @@ Applied to every branch before returning, in this order and for stated reasons:
 │   │   ├── supervisor.py             # LangGraph orchestrator + EXTRACTION_PASSES
 │   │   ├── specialist.py             # The four specialist agents
 │   │   ├── prompt_blocks.py          # Extraction JSON -> labelled prompt blocks
-│   │   ├── documents/                # discovery, keyword classification
+│   │   ├── documents/                # discovery, keyword classification, routing matrix
+│   │   │   ├── document_matrix.py    # Loads and validates the YAML
+│   │   │   └── document_matrix.yaml  # 22 document types -> consuming agents, per program
 │   │   ├── calculator/               # financial ratios, credit need
 │   │   └── extraction/               # BCTC, proposal, CIC S10A, CIC R21, site visit, VAT
-│   ├── matrix/
-│   │   ├── document_matrix.py        # Loads and validates the YAML
-│   │   └── document_matrix.yaml      # 22 document types -> consuming agents, per program
 │   ├── utils/
 │   │   ├── common.py, paths.py
 │   │   ├── reading/                  # ocr.py, extractors.py, tax_xml.py

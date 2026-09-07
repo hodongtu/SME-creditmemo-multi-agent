@@ -1,4 +1,4 @@
-"""Loader for the document routing matrix (src/matrix/document_matrix.yaml)."""
+"""Loader for the document routing matrix (src/agents/documents/document_matrix.yaml)."""
 
 from dataclasses import dataclass, field
 from functools import lru_cache

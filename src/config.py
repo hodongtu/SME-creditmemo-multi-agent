@@ -35,7 +35,7 @@ def build_llm(
         "base_url": os.getenv("OPENAI_API_BASE"),
         "temperature": temperature,
         "timeout": float(os.getenv(timeout_env, "60")),
-        "max_retries": int(os.getenv("LLM_CLIENT_MAX_RETRIES", "3")),
+        "max_retries": int(os.getenv("LLM_CLIENT_MAX_RETRIES", "1")),
     }
     return ChatOpenAI(**kwargs)
 

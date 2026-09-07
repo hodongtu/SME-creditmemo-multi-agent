@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 
-from src.matrix.document_matrix import get_type
+from src.agents.documents.document_matrix import get_type
 from src.tools import cic, t24
 from src.utils.paths import PROJECT_ROOT
 from src.types import truncate_text
