@@ -155,7 +155,7 @@ class ExtractionPass:
         """
 
         return [
-            (doc, getattr(doc, self.error_attr, "") or "Không rõ lý do.")
+            (doc, getattr(doc, self.error_attr, "") or "No reason recorded.")
             for doc in docs
             if getattr(doc, self.flag_attr) and not getattr(doc, self.result_attr)
         ]
@@ -299,8 +299,8 @@ for _pass in EXTRACTION_PASSES:
         )
     except TypeError as exc:
         raise TypeError(
-            f"pass {_pass.label!r}: {_pass.extract.__name__} không nhận được "
-            f"cách runner gọi — {exc}"
+            f"pass {_pass.label!r}: {_pass.extract.__name__} does not accept "
+            f"the runner's call signature — {exc}"
         ) from exc
 
 
@@ -352,11 +352,11 @@ class Supervisor:
     """Local  supervisor without API, cache, or database dependencies."""
 
     MIXED_UNIT_WARNING = (
-        "LƯU Ý ĐƠN VỊ TIỀN: các khối dữ liệu dưới đây dùng ĐƠN VỊ KHÁC NHAU và "
-        "mỗi khối tự ghi đơn vị của nó ở ngay đầu khối. Đọc đúng đơn vị của "
-        "khối đang trích. TUYỆT ĐỐI không lấy số của khối này đặt cạnh số của "
-        "khối khác khi chưa quy đổi — cùng một chỉ tiêu có thể xuất hiện ở hai "
-        "khối với hai đơn vị."
+        "CURRENCY UNIT NOTICE: the blocks below use DIFFERENT UNITS, and each "
+        "block states its own unit at the top. Read the unit of the block you "
+        "are quoting from. NEVER put a figure from one block beside a figure "
+        "from another without converting first — the same line item can appear "
+        "in two blocks under two units."
     )
 
     _document_block_header = staticmethod(prompt_blocks._document_block_header)
@@ -505,10 +505,10 @@ class Supervisor:
                 outside.append(os.path.basename(path))
         if outside:
             steps.append(
-                f"WARNING: bỏ qua {len(outside)} file không nằm trong hộp "
-                f"upload nào: {', '.join(sorted(outside)[:10])}"
-                f"{' …' if len(outside) > 10 else ''}. Mỗi file phải nằm trong "
-                f"một trong {len(box_ids())} thư mục hộp: "
+                f"WARNING: skipped {len(outside)} file(s) under no upload "
+                f"box: {', '.join(sorted(outside)[:10])}"
+                f"{' …' if len(outside) > 10 else ''}. Every file must sit in "
+                f"one of the {len(box_ids())} box folders: "
                 f"{', '.join(sorted(box_ids()))}."
             )
 
@@ -749,7 +749,7 @@ class Supervisor:
         executor = self.config.query_executor
         if executor is None or not key.usable:
             reason = ("No query_executor configured." if executor is None
-                      else "Không xác định được mã số thuế.")
+                      else "Could not determine the tax code.")
             steps.append(
                 f"Skipped reference data for {len(wanted)} tool(s): {reason}"
             )
@@ -757,7 +757,7 @@ class Supervisor:
                     "steps": steps}
 
         steps.append(
-            f"Customer key: MST {key.tax_code} đọc từ {key.source_file} "
+            f"Customer key: tax code {key.tax_code} read from {key.source_file} "
             f"({key.source_field})"
         )
         present = {doc.document_type for doc in documents}
@@ -768,7 +768,7 @@ class Supervisor:
             if covered:
                 # The folder already holds the paper version, and that one wins.
                 steps.append(
-                    f"Skipped {query_tool.name} query: hồ sơ đã có "
+                    f"Skipped {query_tool.name} query: the dossier already holds "
                     f"{', '.join(covered)}"
                 )
                 continue
@@ -780,7 +780,7 @@ class Supervisor:
                         {"tax_code": key.tax_code, "executor": executor}
                     )
                 )
-                steps.append(f"{query_tool.name} query: ok cho MST {key.tax_code}")
+                steps.append(f"{query_tool.name} query: ok for tax code {key.tax_code}")
             except Exception as exc:
                 # A database that is down must not take the report with it: the
                 # documents are still evidence, and the block simply stays empty.
@@ -813,7 +813,7 @@ class Supervisor:
             )
             steps.append(
                 "Evidence gap re-checked: "
-                f"{', '.join(sorted(covered))} lấy từ truy vấn hệ thống"
+                f"{', '.join(sorted(covered))} came from a system query"
             )
         return state_update
 
@@ -1362,7 +1362,7 @@ class Supervisor:
                 f"{label} extraction: {doc.filename} -> "
                 + ("ok" if result is not None else f"failed: {error}")
                 + (
-                    " (đọc thẳng từ XML khai thuế)"
+                    " (read straight from the e-tax XML)"
                     if getattr(doc, "financial_statement_extraction_source", "") == "xml"
                     else ""
                 )

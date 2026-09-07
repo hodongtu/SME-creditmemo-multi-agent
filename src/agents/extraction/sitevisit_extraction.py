@@ -166,14 +166,14 @@ def normalize_lc_ratios(result: dict[str, Any]) -> dict[str, Any]:
         if 1 < value <= 100:
             block[field] = value / 100
             notes.append(
-                f"lc_terms.{field}: đọc được {value} — hiểu là phần trăm và "
-                f"quy về {value / 100}."
+                f"lc_terms.{field}: read as {value} — taken as a percentage "
+                f"and normalised to {value / 100}."
             )
         else:
             block[field] = None
             notes.append(
-                f"lc_terms.{field}: giá trị {value} không phải tỷ lệ hợp lệ "
-                "(ngoài khoảng 0-100%) — đã bỏ, hệ thống dùng mặc định."
+                f"lc_terms.{field}: {value} is not a valid rate (outside "
+                "0-100%) — dropped, the system default applies."
             )
     return result
 

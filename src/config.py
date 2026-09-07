@@ -17,6 +17,7 @@ def build_llm(
     model_env: str,
     temperature: float = 0.1,
     timeout_env: str = "LLM_TIMEOUT_SECONDS",
+    max_tokens_env: str = "LLM_MAX_TOKENS",
 ):
     """Build one ChatOpenAI client from environment variables."""
 
@@ -36,6 +37,17 @@ def build_llm(
         "temperature": temperature,
         "timeout": float(os.getenv(timeout_env, "60")),
         "max_retries": int(os.getenv("LLM_CLIENT_MAX_RETRIES", "1")),
+        # Left unset, the gateway picks its own ceiling — and a small one is
+        # invisible: JsonOutputParser repairs the truncated JSON rather than
+        # raising, so a reply cut off mid-array arrives looking complete. One
+        # live run returned 2 accounts out of 15 sheets that way.
+        #
+        # Per pass, like the timeout, because one shared number has to fit the
+        # weakest model in the fleet: gpt-4o-mini caps completions at 16,384
+        # while gpt-5.4-mini allows 128,000, and the ledger pass — the one that
+        # actually runs out — is on the second. Measured, not read off a page:
+        # testing/probe_max_tokens.py asks the API and it answers in the 400.
+        "max_tokens": int(os.getenv(max_tokens_env, "8192")),
     }
     return ChatOpenAI(**kwargs)
 

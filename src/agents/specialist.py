@@ -163,6 +163,9 @@ class SpecialistAgent:
         may restate their question in Vietnamese first.
         - Keep official names, system codes (T24, CIC, AASC), account names and
         technical terms in their original form — do not translate them.
+        - Warnings and notes inside the evidence blocks are written in English.
+        When you carry one into the report, restate it in Vietnamese — never
+        copy the English sentence across.
 
         MONETARY UNIT RULE:
         - Present every monetary value in tỷ VNĐ, rounded to 2 decimal places,

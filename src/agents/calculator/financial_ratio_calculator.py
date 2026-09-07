@@ -433,11 +433,12 @@ class FinancialRatioCalculator:
                 if self.UNIT_ANOMALY_LOW < ratio < self.UNIT_ANOMALY_HIGH:
                     continue
                 warnings.append(
-                    f"NGHI SAI ĐƠN VỊ: {metric} {later} ({b:,.0f}) lệch "
-                    f"{ratio:.4g} lần so với {earlier} ({a:,.0f}). Nhiều khả "
-                    f"năng một trong hai bảng in bằng triệu/tỷ đồng mà không "
-                    f"ghi rõ đơn vị. KHÔNG dùng tăng trưởng hay tỷ lệ bắc cầu "
-                    f"giữa hai năm này; nêu rõ nghi vấn đơn vị trong báo cáo."
+                    f"SUSPECTED UNIT MISMATCH: {metric} {later} ({b:,.0f}) is "
+                    f"{ratio:.4g}x {earlier} ({a:,.0f}). One of the two "
+                    f"statements was most likely printed in millions or "
+                    f"billions of đồng without saying so. Do NOT compute growth "
+                    f"or any ratio spanning these two years; state the unit "
+                    f"doubt in the report."
                 )
         return warnings
 
@@ -476,20 +477,20 @@ class FinancialRatioCalculator:
                 expected = m["net_revenue"] - m["cogs"]
                 if _off(m["gross_profit"], expected):
                     warnings.append(
-                        f"SỐ LIỆU KHÔNG KHỚP ({year}): lợi nhuận gộp đọc được "
-                        f"{_money('gross_profit')} nhưng doanh thu thuần "
-                        f"{_money('net_revenue')} trừ giá vốn {_money('cogs')} = "
-                        f"{_format_number(expected, 'value')}. Ít nhất một trong "
-                        f"ba số này đọc sai — đối chiếu BCTC gốc trước khi dùng."
+                        f"FIGURES DO NOT RECONCILE ({year}): gross profit reads "
+                        f"{_money('gross_profit')}, but net revenue "
+                        f"{_money('net_revenue')} minus COGS {_money('cogs')} = "
+                        f"{_format_number(expected, 'value')}. At least one of the "
+                        f"three was misread — check the original statement first."
                     )
             elif (
                 _has("gross_profit", "net_revenue")
                 and m["gross_profit"] > m["net_revenue"]
             ):
                 warnings.append(
-                    f"SỐ LIỆU KHÔNG KHỚP ({year}): lợi nhuận gộp "
-                    f"{_money('gross_profit')} lớn hơn doanh thu thuần "
-                    f"{_money('net_revenue')}. Đối chiếu BCTC gốc trước khi dùng."
+                    f"FIGURES DO NOT RECONCILE ({year}): gross profit "
+                    f"{_money('gross_profit')} exceeds net revenue "
+                    f"{_money('net_revenue')}. Check the original statement first."
                 )
 
             if (
@@ -497,29 +498,29 @@ class FinancialRatioCalculator:
                 and m["net_revenue"] > m["gross_revenue"]
             ):
                 warnings.append(
-                    f"SỐ LIỆU KHÔNG KHỚP ({year}): doanh thu thuần "
-                    f"{_money('net_revenue')} lớn hơn doanh thu bán hàng "
-                    f"{_money('gross_revenue')}, trong khi các khoản giảm trừ "
-                    f"không thể âm. Đối chiếu BCTC gốc trước khi dùng."
+                    f"FIGURES DO NOT RECONCILE ({year}): net revenue "
+                    f"{_money('net_revenue')} exceeds gross revenue "
+                    f"{_money('gross_revenue')}, yet revenue deductions cannot be "
+                    f"negative. Check the original statement first."
                 )
 
             if _has("total_assets", "total_liabilities", "equity"):
                 expected = m["total_liabilities"] + m["equity"]
                 if _off(m["total_assets"], expected):
                     warnings.append(
-                        f"SỐ LIỆU KHÔNG KHỚP ({year}): tổng tài sản "
-                        f"{_money('total_assets')} khác nợ phải trả "
-                        f"{_money('total_liabilities')} cộng vốn chủ sở hữu "
+                        f"FIGURES DO NOT RECONCILE ({year}): total assets "
+                        f"{_money('total_assets')} differ from liabilities "
+                        f"{_money('total_liabilities')} plus equity "
                         f"{_money('equity')} = "
-                        f"{_format_number(expected, 'value')}. Bảng cân đối "
-                        f"không cân — đối chiếu BCTC gốc trước khi dùng."
+                        f"{_format_number(expected, 'value')}. The balance sheet "
+                        f"does not balance — check the original statement first."
                     )
 
             for key, label in self.NON_NEGATIVE_METRICS:
                 if _has(key) and m[key] < 0:
                     warnings.append(
-                        f"SỐ LIỆU KHÔNG KHỚP ({year}): {label} âm "
-                        f"({_money(key)}) — bất thường, nghi ngờ lỗi trích xuất."
+                        f"FIGURES DO NOT RECONCILE ({year}): {label} is negative "
+                        f"({_money(key)}) — abnormal, likely an extraction error."
                     )
         return warnings
 

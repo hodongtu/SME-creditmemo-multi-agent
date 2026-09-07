@@ -385,7 +385,10 @@ def extract_financial_statement_from_xml(path: str) -> tuple[dict[str, Any] | No
     if result.error:
         return None, result.error
     if result.kind != "bctc":
-        return None, f"XML là {result.kind or 'biểu mẫu khác'}, không phải báo cáo tài chính."
+        return None, (
+            f"The XML is {result.kind or 'another form type'}, "
+            f"not a financial statement."
+        )
     return result.financial_statement_extraction, ""
 
 

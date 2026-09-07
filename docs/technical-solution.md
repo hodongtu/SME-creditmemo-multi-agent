@@ -164,6 +164,17 @@ Versions are pinned in `requirements.txt`.
 | | `pillow`, `numpy` | 12.2.0, 2.4.6 | Image handling |
 | Readers | `pandas` | 2.3.3 | CSV / tabular |
 | | `openpyxl` | 3.1.5 | XLSX, read directly for format fidelity |
+
+**Completion-token ceilings, measured not documented.** `testing/probe_max_tokens.py` sends
+`max_tokens=999999`; the API refuses with a 400 that names its own limit, and the request
+is rejected before the model runs so it costs nothing.
+
+| Model | Ceiling | Rows a 6-sheet ledger can carry |
+|---|---:|---:|
+| `gpt-4o-mini` | 16,384 | 211 |
+| `gpt-5.4-mini` | 128,000 | 1,836 |
+
+The eightfold spread is why `max_tokens` is set per pass rather than once.
 | | `xlrd` | 2.0.2 | Legacy `.xls` |
 | | `python-pptx` | 1.0.2 | PPTX |
 | Output | `markdown` | 3.10.3 | Markdown -> HTML |
@@ -563,6 +574,7 @@ arithmetic:
 
 | Guard | What it catches |
 |---|---|
+| Truncated output | `item_count` against `len(items)`. Two failures leave this one mark and it cannot separate them: a reply cut at the token ceiling, or a model that wrote fewer rows than it counted — measured at `finish_reason: stop`, 24,638 of 32,000 tokens, with two accounts still declaring 60 and 50 rows while emitting 45. The note lists both causes rather than asserting one. `JsonOutputParser` repairs a reply cut off at the token ceiling instead of raising, so the record arrives looking complete — one live run returned 2 accounts out of 15 sheets. `LLM_MAX_TOKENS` sets the ceiling explicitly; left unset the gateway picks its own |
 | Sheet count | Input sheets vs accounts returned; a shortfall is written into `extraction_notes`, because the model drops whole sheets in silence |
 | Total-row removal | A printed `Tổng` row left among `items`, which would have every figure of that account counted twice |
 | Nesting repair | `unmapped_columns` / `extraction_notes` returned inside `accounts`, where they read as two more accounts |

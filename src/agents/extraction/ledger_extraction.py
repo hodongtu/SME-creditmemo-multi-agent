@@ -39,6 +39,7 @@ from src.agents.extraction.structured_extraction import (
     run_extraction,
 )
 from src.utils.common import normalize_text
+from src.utils.reading.extractors import read_sheets
 
 REQUIRED_TOP_LEVEL_KEYS = {"accounts"}
 
@@ -50,6 +51,10 @@ LEDGER_BLOCK_CHAR_BUDGET = 40_000
 # Label of the row standing in for everything the budget left out. It carries
 # the summed figures of those rows, so visible rows still add up to the total.
 RESIDUAL_LABEL = "Các đối tác còn lại"
+# The keys a detail row carries text in. Everything else in a row is a figure,
+# so these are what naming, labelling and total-row detection look at — three
+# places that all used to read a single "name" key.
+LABEL_KEYS = ("counterparty_name", "counterparty_code", "item_name")
 # Names a printed total row carries. Kept as a set because the prompt already
 # tells the model to leave these out of "items" and it does it anyway — on the
 # sample workbook the inventory sheet came back with an eleventh row called
@@ -59,55 +64,64 @@ TOTAL_ROW_NAMES = {"tong", "tong cong", "cong", "total", "sum"}
 
 
 LEDGER_EXTRACTION_SYSTEM_PROMPT = """
-Bạn đọc sổ chi tiết / bảng cân đối phát sinh công nợ của doanh nghiệp Việt Nam
-(sổ chi tiết tài khoản, bảng tổng hợp nhập xuất tồn) và trả về MỘT bản ghi JSON
-duy nhất cho toàn bộ số file được đưa vào, phục vụ thẩm định tín dụng SME.
+You read Vietnamese accounting detail ledgers (sổ chi tiết tài khoản, bảng tổng
+hợp nhập xuất tồn) and return ONE JSON record covering every file given, for SME
+credit underwriting.
 
-Đầu vào là văn bản đã đọc từ file Excel/CSV, ngăn theo file bằng dòng
-"=== FILE i/N: <tên file> ===" và ngăn theo sheet bằng dòng
-"--- Sheet: <tên sheet> ---". Chỉ đọc trong phạm vi từng file; KHÔNG lấy số của
-file này gán cho file khác.
+The input is a JSON array, one object per sheet:
+  [{{"filename": "...", "sheet_name": "...", "content": "<tab-separated grid>"}}]
 
-PHẢI TRẢ VỀ MỘT MỤC CHO MỌI SHEET. Dòng "SHEET PHẢI XỬ LÝ:" ở đầu đầu vào liệt
-kê đủ danh sách — đi hết danh sách đó, đừng dừng sớm và đừng gộp hai sheet làm
-một trừ khi chúng cùng tài khoản VÀ cùng kỳ. Sheet nào không xếp được thì vẫn
-phải nói ra trong "extraction_notes"; bỏ im lặng một sheet là hỏng nặng nhất,
-vì bản ghi trông vẫn đầy đủ trong khi một nửa sổ đã biến mất.
+Stay inside each object. NEVER take a figure from one file and file it under
+another.
 
-CHÉP ĐỦ MỌI DÒNG CHI TIẾT của từng sheet, không lấy mẫu, không rút gọn.
+YOU ARE THE SOURCE OF EVERY NUMBER in the record. No program re-reads the file to
+correct you. Copy each figure digit for digit as printed.
 
-BẠN LÀ NGUỒN CỦA MỌI CON SỐ trong bản ghi. Không có chương trình nào đọc lại
-file để sửa cho bạn. Chép số đúng từng chữ số như in trong văn bản.
+RETURN ONE ENTRY FOR EVERY SHEET. Work through the whole array; do not stop early
+and do not merge two sheets unless they are the same account AND the same period.
+A sheet you cannot place still has to be named in "extraction_notes" — dropping
+one in silence is the worst failure here, because the record still looks complete
+while half the ledger is gone.
 
-════ KHUNG NGOÀI CÙNG ════
+COPY EVERY DETAIL ROW of each sheet. Do not sample, do not summarise.
+
+════ OUTER FRAME ════
 {{"accounts": {{...}}, "unmapped_columns": [], "extraction_notes": []}}
 
-BA KHOÁ NÀY NGANG HÀNG NHAU. "unmapped_columns" và "extraction_notes" nằm CÙNG
-CẤP với "accounts", TUYỆT ĐỐI không đặt chúng vào bên trong "accounts" — trong
-"accounts" chỉ có các mục tài khoản.
+These three keys are SIBLINGS. "unmapped_columns" and "extraction_notes" sit
+BESIDE "accounts", never inside it — "accounts" holds account entries only.
 
-- "unmapped_columns": tiêu đề cột không xếp được vào tên trường chuẩn, GIỮ
-  NGUYÊN VĂN TIẾNG VIỆT. Thà để lộ tên tiếng Việt còn hơn bịa một tên trường
-  tiếng Anh cho cột chưa ai hiểu.
-- "extraction_notes": sheet nào không xếp được và vì sao. Chỉ vậy.
+- "unmapped_columns": column headings you could not map to a canonical field,
+  KEPT IN THE ORIGINAL VIETNAMESE. Letting a Vietnamese name through beats
+  inventing an English field name for a column nobody has understood yet.
+- "extraction_notes": which sheets you could not place, and why. That is all.
 
-════ KHOÁ CỦA "accounts" — MỘT FORMAT DUY NHẤT ════
-    <số hiệu tài khoản>@<YYYYMMDD>-<YYYYMMDD>
+════ THE "accounts" KEY — ONE FORMAT ONLY ════
+    <account number>@<YYYYMMDD>-<YYYYMMDD>
 
-Ví dụ: "131@20250101-20251231". LUÔN mang kỳ, kể cả khi cả hồ sơ chỉ có một kỳ.
+Example: "131@20250101-20251231". ALWAYS carries the period, even when the whole
+dossier holds only one.
 
-    Cả năm 2025          -> 131@20250101-20251231
-    Quý 1/2025           -> 131@20250101-20250331
-    6 tháng đầu 2025     -> 131@20250101-20250630
-    9 tháng đầu 2025     -> 131@20250101-20250930
-    Niên độ 07/24-06/25  -> 131@20240701-20250630
+    Full year 2025        -> 131@20250101-20251231
+    Q1 2025               -> 131@20250101-20250331
+    First 6 months 2025   -> 131@20250101-20250630
+    First 9 months 2025   -> 131@20250101-20250930
+    Year 07/24-06/25      -> 131@20240701-20250630
 
-SỐ HIỆU TÀI KHOẢN LẤY Ở ĐÂU
-1. Nếu file/sheet CÓ IN số hiệu (tên file "SO CHI TIET TK 131.xlsx", tiêu đề
-   "Tài khoản 331", cột "TK 156"...) thì dùng đúng số đó, code_source="printed".
-2. Nếu KHÔNG in ở đâu cả thì dùng ĐÚNG MỘT mã quy ước theo category dưới đây,
-   code_source="convention". Dùng chính xác mã trong bảng, KHÔNG chọn mã khác
-   cùng nhóm:
+WHERE THE ACCOUNT NUMBER COMES FROM
+
+THE FILE NAME AND THE SHEET NAME ARE STRONG SIGNALS, often the strongest ones.
+Customers export one account per file or per sheet and leave the report title
+half-cut: a sheet called "PTHU_KHAC" is phải thu khác, "TK VAY" is a borrowings
+ledger, "NXT" is nhập xuất tồn. Read those names before deciding you cannot tell.
+"unknown" is for a sheet whose subject you genuinely cannot make out — not for
+one whose title is truncated while its name says plainly what it holds.
+
+1. If the file or sheet PRINTS a number ("SO CHI TIET TK 131.xlsx", a title
+   "Tài khoản 331", a column "TK 156"), use exactly that, code_source="printed".
+2. If nothing prints one, use EXACTLY ONE conventional code from the table below,
+   code_source="convention". Use the code in the table, never another from the
+   same family:
 
      cash              -> 112        receivable        -> 131
      other_receivable  -> 138        inventory         -> 156
@@ -115,88 +129,100 @@ SỐ HIỆU TÀI KHOẢN LẤY Ở ĐÂU
      other_payable     -> 338        borrowing         -> 341
      equity            -> 411
 
-   Sai ở đây là hỏng nặng: "sổ vay" gán 311 thay vì 341, hay "phải trả khác"
-   gán 331 thay vì 338, sẽ đưa toàn bộ số liệu của một tài khoản vào chỗ của
-   tài khoản khác, mà các con số thì vẫn trông đúng.
+   Getting this wrong is severe: a borrowings ledger filed as 311 instead of 341,
+   or other payables as 331 instead of 338, puts one account's figures under
+   another account's name while every number still looks right.
 
-Hai trường hợp biên:
-- Không đọc được kỳ            -> "131@unknown"
-- Không xác định được số hiệu  -> "unknown_<tên sheet>@<kỳ>"
+Two edge cases:
+- No readable period    -> "131@unknown"
+- No identifiable code  -> "unknown_<sheet name>@<period>"
 
-Hai mục khác kỳ là HAI SỰ THẬT RIÊNG — tuyệt đối không cộng số dư của chúng vào
-nhau. Nhiều sheet CÙNG tài khoản VÀ CÙNG kỳ thì gộp làm một mục: sổ Việt Nam hay
-tách một tài khoản ra nhiều sheet theo tháng hoặc theo nhóm hàng.
+Two entries with different periods are TWO SEPARATE FACTS — never add their
+balances together. Several sheets with the SAME account AND the SAME period merge
+into one entry: Vietnamese ledgers often split one account across sheets by month
+or by product group.
 
-════ MỖI MỤC TRONG "accounts" — ĐÚNG 10 KHOÁ ════
-"category"       một trong: cash receivable other_receivable inventory
+════ EACH ENTRY IN "accounts" — EXACTLY 10 KEYS ════
+"category"       one of: cash receivable other_receivable inventory
                  fixed_asset payable other_payable borrowing equity unknown
-                 Thà "unknown" còn hơn đoán: người phân tích đọc được một sheet
-                 chưa đặt tên, nhưng sẽ TIN một cái tên sai.
-"code_source"    "printed" khi số hiệu tài khoản có in trong file;
-                 "convention" khi file không in và bạn xếp theo quy ước hệ
-                 thống tài khoản Việt Nam.
-"code_evidence"  một câu tiếng Việt: đã đọc số hiệu từ đâu (tên file, tên
-                 sheet, tiêu đề báo cáo).
-"source_files"   danh sách tên file đã đóng góp, ĐÚNG NGUYÊN VĂN tên đã cho.
-"period"         {{"from","to","as_printed"}} — xem dưới.
-"source_columns" {{tên_trường_chuẩn: "tiêu đề cột nguyên văn"}}. Ghi MỌI cột đã
-                 xếp được, kể cả cột định danh.
-"units"          {{tên_trường: "vnd" hoặc "quantity"}}. CHỈ ghi cho trường thực
-                 sự có mặt trong "items".
-"totals"         {{tên_trường: số}} — tổng của cả tài khoản, ghi cả trường bằng 0.
-"item_count"     đúng bằng số phần tử của "items".
-"items"          toàn bộ dòng chi tiết — xem dưới.
+                 Prefer "unknown" over a guess: an analyst can read an unlabelled
+                 sheet, but will TRUST a wrong label.
+"code_source"    "printed" or "convention", per the rule above.
+"code_evidence"  one sentence naming where you read the number (file name, sheet
+                 name, report title).
+"source_files"   the file names that fed this entry, EXACTLY as given.
+"period"         {{"from","to","as_printed"}} — see below.
+"source_columns" {{canonical_field: "column heading exactly as printed"}}. Record
+                 EVERY column you placed, identifier columns included.
+"units"          {{field: "vnd" or "quantity"}}. Only for fields that actually
+                 appear in "items".
+"totals"         {{field: number}} — the account total. Include fields worth 0.
+"item_count"     exactly len(items).
+"items"          every detail row — see below.
 
 ════ "period" ════
-"from"/"to"    ngày ISO "YYYY-MM-DD", đọc từ dòng banner in phía trên bảng.
-"as_printed"   dòng banner NGUYÊN VĂN.
+"from"/"to"    ISO "YYYY-MM-DD", read from the banner line above the table.
+"as_printed"   that banner line VERBATIM.
 
-Các cách viết thường gặp và cách mở rộng:
+Common phrasings and how they expand:
     "Từ ngày 01/01/2025 đến ngày 31/12/2025" -> 2025-01-01 / 2025-12-31
     "Kỳ báo cáo: 01/01/2025 - 31/12/2025"    -> 2025-01-01 / 2025-12-31
     "Năm 2024"                               -> 2024-01-01 / 2024-12-31
     "Quý 4/2024"                             -> 2024-10-01 / 2024-12-31
     "Tháng 12 năm 2024"                      -> 2024-12-01 / 2024-12-31
-Không dòng nào nêu kỳ thì để "" cả ba trường — KHÔNG suy từ tên file có chứa năm.
+If no line states a period, leave all three "" — do NOT infer one from a file
+name that merely contains a year.
 
-════ "items" — CHỖ DỄ SAI NHẤT ════
-Mỗi phần tử: khoá "name" + CHỈ các trường số. Cột định danh
-("counterparty_code", "booking_unit") có trong "source_columns" nhưng KHÔNG vào
-"items"; tên đối tác hoặc tên mặt hàng đi vào "name".
+════ "items" — THE EASIEST PART TO GET WRONG ════
+Debt sheets (receivables, payables, borrowings) — the CODE and the NAME are
+SEPARATE FIELDS. A live run put "HSCANTHO" where the counterparty name belonged
+and the row became unreadable:
 
-Số ghi NGUYÊN ĐỒNG, không dấu phân cách, không đơn vị, không ngoặc:
-    đúng: 225510140846
-    sai : "225.510.140.846"   225,51 tỷ   (225510140846)
-Số âm dùng dấu trừ. Ô trống hoặc gạch ngang ghi 0. Không lược bỏ trường có giá
-trị 0.
+{{"counterparty_code": "HSCANTHO", "counterparty_name": "Cty Hoa Sen Cần Thơ",
+  "opening_debit": 0, "opening_credit": 0, "debit_movement": 20738000,
+  "credit_movement": 20738000, "closing_debit": 0}}
 
-DÒNG TỔNG IN TRÊN FILE ("Tổng", "Tổng cộng", "Cộng", "Total") KHÔNG PHẢI MỘT
-DÒNG CHI TIẾT: đưa nó vào "totals", tuyệt đối không thêm vào "items". Để lọt
-vào "items" thì mọi con số của tài khoản đó bị cộng đôi.
+Stock sheets (nhập xuất tồn):
 
-"totals" lấy từ dòng tổng in trên file nếu có; nếu file không in dòng tổng thì
-tự cộng các dòng chi tiết.
+{{"item_name": "Đầu kéo", "opening_quantity": 191, "opening_value": 205670531917,
+  "inflow_quantity": 1381, "inflow_value": 1590661714792}}
 
-════ TÊN TRƯỜNG CHUẨN — HAI BỘ, KHÔNG TRỘN ════
-Công nợ (phải thu, phải trả, vay):
+If the file has no code column, leave "counterparty_code": "" — keep the key.
+Never put a code in "counterparty_name" or a name in "counterparty_code".
+
+Numbers are WHOLE ĐỒNG: no separators, no unit, no brackets.
+    right: 225510140846
+    wrong: "225.510.140.846"   225,51 tỷ   (225510140846)
+Negatives take a minus sign. An empty cell or a dash is 0. Never drop a field
+because its value is 0.
+
+A PRINTED TOTAL ROW ("Tổng", "Tổng cộng", "Cộng", "Total") IS NOT A DETAIL ROW:
+put it in "totals" and never in "items". Letting one into "items" counts every
+figure of that account twice.
+
+"totals" comes from the printed total row when there is one; otherwise sum the
+detail rows yourself.
+
+════ CANONICAL FIELD NAMES — TWO SETS, NEVER MIXED ════
+Debt (receivable, payable, borrowing):
     counterparty_code counterparty_name booking_unit
     opening_debit opening_credit debit_movement credit_movement
     closing_debit closing_credit
-Nhập xuất tồn:
+Stock:
     item_name
     opening_quantity opening_value inflow_quantity inflow_value
     outflow_quantity outflow_value closing_quantity closing_value
 
-Cột đếm dòng ("Stt", "TT") KHÔNG phải một trường: bỏ hẳn, cũng đừng đưa vào
-"unmapped_columns". Không ánh xạ hai tiêu đề vào cùng một trường.
+A row counter ("Stt", "TT") is NOT a field: drop it, and do not list it in
+"unmapped_columns" either. Never map two headings to the same field.
 
-════ VÍ DỤ ĐẦY ĐỦ (một mục công nợ, một mục nhập xuất tồn) ════
+════ WORKED EXAMPLE (one debt entry, one stock entry) ════
 {{
  "accounts": {{
   "131@20250101-20251231": {{
    "category": "receivable",
    "code_source": "convention",
-   "code_evidence": "Sheet TK_131, tiêu đề Báo cáo chi tiết công nợ phải thu; file không in số hiệu.",
+   "code_evidence": "Sheet TK_131, tieu de Bao cao chi tiet cong no phai thu; file khong in so hieu.",
    "source_files": [
     "VIMID_so_chi_tiet.xlsx"
    ],
@@ -234,7 +260,8 @@ Cột đếm dòng ("Stt", "TT") KHÔNG phải một trường: bỏ hẳn, cũn
    "item_count": 2,
    "items": [
     {{
-     "name": "NGUYỄN VĂN A",
+     "counterparty_code": "",
+     "counterparty_name": "NGUYỄN XUÂN VĨ",
      "opening_debit": 0,
      "opening_credit": 0,
      "debit_movement": 20738000,
@@ -242,7 +269,8 @@ Cột đếm dòng ("Stt", "TT") KHÔNG phải một trường: bỏ hẳn, cũn
      "closing_debit": 0
     }},
     {{
-     "name": "NGUYỄN VĂN B",
+     "counterparty_code": "",
+     "counterparty_name": "ĐỒNG VĂN NGỌC",
      "opening_debit": 0,
      "opening_credit": 10000000,
      "debit_movement": 1391300000,
@@ -254,7 +282,7 @@ Cột đếm dòng ("Stt", "TT") KHÔNG phải một trường: bỏ hẳn, cũn
   "156@20250101-20251231": {{
    "category": "inventory",
    "code_source": "convention",
-   "code_evidence": "Sheet NXT, tiêu đề Báo cáo tổng hợp nhập xuất tồn; file không in số hiệu.",
+   "code_evidence": "Sheet NXT, tieu de Bao cao tong hop nhap xuat ton; file khong in so hieu.",
    "source_files": [
     "VIMID_so_chi_tiet.xlsx"
    ],
@@ -297,7 +325,7 @@ Cột đếm dòng ("Stt", "TT") KHÔNG phải một trường: bỏ hẳn, cũn
    "item_count": 2,
    "items": [
     {{
-     "name": "Mooc",
+     "item_name": "Mooc",
      "opening_quantity": 49,
      "opening_value": 22017037516,
      "inflow_quantity": 113,
@@ -308,7 +336,7 @@ Cột đếm dòng ("Stt", "TT") KHÔNG phải một trường: bỏ hẳn, cũn
      "closing_value": 21987404538
     }},
     {{
-     "name": "Đầu kéo",
+     "item_name": "Đầu kéo",
      "opening_quantity": 191,
      "opening_value": 205670531917,
      "inflow_quantity": 1381,
@@ -325,7 +353,7 @@ Cột đếm dòng ("Stt", "TT") KHÔNG phải một trường: bỏ hẳn, cũn
  "extraction_notes": []
 }}
 
-Trả về ĐÚNG schema trên, không kèm chữ nào khác.
+Return EXACTLY this schema and nothing else.
 """
 
 
@@ -336,7 +364,7 @@ def _magnitude(row: dict[str, Any]) -> float:
 
     return max(
         (abs(v) for k, v in row.items()
-         if k != "name"
+         if k not in LABEL_KEYS
          and isinstance(v, (int, float)) and not isinstance(v, bool)),
         default=0.0,
     )
@@ -348,11 +376,18 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     totals: dict[str, float] = {}
     for row in rows:
         for key, value in row.items():
-            if (key != "name"
+            if (key not in LABEL_KEYS
                     and isinstance(value, (int, float))
                     and not isinstance(value, bool)):
                 totals[key] = totals.get(key, 0) + value
-    return {"name": f"{RESIDUAL_LABEL} ({len(rows)})",
+    # The label goes in whichever text key the rows themselves use, so the
+    # aggregate row reads like the rows it stands for rather than like a row
+    # from a different kind of sheet.
+    label_key = next(
+        (k for k in LABEL_KEYS if any(k in row for row in rows)),
+        "counterparty_name",
+    )
+    return {label_key: f"{RESIDUAL_LABEL} ({len(rows)})",
             **{k: round(v) for k, v in totals.items()}}
 
 
@@ -409,42 +444,79 @@ def build_ledger_extraction_chain(llm: Any):
     return build_extraction_chain(LEDGER_EXTRACTION_SYSTEM_PROMPT, llm)
 
 
-def _raw_text_payload(documents: list[tuple[str, str, str]]) -> str:
-    """Every file's text under a fence naming it, in one string.
+# Characters the JSON payload may occupy, matching the per-document budget the
+# rest of the pipeline applies to OCR text. Reading straight from the file skips
+# that cap, so it is re-applied here — otherwise a ledger pass would send more
+# than any other pass is allowed to.
+PAYLOAD_CHAR_BUDGET = 120_000
 
-    The text is already split by sheet — ``extract_excel_text`` writes a
-    "--- Sheet: … ---" line before each one and keeps the .xlsx number formats,
-    and ``extract_csv_text`` covers the flat case. So the only thing missing is
-    the file boundary, which matters because the record spans files and a figure
-    borrowed from the wrong one is invisible once it is in the JSON.
 
-    Numbered i/N rather than named alone: a fence that only carries a name
-    cannot tell the model that a file it should have seen is absent.
+def read_ledger_sheets(
+    documents: list[tuple[str, str, str]],
+) -> tuple[list[dict[str, str]], list[str]]:
+    """Every sheet of every ledger file, and the notes about what did not open.
+
+    Read from the file rather than split back out of ``content``: that string
+    carries "--- Sheet: TK VAY (23 dòng x 10 cột, đã bỏ 1 dòng trùng lặp) ---",
+    and a regex over it breaks the moment a sheet name contains a dash or the
+    parenthetical gains a field — which it did this week. ``read_sheets`` is the
+    same reader ``extract_excel_text`` uses, so the two cannot disagree.
+
+    Costs one re-read of each workbook, measured at 29 ms against an LLM call of
+    about 25 seconds.
+
+    A file that will not open is named in the notes and left out. It is NOT
+    retried by parsing ``content``: falling back to that rebuilds exactly the
+    fragile path this replaced.
     """
 
-    total = len(documents)
-    body = "\n\n".join(
-        f"=== FILE {index}/{total}: {filename} ===\n{content or '(không đọc được nội dung)'}"
-        for index, (filename, content, _path) in enumerate(documents, start=1)
-    )
-    sheets = sheet_inventory(documents)
-    listed = "\n".join(f"  {i}. {name}" for i, name in enumerate(sheets, start=1))
-    return f"SHEET PHẢI XỬ LÝ ({len(sheets)}):\n{listed}\n\n{body}"
+    sheets: list[dict[str, str]] = []
+    notes: list[str] = []
+    for filename, _content, path in documents:
+        if not path:
+            notes.append(f"Could not read {filename}: no file path.")
+            continue
+        try:
+            found = read_sheets(path)
+        except Exception as exc:
+            notes.append(f"Could not read {filename}: {type(exc).__name__}: {exc}"[:300])
+            continue
+        sheets += [
+            {"filename": filename,
+             "sheet_name": sheet.sheet_name,
+             "content": sheet.content}
+            for sheet in found
+        ]
+    return sheets, notes
+
+
+def _json_payload(sheets: list[dict[str, str]]) -> tuple[str, list[str]]:
+    """The sheets as one JSON array, trimmed to the budget at sheet boundaries.
+
+    Whole sheets go, never part of one: half a ledger sheet reads as a complete
+    one to the model, and the figures it would report from the surviving rows
+    would look like the account's totals.
+    """
+
+    kept = list(sheets)
+    dropped: list[str] = []
+    while kept:
+        payload = json.dumps(kept, ensure_ascii=False, separators=(",", ":"))
+        if len(payload) <= PAYLOAD_CHAR_BUDGET:
+            return payload, dropped
+        gone = kept.pop()
+        dropped.append(f"{gone['filename']} › {gone['sheet_name'] or '(single sheet)'}")
+    return "[]", dropped
 
 
 def sheet_inventory(documents: list[tuple[str, str, str]]) -> list[str]:
-    """Every "file › sheet" the payload contains, in reading order.
+    """Every "file › sheet" the payload contains, in reading order."""
 
-    Read back out of the text rather than tracked while building it, so the list
-    describes what the model is actually looking at. A file with no sheet marker
-    — a .csv — counts as one sheet named after the file.
-    """
-
-    found: list[str] = []
-    for filename, content, _path in documents:
-        names = re.findall(r"^--- Sheet: (.+?) ---$", content or "", re.M)
-        found += [f"{filename} › {n.strip()}" for n in names] or [filename]
-    return found
+    sheets, _notes = read_ledger_sheets(documents)
+    return [
+        f"{s['filename']} › {s['sheet_name']}" if s["sheet_name"] else s["filename"]
+        for s in sheets
+    ]
 
 
 def _drop_total_rows(record: dict[str, Any]) -> None:
@@ -463,11 +535,55 @@ def _drop_total_rows(record: dict[str, Any]) -> None:
         rows = account.get("items") or []
         kept = [
             row for row in rows
-            if normalize_text(str(row.get("name", ""))) not in TOTAL_ROW_NAMES
+            if not any(
+                normalize_text(str(row.get(key, ""))) in TOTAL_ROW_NAMES
+                for key in LABEL_KEYS
+            )
         ]
         if len(kept) != len(rows):
             account["items"] = kept
             account["item_count"] = len(kept)
+
+
+def _note_truncated_output(record: dict[str, Any]) -> None:
+    """Say so when the model's answer was cut off mid-array.
+
+    Two different failures leave the same mark, and this cannot tell them apart:
+
+    * the reply was cut at the token ceiling — ``JsonOutputParser`` repairs the
+      broken JSON rather than raising, closing the open braces so a truncated
+      answer arrives looking whole. One live run had an account declare 26 rows
+      and carry 18, the last missing four of its seven fields;
+    * the model simply wrote fewer rows than it counted. Measured on a 340-row
+      dossier: ``finish_reason`` was ``stop`` at 24,638 of 32,000 tokens, yet
+      two accounts still declared 60 and 50 rows while emitting 45 each.
+
+    So the note names what was observed and lists both causes rather than
+    asserting one. Claiming the ceiling when the model merely stopped early
+    sends somebody to raise a limit that was never reached.
+
+    ``item_count`` against ``len(items)`` is the model's own self-contradiction,
+    and the only trace either failure leaves behind.
+    """
+
+    cut = []
+    for key, account in (record.get("accounts") or {}).items():
+        if not isinstance(account, dict):
+            continue
+        declared = account.get("item_count")
+        actual = len(account.get("items") or [])
+        if isinstance(declared, int) and declared > actual:
+            cut.append(f"{key} declared {declared} rows, received {actual}")
+    if cut:
+        record["extraction_notes"].append(
+            "WARNING: the model returned fewer rows than it counted — "
+            + "; ".join(cut)
+            + ". The figures below are INCOMPLETE. Either the answer was cut at "
+            "the token ceiling (raise the pass's max_tokens_env, e.g. "
+            "LLM_LEDGER_MAX_TOKENS; run testing/probe_max_tokens.py for the "
+            "model's real ceiling) or the model stopped early on its own — in "
+            "which case split the dossier and run again."
+        )
 
 
 def extract_ledger_batch(
@@ -483,10 +599,16 @@ def extract_ledger_batch(
     copies would render the block once per file.
     """
 
+    sheets, read_notes = read_ledger_sheets(documents)
+    if not sheets:
+        reason = "; ".join(read_notes) or "No sheet could be read"
+        return [(None, reason[:500]) for _ in documents]
+
+    payload, dropped = _json_payload(sheets)
     record, error = run_extraction(
         chain,
         ", ".join(filename for filename, _, _ in documents),
-        _raw_text_payload(documents),
+        payload,
         REQUIRED_TOP_LEVEL_KEYS,
         "No ledger extraction LLM configured.",
     )
@@ -502,6 +624,16 @@ def extract_ledger_batch(
             record[key] = misplaced
     record.setdefault("unmapped_columns", [])
     record.setdefault("extraction_notes", [])
+    record["extraction_notes"] += read_notes
+    if dropped:
+        record["extraction_notes"].append(
+            f"Input exceeded {PAYLOAD_CHAR_BUDGET:,} characters, so {len(dropped)} "
+            f"sheet(s) were not sent: {', '.join(dropped[:10])}."
+        )
+
+    # Before _drop_total_rows, which rewrites item_count to match and would
+    # erase the evidence.
+    _note_truncated_output(record)
     _drop_total_rows(record)
 
     # The model has dropped whole sheets in silence — on the sample workbook it
@@ -514,8 +646,9 @@ def extract_ledger_batch(
     returned = len(record.get("accounts") or {})
     if returned < expected:
         record["extraction_notes"].append(
-            f"CẢNH BÁO: đầu vào có {expected} sheet nhưng chỉ trích xuất được "
-            f"{returned} tài khoản. Nhiều sheet đã bị bỏ qua — số liệu dưới đây "
-            f"KHÔNG phải toàn bộ sổ chi tiết khách hàng nộp."
+            f"WARNING: the input held {expected} sheets but only {returned} accounts "
+            f"came back. Absent a TRUNCATED warning above, the model skipped sheets "
+            f"— the figures below are NOT the whole ledger the customer "
+            f"submitted."
         )
     return [(record, "") for _ in documents]

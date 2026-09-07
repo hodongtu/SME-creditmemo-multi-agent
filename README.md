@@ -217,13 +217,44 @@ arrive split across two files, and a single call sees the whole set. And its inp
 `extract_excel_text` has already split the workbook by sheet and kept the `.xlsx` number formats,
 so the pass feeds that text back and asks for the finished record, **figures included**.
 
+The pass reads the workbook itself through `read_sheets`, which is the same reader
+`extract_excel_text` uses — one source, two shapes. It sends a JSON array of
+`{filename, sheet_name, content}`, one object per sheet, rather than fenced text: splitting
+the text form back apart with a regex would break the moment a sheet name contains a dash
+or the header line gains a field, which it did.
+
 That last part is a deliberate trade. `.xls` and `.csv` ledgers work now, where the previous
 `openpyxl` reader could not open them at all — but no figure is guaranteed exact any more.
 Measured on the sample workbook (338 comparable figures): `gpt-5.4-mini` got every figure right
 in two runs of four, dropped a sheet with four wrong figures in a third, and returned an
 unusable shape in the fourth. `gpt-4o-mini` is not usable for this pass — it returned one
-closing balance of 82,036,126,740 as `0`. Three structural guards remain (sheet count, printed
-total row, misplaced top-level keys); none of them checks arithmetic.
+closing balance of 82,036,126,740 as `0`. Four structural guards remain (truncated output, sheet count,
+printed total row, misplaced top-level keys); none of them checks arithmetic.
+
+The first of those exists because `JsonOutputParser` **repairs** a truncated reply rather
+than raising: it closes the open braces and hands back a valid dict, so an answer cut off at
+the token ceiling arrives looking complete. One live run returned 2 accounts out of 15
+sheets that way, one of them declaring 26 rows and carrying 18. `item_count` against
+`len(items)` is the model's own self-contradiction and the only trace the repair leaves.
+`LLM_MAX_TOKENS` now sets the ceiling explicitly — left unset, the gateway picks its own.
+
+**The ceiling is per pass, because one number cannot fit the whole fleet.** Measured by
+asking each model (`testing/probe_max_tokens.py` sends `max_tokens=999999` and reads the
+figure back out of the 400): `gpt-4o-mini` allows 16,384 completion tokens, `gpt-5.4-mini`
+128,000 — an eightfold spread inside one `.env`. A shared knob has to sit under the
+weakest, which throttles the ledger pass by a factor of eight even though it runs on the
+larger model. So `build_llm` takes `max_tokens_env` alongside `timeout_env`, and the ledger
+pass reads `LLM_LEDGER_MAX_TOKENS`.
+
+Sizing it is arithmetic, not guesswork. A detail row costs **68.7 tokens** on average
+(58–80 depending on how long the counterparty name is), an account frame 298, the outer
+frame 73. A 6-sheet, 340-row dossier therefore needs 21,600–29,100 — predicted 25,219 and
+measured 24,638 on a real run, 2% out. 32,000 carries it with room; 16,000 would have cut
+it at about row 206.
+
+Going over the model's ceiling is a **400 that stops the run**, not a quiet trim, so the
+value cannot simply be set high. `run_extraction` recognises that refusal and names the
+variable to change.
 
 The site-visit report is the one every specialist reads, because it is the only document
 describing the business itself rather than one facet of it — industry and GSO code, main products,

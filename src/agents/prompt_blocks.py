@@ -259,7 +259,7 @@ def _build_credit_need_block(
         )
     if table.warnings:
         lines.append("")
-        lines.extend(f"CẢNH BÁO: {w}" for w in table.warnings)
+        lines.extend(f"WARNING: {w}" for w in table.warnings)
     return "\n".join(lines)
 
 
@@ -502,11 +502,13 @@ def _build_ledger_structured_block(
         '"closing_debit"/"closing_credit" là dư cuối kỳ; hàng tồn kho dùng '
         '"opening_/inflow_/outflow_/closing_" kèm "_quantity" hoặc "_value". '
         '"source_columns" cho biết mỗi trường ứng với cột nào trong file gốc.',
-        '"items" là toàn bộ dòng chi tiết; cột nào trong file có giá trị 0 thì '
-        'ghi 0 chứ không lược đi. Nếu có dòng tên '
-        f'"{ledger_extraction.RESIDUAL_LABEL} (N)" thì đó là tổng gộp của N '
-        'dòng nhỏ không liệt kê riêng, nên tổng các dòng luôn khớp "totals" — '
-        'đừng cộng "items" rồi gọi đó là tổng khi đã có "totals".',
+        '"items" là toàn bộ dòng chi tiết. Sổ công nợ có HAI trường riêng cho '
+        'đối tác: "counterparty_code" là mã, "counterparty_name" là tên — trích '
+        'dẫn theo TÊN, chỉ dùng mã khi không có tên. Sổ nhập xuất tồn dùng '
+        '"item_name". Cột nào trong file có giá trị 0 thì ghi 0 chứ không lược '
+        f'đi. Nếu có dòng tên "{ledger_extraction.RESIDUAL_LABEL} (N)" thì đó là '
+        'tổng gộp của N dòng nhỏ không liệt kê riêng, nên tổng các dòng luôn '
+        'khớp "totals" — đừng cộng "items" rồi gọi đó là tổng khi đã có "totals".',
         '"code_source": "printed" nghĩa là số hiệu tài khoản in trong file; '
         '"convention" nghĩa là file không in số hiệu và chương trình xếp theo '
         'quy ước hệ thống tài khoản. Đừng trích dẫn số hiệu "convention" như '

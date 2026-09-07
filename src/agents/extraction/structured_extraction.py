@@ -75,6 +75,28 @@ def build_extraction_chain(system_prompt: str, llm: Any):
     return prompt | llm | JsonOutputParser()
 
 
+def _explain(exc: Exception) -> str:
+    """The failure as a sentence somebody can act on.
+
+    One case earns its own branch: a max_tokens above the model's ceiling is a
+    400 that stops the whole run, and the API's own wording names neither the
+    environment variable that set it nor the fact that it is settable at all.
+    Everything else passes through unchanged: a message nobody can act on still
+    beats a wrong guess about which knob to turn.
+    """
+
+    text = str(exc)
+    if "max_tokens" in text and "at most" in text:
+        return (
+            "max_tokens exceeds the model's ceiling — the request was refused "
+            "before the model ran. Lower LLM_MAX_TOKENS (or the pass's own "
+            "max_tokens_env, e.g. LLM_LEDGER_MAX_TOKENS) in .env; run "
+            "testing/probe_max_tokens.py to read the model's real ceiling. "
+            f"API said: {text}"
+        )[:500]
+    return f"{type(exc).__name__}: {text}"[:500]
+
+
 def run_extraction(
     chain: Any,
     filename: str,
@@ -90,7 +112,7 @@ def run_extraction(
     try:
         result = chain.invoke({"filename": filename, "content": content})
     except Exception as exc:
-        return None, f"{type(exc).__name__}: {exc}"[:500]
+        return None, _explain(exc)
 
     if not isinstance(result, dict):
         return None, f"Extraction returned non-dict result: {type(result).__name__}"

@@ -92,9 +92,9 @@ def resolve_customer_key(documents: list[Any]) -> CustomerKey:
             f"{row[1]} ({row[3]})" for row in candidates if row[1] in distinct
         )
         warnings.append(
-            f"Hồ sơ nêu {len(distinct)} mã số thuế khác nhau: {listed}. "
-            f"Dùng {code} theo thứ tự ưu tiên nguồn — hãy kiểm tra hồ sơ có bị "
-            f"lẫn tài liệu của khách khác không."
+            f"The dossier states {len(distinct)} different tax codes: {listed}. "
+            f"Using {code} by source precedence — check whether another "
+            f"customer's documents got mixed in."
         )
 
     if not _TAX_CODE.match(code):

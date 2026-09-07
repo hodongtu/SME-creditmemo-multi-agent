@@ -2,6 +2,7 @@
 
 import csv
 import datetime
+from dataclasses import dataclass
 from pathlib import Path
 
 import openpyxl
@@ -12,16 +13,17 @@ from pptx import Presentation
 from src.utils.reading.ocr import ocr_pdf
 
 
-def extract_csv_text(
-    csv_path: str,
-    max_rows: int = 500,
-    max_chars: int = 100000,
-) -> str:
-    """Extract CSV content as tab-separated text for LLM analysis."""
-    encodings = ["utf-8", "latin-1"]
-    last_error = None
+def _read_csv_rows(csv_path: str) -> list[list[str]]:
+    """Every row of a CSV, decoded and stripped. Never truncates.
 
-    for encoding in encodings:
+    Reading in full is what lets de-duplication run before the row cap: a file
+    whose pasted block sits ahead of the real data would otherwise spend the
+    whole allowance on copies. Affordable because a CSV row is a list of short
+    strings, and upload size is bounded before the file gets here.
+    """
+
+    last_error = None
+    for encoding in ("utf-8", "latin-1"):
         try:
             with open(csv_path, newline="", encoding=encoding) as csv_file:
                 sample = csv_file.read(4096)
@@ -30,30 +32,29 @@ def extract_csv_text(
                     dialect = csv.Sniffer().sniff(sample)
                 except csv.Error:
                     dialect = csv.excel
-
-                rows = [
+                return [
                     [cell.strip() for cell in row]
                     for row in csv.reader(csv_file, dialect)
                 ]
-
-            # Read in full, then de-duplicate, then cut — the cut used to happen
-            # during the read, which meant a file whose pasted block came before
-            # the real data spent its whole allowance on copies. Reading it all
-            # is affordable here: a CSV row is a list of short strings, and the
-            # upload size is bounded before the file reaches this point.
-            rows, duplicates = _dedup_rows(rows)
-            body = rows[:max_rows]
-            if len(rows) > max_rows:
-                body = body + [[f"... truncated after {max_rows} rows ..."]]
-            if duplicates:
-                body = [[f"... đã bỏ {duplicates} dòng trùng lặp ..."]] + body
-
-            content = "\n".join("\t".join(row) for row in body)
-            return content[:max_chars]
         except UnicodeDecodeError as exc:
             last_error = exc
-
     raise ValueError(f"Unable to decode CSV file: {last_error}")
+
+
+def extract_csv_text(
+    csv_path: str,
+    max_rows: int = 500,
+    max_chars: int = 100000,
+) -> str:
+    """Extract CSV content as tab-separated text for LLM analysis."""
+
+    rows, duplicates = _dedup_rows(_read_csv_rows(csv_path))
+    body = rows[:max_rows]
+    if len(rows) > max_rows:
+        body = body + [[f"... truncated after {max_rows} rows ..."]]
+    if duplicates:
+        body = [[f"... đã bỏ {duplicates} dòng trùng lặp ..."]] + body
+    return "\n".join("\t".join(row) for row in body)[:max_chars]
 
 
 def _format_number(value: float, number_format: str) -> str:
@@ -218,79 +219,96 @@ def _grid_to_tsv(
     return "\n".join(lines)
 
 
-def extract_excel_text(
+@dataclass(frozen=True)
+class SheetText:
+    """One sheet of a spreadsheet, already cleaned, de-duplicated and capped.
+
+    The structured form exists because two callers want the same reading with
+    different shapes: the general OCR path wants one string per file, and the
+    ledger pass wants one JSON object per sheet. Splitting the string back apart
+    with a regex was the alternative, and the "--- Sheet: … ---" line it would
+    have to match changed this week when duplicate counts joined it.
+    """
+
+    sheet_name: str
+    content: str
+    row_count: int
+    column_count: int
+    duplicates_dropped: int
+
+
+def read_sheets(
     excel_path: str,
     max_rows_per_sheet: int = 500,
-    max_chars: int = 100000,
-) -> str:
-    """Extract XLS/XLSX workbook content as LLM-readable text grouped by sheet.
+) -> list[SheetText]:
+    """Every sheet of a spreadsheet, one record each.
 
-    The grid is emitted as-is (no header inference), led by Excel column letters
-    so the LLM can align columns and cite a specific cell. Cells are rendered the
-    way Excel displays them (percent, dates, thousands grouping).
+    Handles the three formats behind one signature: ``.xlsx`` through openpyxl
+    in normal mode (read-only does not expose ``merged_cells.ranges``, which is
+    needed to propagate merged headers), ``.xls`` through pandas + xlrd, and
+    ``.csv`` as a single unnamed sheet.
 
-    ``.xlsx`` is read with openpyxl in normal mode — read-only mode does not
-    expose ``merged_cells.ranges``, which is needed to propagate merged headers.
-    That loads the workbook into memory; ``max_rows_per_sheet`` bounds the output
-    size, not peak memory. ``.xls`` (legacy) falls back to pandas + xlrd, which
-    cannot recover number formats.
+    An empty sheet still gets a record, with empty ``content`` and a zero
+    ``row_count`` — dropping it here would make the sheet count the ledger pass
+    checks against disagree with the workbook.
     """
-    if Path(excel_path).suffix.lower() != ".xlsx":
-        return _extract_legacy_xls_text(excel_path, max_rows_per_sheet, max_chars)
+
+    suffix = Path(excel_path).suffix.lower()
+    if suffix == ".csv":
+        rows, duplicates = _dedup_rows(_read_csv_rows(excel_path))
+        grid, kept_columns = _clean_grid(rows)
+        if not grid:
+            return [SheetText("", "", 0, 0, duplicates)]
+        return [SheetText("", _grid_to_tsv(grid, kept_columns, max_rows_per_sheet),
+                          len(grid), len(kept_columns), duplicates)]
+
+    if suffix != ".xlsx":
+        return _read_legacy_xls_sheets(excel_path, max_rows_per_sheet)
 
     workbook = openpyxl.load_workbook(excel_path, data_only=True)
     try:
-        blocks = []
+        sheets = []
         for worksheet in workbook.worksheets:
             grid, kept_columns = _clean_grid(_sheet_grid(worksheet))
             if not grid:
-                blocks.append(f"--- Sheet: {worksheet.title} (trống) ---")
+                sheets.append(SheetText(worksheet.title, "", 0, 0, 0))
                 continue
             # Before the row cap, not after: a sheet whose pasted block sits
             # ahead of the real data would otherwise spend the whole 500-row
             # window on copies and drop every real row behind them.
             grid, duplicates = _dedup_rows(grid)
-            body = _grid_to_tsv(grid, kept_columns, max_rows_per_sheet)
-            blocks.append(
-                _sheet_header(worksheet.title, len(grid), len(kept_columns),
-                              duplicates)
-                + f"\n{body}"
-            )
+            sheets.append(SheetText(
+                worksheet.title,
+                _grid_to_tsv(grid, kept_columns, max_rows_per_sheet),
+                len(grid), len(kept_columns), duplicates,
+            ))
+        return sheets
     finally:
         workbook.close()
 
-    return _join_sheet_blocks(blocks, max_chars)
 
-
-def _extract_legacy_xls_text(
+def _read_legacy_xls_sheets(
     excel_path: str,
     max_rows_per_sheet: int,
-    max_chars: int,
-) -> str:
-    """Read a legacy .xls workbook (no number-format fidelity available)."""
-    workbook = pd.read_excel(
-        excel_path,
-        sheet_name=None,
-        dtype=str,
-        header=None,
-        engine="xlrd",
-    )
+) -> list[SheetText]:
+    """A legacy .xls workbook, sheet by sheet (no number-format fidelity)."""
 
-    blocks = []
+    workbook = pd.read_excel(
+        excel_path, sheet_name=None, dtype=str, header=None, engine="xlrd",
+    )
+    sheets = []
     for sheet_name, dataframe in workbook.items():
         raw_grid = dataframe.fillna("").astype(str).values.tolist()
         grid, kept_columns = _clean_grid(raw_grid)
         if not grid:
-            blocks.append(f"--- Sheet: {sheet_name} (trống) ---")
+            sheets.append(SheetText(sheet_name, "", 0, 0, 0))
             continue
         grid, duplicates = _dedup_rows(grid)
-        body = _grid_to_tsv(grid, kept_columns, max_rows_per_sheet)
-        blocks.append(
-            _sheet_header(sheet_name, len(grid), len(kept_columns), duplicates)
-            + f"\n{body}"
-        )
-
-    return _join_sheet_blocks(blocks, max_chars)
+        sheets.append(SheetText(
+            sheet_name, _grid_to_tsv(grid, kept_columns, max_rows_per_sheet),
+            len(grid), len(kept_columns), duplicates,
+        ))
+    return sheets
 
 
 def _join_sheet_blocks(blocks: list[str], max_chars: int) -> str:
@@ -304,37 +322,35 @@ def _join_sheet_blocks(blocks: list[str], max_chars: int) -> str:
     )
 
 
-def _slide_text(slide) -> list[str]:
-    """Collect text from every non-title shape on a slide, tables included.
+def _sheets_to_text(sheets: list[SheetText], max_chars: int) -> str:
+    """The one-string form every non-ledger caller reads."""
 
-    The title shape is skipped here — it already leads the slide's block
-    header (see ``extract_pptx_text``), and repeating it as the first body
-    line would just echo the same text twice.
+    blocks = [
+        f"--- Sheet: {sheet.sheet_name} (trống) ---" if not sheet.row_count
+        else _sheet_header(sheet.sheet_name, sheet.row_count,
+                           sheet.column_count, sheet.duplicates_dropped)
+        + f"\n{sheet.content}"
+        for sheet in sheets
+    ]
+    return _join_sheet_blocks(blocks, max_chars)
+
+
+def extract_excel_text(
+    excel_path: str,
+    max_rows_per_sheet: int = 500,
+    max_chars: int = 100000,
+) -> str:
+    """Extract XLS/XLSX workbook content as LLM-readable text grouped by sheet.
+
+    The grid is emitted as-is (no header inference), led by Excel column letters
+    so the LLM can align columns and cite a specific cell. Cells are rendered the
+    way Excel displays them (percent, dates, thousands grouping).
+
+    A thin join over ``read_sheets``, which does the reading for both shapes this
+    module hands out — see ``SheetText``.
     """
-    title_shape = slide.shapes.title
-    title_id = title_shape.shape_id if title_shape is not None else None
-    parts: list[str] = []
-    for shape in slide.shapes:
-        if title_id is not None and shape.shape_id == title_id:
-            continue
-        if shape.has_text_frame:
-            text = shape.text_frame.text.strip()
-            if text:
-                parts.append(text)
-        elif shape.has_table:
-            for row in shape.table.rows:
-                cells = [cell.text.strip() for cell in row.cells]
-                if any(cells):
-                    parts.append("\t".join(cells))
-    return parts
 
-
-def _slide_title(slide) -> str:
-    """The slide's title placeholder text, if it has one."""
-    title_shape = slide.shapes.title
-    if title_shape is not None and title_shape.has_text_frame:
-        return title_shape.text_frame.text.strip()
-    return ""
+    return _sheets_to_text(read_sheets(excel_path, max_rows_per_sheet), max_chars)
 
 
 def extract_pptx_text(pptx_path: str, max_chars: int = 100000) -> str:

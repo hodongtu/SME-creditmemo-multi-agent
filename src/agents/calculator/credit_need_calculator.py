@@ -271,7 +271,10 @@ def build_credit_need_table(
 
     table = CreditNeedTable()
     if not yearly_metrics:
-        table.warnings.append("Không có số liệu BCTC — không tính được bảng nhu cầu tín dụng.")
+        table.warnings.append(
+            "No financial statement data — the credit need table cannot be "
+            "computed."
+        )
         return table
 
     latest_year = max(yearly_metrics)
@@ -445,27 +448,27 @@ def build_credit_need_table(
         ]
         if dropped:
             table.warnings.append(
-                "Giấy đề nghị không nêu nhu cầu "
-                + " và ".join(dropped)
-                + " — đã bỏ phần này khỏi bảng."
+                "The credit application states no need for "
+                + " or ".join(dropped)
+                + " — those rows were left out of the table."
             )
     if revenue_latest and revenue_plan:
         ratio = revenue_plan / revenue_latest
         if ratio < 0.01 or ratio > 100:
             table.warnings.append(
-                f"Nghi sai đơn vị: doanh thu năm kế hoạch ({revenue_plan:,.0f}) "
-                f"lệch {ratio:.4g} lần so với năm gần nhất "
-                f"({revenue_latest:,.0f}). Kiểm tra 'source_unit' trong hồ sơ "
-                f"nguồn ({revenue_src}) trước khi dùng bảng này."
+                f"Suspected unit mismatch: planned revenue ({revenue_plan:,.0f}) "
+                f"is {ratio:.4g}x the most recent year "
+                f"({revenue_latest:,.0f}). Check 'source_unit' in the source "
+                f"document ({revenue_src}) before using this table."
             )
     if ccc is None:
         table.warnings.append(
-            "Thiếu chu kỳ tiền — không tính được nhu cầu vốn lưu động."
+            "Cash conversion cycle missing — working capital need cannot be computed."
         )
     if other_debt is None:
         table.warnings.append(
-            "Không có dữ liệu CIC — nguồn vốn khác coi như chưa xác định, "
-            "nhu cầu vốn vay có thể đang bị tính cao hơn thực tế."
+            "No CIC data — other funding sources are treated as unknown, so "
+            "the borrowing need may be overstated."
         )
     return table
 

@@ -387,7 +387,10 @@ def _parse_vat(root: ET.Element, result: TaxXmlResult) -> TaxXmlResult:
     if kind == "M":
         month = label.split("/")[0].strip()
         result.vat_revenue = {f"{int(month):02d}/{year}": (revenue, False)}
-        result.notes.append(f"Tờ khai tháng {month}/{year}: doanh thu là số kê khai, không ước lượng.")
+        result.notes.append(
+            f"Monthly return {month}/{year}: revenue is the declared figure, "
+            f"not an estimate."
+        )
     elif kind == "Q":
         quarter = int(label.split("/")[0].strip())
         share = revenue / 3
@@ -396,10 +399,11 @@ def _parse_vat(root: ET.Element, result: TaxXmlResult) -> TaxXmlResult:
             for month in range(quarter * 3 - 2, quarter * 3 + 1)
         }
         result.notes.append(
-            f"Tờ khai quý {quarter}/{year}: chia đều cho 3 tháng và đánh dấu ước lượng."
+            f"Quarterly return {quarter}/{year}: split evenly across 3 months "
+            f"and flagged as estimated."
         )
     else:
-        result.error = f"Kiểu kỳ kê khai không nhận ra: {kind!r}."
+        result.error = f"Unrecognised declaration period type: {kind!r}."
     return result
 
 
