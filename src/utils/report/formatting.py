@@ -12,6 +12,13 @@ _ALREADY_SCALED = re.compile(r"^\s*(?:tỷ|triệu|nghìn\s+tỷ|ngàn\s+tỷ)\b
 # cells of a statement is noise. A figure standing in a sentence has no such
 # label, so it keeps the unit.
 _TABLE_ROW = re.compile(r"^\s*\|")
+# A "tỷ VNĐ" the model wrote itself. The converter only ever sees raw đồng, so a
+# figure that arrived already scaled slipped past the table rule entirely — one
+# report carried the unit in 99 table rows. Matched with the figure in front of
+# it so the substitution cannot eat a bare unit standing on its own, such as the
+# "(Đơn vị: tỷ VNĐ)" caption above the table.
+_SCALED_IN_CELL = re.compile(r"(?<=\d)\s*(?:tỷ|triệu|nghìn\s+tỷ|ngàn\s+tỷ)\s*VN[ĐD]\b",
+                             re.IGNORECASE)
 
 
 def format_vn_number(value: float, decimals: int = 2) -> str:
@@ -73,6 +80,10 @@ def convert_amounts_in_text(text: str, decimals: int = 2) -> str:
     contiguous identifier digits (tax codes, registration numbers). Absorbs a
     trailing "VNĐ"/"đồng" so the result is not double-labelled. Writes the unit
     after figures in prose and leaves it off inside table cells — see _TABLE_ROW.
+
+    A table cell is also stripped of a unit the MODEL wrote, not just one this
+    function would have added. The rule is about the finished table, and until
+    now it only governed the half of the figures that arrived as raw đồng.
     """
     if not text:
         return text
@@ -81,10 +92,12 @@ def convert_amounts_in_text(text: str, decimals: int = 2) -> str:
     # _AMOUNT_TOKEN matches only digits and separators, so no match can span a
     # newline; split and join on the same character, so a trailing newline
     # survives.
-    return "\n".join(
-        _convert_line(line, decimals, suffix=not _TABLE_ROW.match(line))
-        for line in text.split("\n")
-    )
+    def one(line: str) -> str:
+        in_table = bool(_TABLE_ROW.match(line))
+        converted = _convert_line(line, decimals, suffix=not in_table)
+        return _SCALED_IN_CELL.sub("", converted) if in_table else converted
+
+    return "\n".join(one(line) for line in text.split("\n"))
 
 
 def _convert_line(text: str, decimals: int, suffix: bool) -> str:

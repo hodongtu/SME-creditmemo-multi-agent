@@ -77,7 +77,7 @@ def resolve_customer_key(documents: list[Any]) -> CustomerKey:
     candidates = _candidates(documents)
     if not candidates:
         return CustomerKey("", "", "", "", (
-            "Không tài liệu nào nêu mã số thuế, nên không truy vấn dữ liệu tham chiếu.",
+            "No document states a tax code, so no reference data was queried.",
         ))
 
     rank, code, name, filename, field = candidates[0]
@@ -99,7 +99,7 @@ def resolve_customer_key(documents: list[Any]) -> CustomerKey:
 
     if not _TAX_CODE.match(code):
         return CustomerKey("", name, filename, field, tuple(warnings) + (
-            f"Mã số thuế đọc được từ {filename} là {code!r} ({len(code)} chữ số) — "
-            f"không phải 10 hoặc 13 chữ số, nên KHÔNG truy vấn.",
+            f"The tax code read from {filename} is {code!r} ({len(code)} digits) "
+            f"— not 10 or 13, so NO query was made.",
         ))
     return CustomerKey(code, name, filename, field, tuple(warnings))

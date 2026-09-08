@@ -574,6 +574,8 @@ arithmetic:
 
 | Guard | What it catches |
 |---|---|
+| Table units | A `tỷ VNĐ` suffix inside a table cell, whether this pipeline added it or the model wrote it. The table states its unit in the caption above; one report repeated it in 56 rows because the rule only governed figures the converter itself had scaled |
+| Column alignment | Every row exactly as wide as `item_columns`. A short row shifts every value after the gap into the next column, and the JSON stays valid while the figures stop meaning anything |
 | Truncated output | `item_count` against `len(items)`. Two failures leave this one mark and it cannot separate them: a reply cut at the token ceiling, or a model that wrote fewer rows than it counted — measured at `finish_reason: stop`, 24,638 of 32,000 tokens, with two accounts still declaring 60 and 50 rows while emitting 45. The note lists both causes rather than asserting one. `JsonOutputParser` repairs a reply cut off at the token ceiling instead of raising, so the record arrives looking complete — one live run returned 2 accounts out of 15 sheets. `LLM_MAX_TOKENS` sets the ceiling explicitly; left unset the gateway picks its own |
 | Sheet count | Input sheets vs accounts returned; a shortfall is written into `extraction_notes`, because the model drops whole sheets in silence |
 | Total-row removal | A printed `Tổng` row left among `items`, which would have every figure of that account counted twice |

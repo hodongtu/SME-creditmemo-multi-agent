@@ -157,7 +157,7 @@ class SpecialistAgent:
         LANGUAGE RULE:
         - Always write the whole report in Vietnamese, regardless of the language
         of the user's request. The report template, the required wordings
-        ("Không có dữ liệu trong hồ sơ") and the downstream checks are all
+        ("Không có dữ liệu") and the downstream checks are all
         Vietnamese, so an English answer would break them.
         - If the user writes in another language, still answer in Vietnamese; you
         may restate their question in Vietnamese first.
@@ -169,8 +169,13 @@ class SpecialistAgent:
 
         MONETARY UNIT RULE:
         - Present every monetary value in tỷ VNĐ, rounded to 2 decimal places,
-        with a comma as the decimal separator and a full stop for thousands
-        (example: 3.991.124.661.120 VNĐ → 3.991,12 tỷ VNĐ). Never write raw đồng.
+        with a comma as the decimal separator and a full stop for thousands.
+        Never write raw đồng.
+        - IN A TABLE the cell carries the bare figure: 3.991,12 — no unit. The
+        table already states its unit in the "(Đơn vị: tỷ VNĐ)" line above it,
+        and repeating it down eighty cells is noise.
+        - IN A SENTENCE the figure keeps its unit: "doanh thu đạt 3.991,12 tỷ
+        VNĐ". There is no caption there to carry it.
 
         NUMBER FORMAT RULE (applies to EVERY table and EVERY sentence of the report):
         - Round percentages to 1 decimal place: 35,2%.
@@ -204,7 +209,7 @@ class SpecialistAgent:
         [PRE-COMPUTED FINANCIAL METRICS] block, or a tool result). Never use
         knowledge from outside the dossier.
         - Where a figure or a piece of information is NOT in the dossier, write
-        exactly the string "Không có dữ liệu trong hồ sơ". Do not estimate, do not
+        exactly the string "Không có dữ liệu". Do not estimate, do not
         guess, do not put in 0 or "-" to fill the gap. (The "-" in a table is only
         for a figure that was read and equals zero — see NUMBER FORMAT RULE. A
         cell with no data stays empty.)
@@ -236,7 +241,7 @@ class SpecialistAgent:
         - Exception: where a section has EXACTLY ONE short thing to say (reporting
         missing data, for instance), write it as a plain sentence, do NOT make it
         a lone bullet:
-        Không có dữ liệu trong hồ sơ.
+        Không có dữ liệu.
         - One bullet may carry both a fact read from the dossier and your own
         inference, written one after the other where they belong to the same
         point. The reader must still be able to tell them apart, and does so BY
@@ -251,7 +256,7 @@ class SpecialistAgent:
         there is not enough basis to infer, still write the bullet with the fact
         you read and say plainly "Chưa đủ cơ sở để đánh giá".
         - Where there is no fact at all for a section, write exactly one sentence:
-        Không có dữ liệu trong hồ sơ.
+        Không có dữ liệu.
 
         RIGHT example (no label line, and a blank line before the first bullet; if
         your section is under CITATION RULE below, attach [^N] to the facts as in
@@ -351,8 +356,8 @@ class SpecialistAgent:
 
         return (
             f"# {self.name}\n\n"
-            "LLM chưa được cấu hình, nên notebook chỉ hiển thị bản "
-            "tóm tắt evidence preview.\n\n"
+            "No analysis LLM is configured, so this is an evidence preview "
+            "rather than a report.\n\n"
             "```text\n"
             f"{truncate_text(user_input, 3_000)}\n"
             "```"
@@ -483,21 +488,21 @@ SPECIALIST_BY_AGENT: dict[str, type[SpecialistAgent]] = {
 # run, so it is checked when the module loads rather than when a query fires.
 if len(SPECIALIST_BY_AGENT) != 4:
     raise ValueError(
-        f"SPECIALIST_BY_AGENT có {len(SPECIALIST_BY_AGENT)} mục cho 4 lớp — "
-        f"hai lớp khai trùng agent_id"
+        f"SPECIALIST_BY_AGENT holds {len(SPECIALIST_BY_AGENT)} entries for 4 "
+        f"classes — two classes declare the same agent_id"
     )
 for _agent_id, _cls in SPECIALIST_BY_AGENT.items():
     for _query_tool in _cls.query_tools:
         _extras = getattr(_query_tool, "extras", None) or {}
         if not _extras.get("heading"):
             raise ValueError(
-                f"{_agent_id} / {_query_tool.name!r}: thiếu extras['heading']"
+                f"{_agent_id} / {_query_tool.name!r}: extras['heading'] is missing"
             )
         for _type_id in _extras.get("superseded_by", ()):
             if get_type(_type_id) is None:
                 raise ValueError(
                     f"{_agent_id} / {_query_tool.name!r}: superseded_by "
-                    f"{_type_id!r} không phải document_type trong ma trận"
+                    f"{_type_id!r} is not a document_type in the matrix"
                 )
         # Every argument must be injected. A tool that leaves one visible is one
         # a model could fill in — and the argument in question decides whose
@@ -505,6 +510,6 @@ for _agent_id, _cls in SPECIALIST_BY_AGENT.items():
         _visible = list(_query_tool.tool_call_schema.model_fields)
         if _visible:
             raise ValueError(
-                f"{_agent_id} / {_query_tool.name!r}: tham số {_visible} không "
-                f"phải InjectedToolArg — model nhìn thấy và điền được"
+                f"{_agent_id} / {_query_tool.name!r}: argument {_visible} is not "
+                f"an InjectedToolArg — a model can see it and fill it in"
             )

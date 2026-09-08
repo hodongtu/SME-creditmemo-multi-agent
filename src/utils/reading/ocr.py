@@ -489,9 +489,9 @@ def _ocr_page(
         if angle:
             working = _apply_rotation(working, angle)
             print(
-                f"[ocr_pdf] WARNING: trang {page_number} bị xoay {angle}°, "
-                "đã tự động chỉnh — kiểm tra file gốc nếu kết quả OCR vẫn "
-                "bất thường."
+                f"[ocr_pdf] WARNING: page {page_number} was rotated {angle}° "
+                "and has been straightened — check the original if the OCR "
+                "still looks wrong."
             )
     # Ahead of the opt-in ``preprocess`` bundle and unconditional on it: this
     # targets table rules, not scan noise, so it runs on the untouched render

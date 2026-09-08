@@ -223,6 +223,27 @@ The pass reads the workbook itself through `read_sheets`, which is the same read
 the text form back apart with a regex would break the moment a sheet name contains a dash
 or the header line gains a field, which it did.
 
+Sheet names are decoded from their abbreviations — `P.TRA KHAC` is phải trả khác and lands
+on 338, `NXT` is nhập xuất tồn — and `unknown` is reserved for a sheet whose *subject* is
+unreadable, never for one whose columns are laid out unusually. Inventory is the one
+category that splits by what is being counted: vehicles held for resale give 156, raw
+materials 152, tools 153, finished goods 155.
+
+Two traps around the printed total row cost a whole run each. It is often printed **above**
+the details rather than below, and a detail row can carry the **same figure** as the total
+when one counterparty holds nearly the whole balance — so the total row is identified by its
+label and never by its amount. Dropping that row silently loses the largest position in the
+account.
+
+Detail rows are **positional arrays** under a per-account `item_columns`, not objects
+repeating their field names on every row. Names cost 56% of what `items` weighs and `items`
+is 64% of the record, so the shape change pays twice: the model writes 41% fewer tokens, and
+the rendered block drops 55% — which matters more than the saving, because that block is
+capped at 40,000 characters and a 342-row dossier used to reach the agent with only 102 of
+its rows. It now arrives whole, and the ceiling holds 384 rows instead of 114. `totals` is
+summed by the program rather than returned; `item_count` stays, at 0.7% of the record,
+because comparing it to `len(items)` is the only thing that notices a truncated answer.
+
 That last part is a deliberate trade. `.xls` and `.csv` ledgers work now, where the previous
 `openpyxl` reader could not open them at all — but no figure is guaranteed exact any more.
 Measured on the sample workbook (338 comparable figures): `gpt-5.4-mini` got every figure right

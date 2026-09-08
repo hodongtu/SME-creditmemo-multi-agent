@@ -502,24 +502,45 @@ def _build_ledger_structured_block(
         '"closing_debit"/"closing_credit" là dư cuối kỳ; hàng tồn kho dùng '
         '"opening_/inflow_/outflow_/closing_" kèm "_quantity" hoặc "_value". '
         '"source_columns" cho biết mỗi trường ứng với cột nào trong file gốc.',
-        '"items" là toàn bộ dòng chi tiết. Sổ công nợ có HAI trường riêng cho '
-        'đối tác: "counterparty_code" là mã, "counterparty_name" là tên — trích '
-        'dẫn theo TÊN, chỉ dùng mã khi không có tên. Sổ nhập xuất tồn dùng '
-        '"item_name". Cột nào trong file có giá trị 0 thì ghi 0 chứ không lược '
-        f'đi. Nếu có dòng tên "{ledger_extraction.RESIDUAL_LABEL} (N)" thì đó là '
-        'tổng gộp của N dòng nhỏ không liệt kê riêng, nên tổng các dòng luôn '
-        'khớp "totals" — đừng cộng "items" rồi gọi đó là tổng khi đã có "totals".',
+        '"items" là toàn bộ dòng chi tiết, mỗi dòng là một MẢNG giá trị theo '
+        'ĐÚNG thứ tự khai ở "item_columns" của chính tài khoản đó. Đọc giá trị '
+        'thứ i của dòng ứng với tên cột thứ i — hai tài khoản có thể khai thứ '
+        'tự cột khác nhau, nên phải đọc "item_columns" của tài khoản đang xem, '
+        'không dùng lại thứ tự của tài khoản trước.',
+        'Sổ công nợ có HAI cột riêng cho đối tác: "counterparty_code" là mã, '
+        '"counterparty_name" là tên — trích dẫn theo TÊN, chỉ dùng mã khi không '
+        'có tên. Sổ nhập xuất tồn dùng "item_name". '
+        f'Nếu có dòng mang tên "{ledger_extraction.RESIDUAL_LABEL} (N)" thì đó '
+        'là tổng gộp của N dòng nhỏ không liệt kê riêng, nên cộng toàn bộ "items" '
+        'vẫn ra đúng tổng của tài khoản.',
+        '"totals" là tổng từng cột do chương trình cộng lại từ "items", không '
+        'phải con số mô hình tự khai.',
         '"code_source": "printed" nghĩa là số hiệu tài khoản in trong file; '
         '"convention" nghĩa là file không in số hiệu và chương trình xếp theo '
         'quy ước hệ thống tài khoản. Đừng trích dẫn số hiệu "convention" như '
         'thể khách hàng đã ghi nó.',
     ]
     for record in records:
+        # Totals are added up here rather than carried in the record: the model
+        # used to return them, and they cost 6.3% to state what the rows already
+        # state.
+        #
+        # Added BEFORE the trim, not after, so fit_to_budget measures the shape
+        # that actually gets printed — adding them afterwards put the block 423
+        # characters over a budget it had just been told it met. Safe to compute
+        # on the untrimmed record because the aggregate row carries the sums of
+        # the rows it replaces, so the column totals come out the same either way.
+        with_totals = {
+            **record,
+            "accounts": {
+                key: {**account,
+                      "totals": ledger_extraction.account_totals(account)}
+                for key, account in (record.get("accounts") or {}).items()
+            },
+        }
         parts.append(
-            json.dumps(
-                ledger_extraction.fit_to_budget(record),
-                ensure_ascii=False,
-                indent=2,
+            ledger_extraction.render_record(
+                ledger_extraction.fit_to_budget(with_totals)
             )
         )
     return "\n\n".join(parts)

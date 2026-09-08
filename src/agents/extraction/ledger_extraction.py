@@ -51,10 +51,17 @@ LEDGER_BLOCK_CHAR_BUDGET = 40_000
 # Label of the row standing in for everything the budget left out. It carries
 # the summed figures of those rows, so visible rows still add up to the total.
 RESIDUAL_LABEL = "Các đối tác còn lại"
-# The keys a detail row carries text in. Everything else in a row is a figure,
-# so these are what naming, labelling and total-row detection look at — three
-# places that all used to read a single "name" key.
+# The columns a detail row carries text in. A row is a positional array now, so
+# these are looked up through "item_columns" rather than read off the row —
+# naming, aggregating and total-row detection all need to know which cells hold
+# words and which hold money.
 LABEL_KEYS = ("counterparty_name", "counterparty_code", "item_name")
+
+
+def _label_positions(columns: list[str]) -> list[int]:
+    """Indexes of the text columns, in the order they appear."""
+
+    return [i for i, c in enumerate(columns) if c in LABEL_KEYS]
 # Names a printed total row carries. Kept as a set because the prompt already
 # tells the model to leave these out of "items" and it does it anyway — on the
 # sample workbook the inventory sheet came back with an eleventh row called
@@ -111,11 +118,29 @@ dossier holds only one.
 WHERE THE ACCOUNT NUMBER COMES FROM
 
 THE FILE NAME AND THE SHEET NAME ARE STRONG SIGNALS, often the strongest ones.
-Customers export one account per file or per sheet and leave the report title
-half-cut: a sheet called "PTHU_KHAC" is phải thu khác, "TK VAY" is a borrowings
-ledger, "NXT" is nhập xuất tồn. Read those names before deciding you cannot tell.
-"unknown" is for a sheet whose subject you genuinely cannot make out — not for
-one whose title is truncated while its name says plainly what it holds.
+Customers export one account per file or per sheet, and the printed title is
+usually generic — "BÁO CÁO CÂN ĐỐI PHÁT SINH CÔNG NỢ CỦA MỘT TÀI KHOẢN" names no
+account at all. Read the sheet name before deciding you cannot tell.
+
+Vietnamese accounting software abbreviates heavily. Decode these:
+
+  P.THU  PTHU  PT      phải thu       -> receivable
+  P.TRA  PTRA  PTr     phải trả       -> payable
+  KHAC   #KHAC          khác          -> the other_* category of the same side,
+                                         so "P.TRA KHAC" is other_payable (338)
+                                         and "PTHU_KHAC" is other_receivable (138)
+  NXT    N-X-T          nhập xuất tồn -> inventory
+  TK <n>                tài khoản <n> -> use that number
+  CN     CNo            công nợ
+  VAY                   vay           -> borrowing
+  KH                    khách hàng    TM  thương mại    NVL  nguyên vật liệu
+
+"unknown" IS ONLY FOR A SHEET WHOSE SUBJECT YOU CANNOT MAKE OUT. Never return
+"unknown" because column headings do not match the canonical names, because the
+table is laid out unusually, or because a title is generic — a sheet headed
+"BÁO CÁO TỔNG HỢP NHẬP XUẤT TỒN" is an inventory sheet whatever its columns look
+like. Headings you cannot place go in "unmapped_columns"; that is what the key
+is for.
 
 1. If the file or sheet PRINTS a number ("SO CHI TIET TK 131.xlsx", a title
    "Tài khoản 331", a column "TK 156"), use exactly that, code_source="printed".
@@ -124,10 +149,24 @@ one whose title is truncated while its name says plainly what it holds.
    same family:
 
      cash              -> 112        receivable        -> 131
-     other_receivable  -> 138        inventory         -> 156
-     fixed_asset       -> 211        payable           -> 331
-     other_payable     -> 338        borrowing         -> 341
-     equity            -> 411
+     other_receivable  -> 138        fixed_asset       -> 211
+     payable           -> 331        other_payable     -> 338
+     borrowing         -> 341        equity            -> 411
+
+   INVENTORY IS THE ONE THAT SPLITS. Group 15x has a code per kind of stock, so
+   read the item column — what is actually being counted — and pick from it:
+
+     goods bought to resell (vehicles, equipment, merchandise)  -> 156
+     raw materials and supplies consumed in production          -> 152
+     tools and instruments (công cụ, dụng cụ)                    -> 153
+     finished goods the company manufactured                     -> 155
+     work in progress (chi phí SXKD dở dang)                     -> 154
+     goods sent out on consignment (hàng gửi đi bán)             -> 157
+
+   A sheet whose item column reads "Mooc, Đầu kéo, Satxi, Tải thùng kín" is
+   vehicles held for resale, so 156. One reading "Thép tấm, Sơn, Vòng bi" is raw
+   material, so 152. When a sheet mixes kinds, take the one holding most of the
+   value and say so in "code_evidence".
 
    Getting this wrong is severe: a borrowings ledger filed as 311 instead of 341,
    or other payables as 331 instead of 338, puts one account's figures under
@@ -155,10 +194,12 @@ or by product group.
 "source_columns" {{canonical_field: "column heading exactly as printed"}}. Record
                  EVERY column you placed, identifier columns included.
 "units"          {{field: "vnd" or "quantity"}}. Only for fields that actually
-                 appear in "items".
-"totals"         {{field: number}} — the account total. Include fields worth 0.
+                 appear in "item_columns".
 "item_count"     exactly len(items).
-"items"          every detail row — see below.
+"item_columns"   the field names of a detail row, in the order the values come.
+"items"          every detail row, as an ARRAY per row — see below.
+
+Do NOT return a "totals" key. The program adds the columns up itself.
 
 ════ "period" ════
 "from"/"to"    ISO "YYYY-MM-DD", read from the banner line above the table.
@@ -174,34 +215,53 @@ If no line states a period, leave all three "" — do NOT infer one from a file
 name that merely contains a year.
 
 ════ "items" — THE EASIEST PART TO GET WRONG ════
+Name the columns ONCE per account in "item_columns", then give each detail row
+as an ARRAY of values in that exact order. Never repeat the field names on a row.
+
 Debt sheets (receivables, payables, borrowings) — the CODE and the NAME are
-SEPARATE FIELDS. A live run put "HSCANTHO" where the counterparty name belonged
-and the row became unreadable:
+SEPARATE COLUMNS. A live run put "HSCANTHO" where the counterparty name belonged
+and the row became unreadable as either:
 
-{{"counterparty_code": "HSCANTHO", "counterparty_name": "Cty Hoa Sen Cần Thơ",
-  "opening_debit": 0, "opening_credit": 0, "debit_movement": 20738000,
-  "credit_movement": 20738000, "closing_debit": 0}}
+"item_columns": ["counterparty_code","counterparty_name","opening_debit",
+                 "opening_credit","debit_movement","credit_movement","closing_debit"],
+"items": [["HSCANTHO","Cty Hoa Sen Cần Thơ",0,0,20738000,20738000,0],
+          ["PHUTHINH","Cty Phú Thịnh",500000000,0,4825000000,4325000000,0]]
 
-Stock sheets (nhập xuất tồn):
+Stock sheets (nhập xuất tồn) use their own column set:
 
-{{"item_name": "Đầu kéo", "opening_quantity": 191, "opening_value": 205670531917,
-  "inflow_quantity": 1381, "inflow_value": 1590661714792}}
+"item_columns": ["item_name","opening_quantity","opening_value",
+                 "inflow_quantity","inflow_value"],
+"items": [["Đầu kéo",191,205670531917,1381,1590661714792]]
 
-If the file has no code column, leave "counterparty_code": "" — keep the key.
-Never put a code in "counterparty_name" or a name in "counterparty_code".
+EVERY ROW MUST HAVE EXACTLY len(item_columns) VALUES. A short row shifts every
+value after the gap into the wrong column, and the JSON stays valid while the
+figures stop meaning anything. If a column has no value for a row, write "" for
+a text column and 0 for a number — never leave it out.
+
+If the file has no code column, put "" in the counterparty_code position and
+keep the column. Never put a code in the name position or a name in the code
+position.
 
 Numbers are WHOLE ĐỒNG: no separators, no unit, no brackets.
     right: 225510140846
     wrong: "225.510.140.846"   225,51 tỷ   (225510140846)
-Negatives take a minus sign. An empty cell or a dash is 0. Never drop a field
-because its value is 0.
+Negatives take a minus sign. An empty cell or a dash is 0.
 
 A PRINTED TOTAL ROW ("Tổng", "Tổng cộng", "Cộng", "Total") IS NOT A DETAIL ROW:
-put it in "totals" and never in "items". Letting one into "items" counts every
-figure of that account twice.
+leave it out entirely. The program sums the columns itself, so a total row left
+among the details counts every figure of that account twice.
 
-"totals" comes from the printed total row when there is one; otherwise sum the
-detail rows yourself.
+A TOTAL ROW IS IDENTIFIED BY ITS LABEL, NEVER BY ITS FIGURES. Two traps:
+
+* It is often printed ABOVE the detail rows, directly under the headings — do
+  not assume it sits at the bottom.
+* A detail row may carry the SAME amount as the total. When one counterparty
+  holds nearly the whole balance, its row and the total row read alike; the one
+  with a counterparty name is a detail row and MUST be kept. Dropping it loses
+  the largest position in the account.
+
+Every row that names a counterparty or an item is a detail row. Count them: your
+"item_count" must equal the number of named rows in the sheet, not fewer.
 
 ════ CANONICAL FIELD NAMES — TWO SETS, NEVER MIXED ════
 Debt (receivable, payable, borrowing):
@@ -216,141 +276,96 @@ Stock:
 A row counter ("Stt", "TT") is NOT a field: drop it, and do not list it in
 "unmapped_columns" either. Never map two headings to the same field.
 
+HEADINGS OFTEN SPAN TWO ROWS. A stock sheet prints the group on one line and the
+measure underneath it:
+
+    Loại xe | Dư đầu   | Dư đầu   | Nhập vào | Nhập vào | ...
+    Loại xe | Số lượng | Giá trị  | Số lượng | Giá trị  | ...
+
+Join them top-to-bottom before mapping: "Dư đầu" + "Số lượng" -> opening_quantity,
+"Nhập vào" + "Giá trị" -> inflow_value. Record the joined text in
+"source_columns" ("Dư đầu - Số lượng"). Two header rows are a normal layout, not
+a reason to give up on the sheet.
+
 ════ WORKED EXAMPLE (one debt entry, one stock entry) ════
 {{
- "accounts": {{
-  "131@20250101-20251231": {{
-   "category": "receivable",
-   "code_source": "convention",
-   "code_evidence": "Sheet TK_131, tieu de Bao cao chi tiet cong no phai thu; file khong in so hieu.",
-   "source_files": [
-    "VIMID_so_chi_tiet.xlsx"
-   ],
-   "period": {{
-    "from": "2025-01-01",
-    "to": "2025-12-31",
-    "as_printed": "Từ ngày 01/01/2025 đến ngày 31/12/2025"
-   }},
-   "source_columns": {{
-    "counterparty_code": "Mã khách hàng",
-    "counterparty_name": "Tên khách hàng",
-    "opening_debit": "Dư nợ đầu kỳ",
-    "opening_credit": "Dư có đầu kỳ",
-    "debit_movement": "Phát sinh nợ",
-    "credit_movement": "Phát sinh có",
-    "closing_debit": "Dư nợ cuối kỳ",
-    "closing_credit": "Dư có cuối kỳ",
-    "booking_unit": "Tên đơn vị"
-   }},
-   "units": {{
-    "closing_debit": "vnd",
-    "credit_movement": "vnd",
-    "debit_movement": "vnd",
-    "opening_credit": "vnd",
-    "opening_debit": "vnd"
-   }},
-   "totals": {{
-    "opening_debit": 225510140846,
-    "opening_credit": 10000000,
-    "debit_movement": 527543796658,
-    "credit_movement": 528855090000,
-    "closing_debit": 224188847504,
-    "closing_credit": 0
-   }},
-   "item_count": 2,
-   "items": [
-    {{
-     "counterparty_code": "",
-     "counterparty_name": "NGUYỄN XUÂN VĨ",
-     "opening_debit": 0,
-     "opening_credit": 0,
-     "debit_movement": 20738000,
-     "credit_movement": 20738000,
-     "closing_debit": 0
+  "accounts": {{
+    "131@20250101-20251231": {{
+      "category": "receivable",
+      "code_source": "convention",
+      "code_evidence": "Sheet TK_131, tieu de Bao cao chi tiet cong no phai thu; file khong in so hieu.",
+      "source_files": ["VIMID_so_chi_tiet.xlsx"],
+      "period": {{
+        "from": "2025-01-01",
+        "to": "2025-12-31",
+        "as_printed": "Từ ngày 01/01/2025 đến ngày 31/12/2025"
+      }},
+      "source_columns": {{
+        "counterparty_code": "Mã khách hàng",
+        "counterparty_name": "Tên khách hàng",
+        "opening_debit": "Dư nợ đầu kỳ",
+        "opening_credit": "Dư có đầu kỳ",
+        "debit_movement": "Phát sinh nợ",
+        "credit_movement": "Phát sinh có",
+        "closing_debit": "Dư nợ cuối kỳ",
+        "closing_credit": "Dư có cuối kỳ",
+        "booking_unit": "Tên đơn vị"
+      }},
+      "units": {{
+        "closing_debit": "vnd",
+        "credit_movement": "vnd",
+        "debit_movement": "vnd",
+        "opening_credit": "vnd",
+        "opening_debit": "vnd"
+      }},
+      "item_count": 2,
+      "item_columns": ["counterparty_code","counterparty_name","opening_debit","opening_credit","debit_movement","credit_movement","closing_debit"],
+      "items": [
+        ["","NGUYỄN XUÂN VĨ",0,0,20738000,20738000,0],
+        ["","ĐỒNG VĂN NGỌC",0,10000000,1391300000,1381300000,0]
+      ]
     }},
-    {{
-     "counterparty_code": "",
-     "counterparty_name": "ĐỒNG VĂN NGỌC",
-     "opening_debit": 0,
-     "opening_credit": 10000000,
-     "debit_movement": 1391300000,
-     "credit_movement": 1381300000,
-     "closing_debit": 0
+    "156@20250101-20251231": {{
+      "category": "inventory",
+      "code_source": "convention",
+      "code_evidence": "Sheet NXT, tieu de Bao cao tong hop nhap xuat ton; file khong in so hieu.",
+      "source_files": ["VIMID_so_chi_tiet.xlsx"],
+      "period": {{
+        "from": "2025-01-01",
+        "to": "2025-12-31",
+        "as_printed": "Từ ngày 01/01/2025 đến ngày 31/12/2025"
+      }},
+      "source_columns": {{
+        "item_name": "Loại xe",
+        "opening_quantity": "Dư đầu - Số lượng",
+        "opening_value": "Dư đầu - Giá trị",
+        "inflow_quantity": "Nhập vào - Số lượng",
+        "inflow_value": "Nhập vào - Giá trị",
+        "outflow_quantity": "Xuất ra - Số lượng",
+        "outflow_value": "Xuất ra - Giá trị",
+        "closing_quantity": "Dư cuối - Số lượng",
+        "closing_value": "Dư cuối - Giá trị"
+      }},
+      "units": {{
+        "closing_quantity": "quantity",
+        "closing_value": "vnd",
+        "inflow_quantity": "quantity",
+        "inflow_value": "vnd",
+        "opening_quantity": "quantity",
+        "opening_value": "vnd",
+        "outflow_quantity": "quantity",
+        "outflow_value": "vnd"
+      }},
+      "item_count": 2,
+      "item_columns": ["item_name","opening_quantity","opening_value","inflow_quantity","inflow_value","outflow_quantity","outflow_value","closing_quantity","closing_value"],
+      "items": [
+        ["Mooc",49,22017037516,113,48305699921,112,48335332899,50,21987404538],
+        ["Đầu kéo",191,205670531917,1381,1590661714792,1001,1156312267740,571,640019978969]
+      ]
     }}
-   ]
   }},
-  "156@20250101-20251231": {{
-   "category": "inventory",
-   "code_source": "convention",
-   "code_evidence": "Sheet NXT, tieu de Bao cao tong hop nhap xuat ton; file khong in so hieu.",
-   "source_files": [
-    "VIMID_so_chi_tiet.xlsx"
-   ],
-   "period": {{
-    "from": "2025-01-01",
-    "to": "2025-12-31",
-    "as_printed": "Từ ngày 01/01/2025 đến ngày 31/12/2025"
-   }},
-   "source_columns": {{
-    "item_name": "Loại xe",
-    "opening_quantity": "Dư đầu - Số lượng",
-    "opening_value": "Dư đầu - Giá trị",
-    "inflow_quantity": "Nhập vào - Số lượng",
-    "inflow_value": "Nhập vào - Giá trị",
-    "outflow_quantity": "Xuất ra - Số lượng",
-    "outflow_value": "Xuất ra - Giá trị",
-    "closing_quantity": "Dư cuối - Số lượng",
-    "closing_value": "Dư cuối - Giá trị"
-   }},
-   "units": {{
-    "closing_quantity": "quantity",
-    "closing_value": "vnd",
-    "inflow_quantity": "quantity",
-    "inflow_value": "vnd",
-    "opening_quantity": "quantity",
-    "opening_value": "vnd",
-    "outflow_quantity": "quantity",
-    "outflow_value": "vnd"
-   }},
-   "totals": {{
-    "opening_quantity": 705,
-    "opening_value": 775511777881,
-    "inflow_quantity": 3059,
-    "inflow_value": 3577157767500,
-    "outflow_quantity": 2206,
-    "outflow_value": 2564487338322,
-    "closing_quantity": 1558,
-    "closing_value": 1788182207060
-   }},
-   "item_count": 2,
-   "items": [
-    {{
-     "item_name": "Mooc",
-     "opening_quantity": 49,
-     "opening_value": 22017037516,
-     "inflow_quantity": 113,
-     "inflow_value": 48305699921,
-     "outflow_quantity": 112,
-     "outflow_value": 48335332899,
-     "closing_quantity": 50,
-     "closing_value": 21987404538
-    }},
-    {{
-     "item_name": "Đầu kéo",
-     "opening_quantity": 191,
-     "opening_value": 205670531917,
-     "inflow_quantity": 1381,
-     "inflow_value": 1590661714792,
-     "outflow_quantity": 1001,
-     "outflow_value": 1156312267740,
-     "closing_quantity": 571,
-     "closing_value": 640019978969
-    }}
-   ]
-  }}
- }},
- "unmapped_columns": [],
- "extraction_notes": []
+  "unmapped_columns": [],
+  "extraction_notes": []
 }}
 
 Return EXACTLY this schema and nothing else.
@@ -359,36 +374,103 @@ Return EXACTLY this schema and nothing else.
 
 # ── Fitting the record to the prompt's character budget ───────────────────
 
-def _magnitude(row: dict[str, Any]) -> float:
+def render_record(record: dict[str, Any], indent: int = 2) -> str:
+    """The record as the agent sees it: framed by indent, one detail row per line.
+
+    ``json.dumps(indent=2)`` breaks EVERY array element onto its own line, which
+    turns a seven-value row into seven lines and undoes most of what the
+    columnar shape saves — 37% off instead of 56%, measured. So rows are dumped
+    compactly and the frame around them keeps its indentation.
+
+    Assembled from ``json.dumps`` piece by piece rather than by rewriting a
+    dumped string: a regex over JSON breaks the moment a value contains a
+    bracket, and Vietnamese counterparty names do.
+
+    ``fit_to_budget`` measures with this same function. Two renderers would
+    budget against one shape and print another — trimming rows that would have
+    fit, or overflowing without noticing.
+    """
+
+    def encode(value: Any, depth: int) -> str:
+        pad = " " * (indent * depth)
+        inner = pad + " " * indent
+        if isinstance(value, list) and value and all(isinstance(v, list) for v in value):
+            rows = ",\n".join(
+                inner + json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+                for row in value
+            )
+            return f"[\n{rows}\n{pad}]"
+        if isinstance(value, dict):
+            body = ",\n".join(
+                f"{inner}{json.dumps(key, ensure_ascii=False)}: {encode(item, depth + 1)}"
+                for key, item in value.items()
+            )
+            return f"{{\n{body}\n{pad}}}" if value else "{}"
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+    return encode(record, 0)
+
+
+def account_totals(account: dict[str, Any]) -> dict[str, Any]:
+    """Column sums for one account, added up rather than asked for.
+
+    The model used to return these. It cost 6.3% of the record to carry figures
+    that are the sum of the rows underneath them — verified equal on all 38
+    fields of a real record before the field was dropped.
+
+    What that lost: a printed total row is a witness independent of the detail
+    rows, so when the model drops rows the two disagree and the gap shows. That
+    job now belongs to ``item_count``, one number instead of six.
+    """
+
+    columns = account.get("item_columns") or []
+    rows = account.get("items") or []
+    totals: dict[str, float] = {}
+    for index, column in enumerate(columns):
+        values = [
+            row[index] for row in rows
+            if index < len(row)
+            and isinstance(row[index], (int, float))
+            and not isinstance(row[index], bool)
+        ]
+        if values:
+            totals[column] = round(sum(values), 2)
+    return totals
+
+
+def _magnitude(row: list[Any], label_at: set[int]) -> float:
     """How big this row is, across every column rather than one of them."""
 
     return max(
-        (abs(v) for k, v in row.items()
-         if k not in LABEL_KEYS
+        (abs(v) for i, v in enumerate(row)
+         if i not in label_at
          and isinstance(v, (int, float)) and not isinstance(v, bool)),
         default=0.0,
     )
 
 
-def _aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """One row summing every field of the rows it stands in for."""
+def _aggregate(rows: list[list[Any]], columns: list[str]) -> list[Any]:
+    """One row summing every column of the rows it stands in for.
 
-    totals: dict[str, float] = {}
-    for row in rows:
-        for key, value in row.items():
-            if (key not in LABEL_KEYS
-                    and isinstance(value, (int, float))
-                    and not isinstance(value, bool)):
-                totals[key] = totals.get(key, 0) + value
-    # The label goes in whichever text key the rows themselves use, so the
-    # aggregate row reads like the rows it stands for rather than like a row
-    # from a different kind of sheet.
-    label_key = next(
-        (k for k in LABEL_KEYS if any(k in row for row in rows)),
-        "counterparty_name",
-    )
-    return {label_key: f"{RESIDUAL_LABEL} ({len(rows)})",
-            **{k: round(v) for k, v in totals.items()}}
+    Positional, so it must be exactly as wide as ``item_columns``: a short row
+    silently shifts every value after the gap into the wrong column, and the
+    JSON stays valid while the figures stop meaning anything.
+    """
+
+    label_at = _label_positions(columns)
+    out: list[Any] = []
+    for index in range(len(columns)):
+        if index in label_at:
+            out.append(f"{RESIDUAL_LABEL} ({len(rows)})" if index == label_at[-1] else "")
+            continue
+        total = sum(
+            row[index] for row in rows
+            if index < len(row)
+            and isinstance(row[index], (int, float))
+            and not isinstance(row[index], bool)
+        )
+        out.append(round(total))
+    return out
 
 
 def fit_to_budget(
@@ -413,13 +495,16 @@ def fit_to_budget(
             if len(rows) <= keep:
                 accounts[key] = account
                 continue
-            ordered = sorted(rows, key=_magnitude, reverse=True)
+            columns = account.get("item_columns") or []
+            label_at = set(_label_positions(columns))
+            ordered = sorted(rows, key=lambda r: _magnitude(r, label_at), reverse=True)
             accounts[key] = {**account,
-                             "items": ordered[:keep] + [_aggregate(ordered[keep:])]}
+                             "items": ordered[:keep]
+                             + [_aggregate(ordered[keep:], columns)]}
         return {**record, "accounts": accounts}
 
     def size(candidate: dict[str, Any]) -> int:
-        return len(json.dumps(candidate, ensure_ascii=False, indent=2))
+        return len(render_record(candidate))
 
     if size(record) <= budget:
         return record
@@ -449,6 +534,41 @@ def build_ledger_extraction_chain(llm: Any):
 # that cap, so it is re-applied here — otherwise a ledger pass would send more
 # than any other pass is allowed to.
 PAYLOAD_CHAR_BUDGET = 120_000
+
+
+def _without_row_counter(content: str) -> str:
+    """The sheet's TSV with any row-counter column removed.
+
+    Only a column whose every numeric value is a consecutive integer starting at
+    1 — an "Stt" or "TT" and nothing else. The prompt already tells the model to
+    ignore these, so dropping them changes no answer; it just stops paying to
+    send them. Worth about 9% of the payload on a wide ledger.
+
+    Deliberately strict rather than name-based: a heading match would have to
+    guess at every accounting package's wording, and dropping the wrong column
+    loses figures in silence. On the sample workbook this fires on the one sheet
+    that has such a column and leaves the other five untouched.
+    """
+
+    rows = [line.split("\t") for line in content.splitlines()]
+    if len(rows) < 6:
+        return content
+    width = max(len(r) for r in rows)
+    drop = set()
+    for column in range(width):
+        cells = [r[column].strip() if column < len(r) else "" for r in rows]
+        digits = [c for c in cells if c.replace(".", "").replace(",", "").isdigit()]
+        if len(digits) < 3 or len(digits) < len(cells) * 0.6:
+            continue
+        if [int(c.replace(".", "").replace(",", "")) for c in digits] == list(
+            range(1, len(digits) + 1)
+        ):
+            drop.add(column)
+    if not drop:
+        return content
+    return "\n".join(
+        "\t".join(v for i, v in enumerate(r) if i not in drop) for r in rows
+    )
 
 
 def read_ledger_sheets(
@@ -484,7 +604,7 @@ def read_ledger_sheets(
         sheets += [
             {"filename": filename,
              "sheet_name": sheet.sheet_name,
-             "content": sheet.content}
+             "content": _without_row_counter(sheet.content)}
             for sheet in found
         ]
     return sheets, notes
@@ -533,11 +653,12 @@ def _drop_total_rows(record: dict[str, Any]) -> None:
         if not isinstance(account, dict):
             continue
         rows = account.get("items") or []
+        label_at = _label_positions(account.get("item_columns") or [])
         kept = [
             row for row in rows
             if not any(
-                normalize_text(str(row.get(key, ""))) in TOTAL_ROW_NAMES
-                for key in LABEL_KEYS
+                i < len(row) and normalize_text(str(row[i])) in TOTAL_ROW_NAMES
+                for i in label_at
             )
         ]
         if len(kept) != len(rows):
