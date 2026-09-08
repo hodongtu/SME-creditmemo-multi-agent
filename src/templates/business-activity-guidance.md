@@ -12,6 +12,36 @@ description: >-
 - Mọi tỷ trọng phần trăm — trong bảng lẫn trên dây nối sơ đồ — làm tròn 1 chữ số
   thập phân, dấu phẩy thập phân: `35,2%`. Làm tròn xong mà phần thập phân là 0 thì
   bỏ hẳn: viết `8%`, không viết `8,0%`. Không viết `35,17%`.
+- MẪU SỐ CỦA MỌI CỘT "Tỷ trọng" (mục 2, 3, 4) VÀ MỌI SỐ TRÊN DÂY NỐI SƠ ĐỒ:
+  - Mẫu số nằm ở `totals` của khối [EXTRACTED DETAIL LEDGER], LẤY ĐÚNG CỘT ĐANG TÍNH
+  của ĐÚNG TÀI KHOẢN mà mục đó yêu cầu:
+
+  | Mục | Tử số của từng dòng | Khoá `totals` làm mẫu số | Tài khoản |
+  |---|---|---|---|
+  | 2 sản phẩm/dịch vụ | doanh số xuất trong kỳ | `outflow_value` | sổ kho (155/156/154…) |
+  | 3 Đầu ra | phát sinh nợ | `debit_movement` | 131 |
+  | 4 Đầu vào | phát sinh có | `credit_movement` | 331 |
+
+  - TỬ SỐ VÀ MẪU SỐ PHẢI CÙNG MỘT NGUỒN. Dòng đọc từ sổ chi tiết thì mẫu số cũng
+  phải từ sổ chi tiết. TUYỆT ĐỐI KHÔNG lấy một chỉ tiêu BCTC (doanh thu thuần, phải
+  thu khách hàng, phải trả người bán…) làm mẫu số cho các dòng đọc từ sổ: hai bên
+  khác phạm vi nên phép chia đó vô nghĩa dù hai số đều có thật.
+  - KHÔNG CỘNG "items" LẠI ĐỂ LÀM MẪU SỐ. "items" chỉ chứa các dòng lớn nhất, không
+  phải toàn bộ tài khoản. Chỉ `totals` mới là số của cả tài khoản.
+  - CỘT TỶ TRỌNG KHÔNG CẦN CỘNG THÀNH 100%, và thường sẽ nhỏ hơn vì chỉ liệt kê 5
+  đối tác lớn nhất. Đó là ĐÚNG. Không co giãn các con số cho tổng thành 100%, không
+  thêm dòng "Khác" để bù cho đủ.
+  - MỘT Ô TỶ TRỌNG VƯỢT 100% GẦN NHƯ LUÔN LÀ MẪU SỐ SAI: một đối tác không thể lớn
+  hơn cả tài khoản chứa nó. Gặp con số như vậy thì quay lại lấy đúng khoá `totals`,
+  đừng đăng nó. Chỉ một trường hợp >100% là thật: tài khoản có dòng giá trị ÂM làm
+  tổng nhỏ đi — khi đó phải nói rõ trong câu văn ngay dưới bảng là vì sao.
+  - THIẾU KHOÁ `totals` CẦN DÙNG thì ô tỷ trọng ĐỂ TRỐNG. Không mượn tổng của BCTC,
+  của tài khoản khác, hay của cột khác để lấp chỗ đó.
+  - HỒ SƠ KHÔNG CÓ TÀI KHOẢN MÀ MỤC YÊU CẦU thì ghi "Không có dữ liệu" và bỏ bảng.
+  KHÔNG thay bằng tài khoản khác cho có số — mục 4 hỏi sổ 331, điền sổ 338 hay sổ
+  341 vào đó thì cả bảng lẫn mẫu số đều sai theo.
+  - CÂU VĂN dùng lại đúng con số phần trăm đã ghi trong bảng, không tính lại bằng
+  mẫu số khác.
 - Ô bảng có giá trị đúng bằng không thì viết dấu gạch ngang `-`, không viết `0` hay
   `0,00%`. Ô THIẾU dữ liệu vẫn để trống — trống là hồ sơ không nêu, `-` là hồ sơ nêu
   và bằng không.
@@ -100,16 +130,16 @@ ra -> sản phẩm đầu ra.
   - Tên mặt hàng giữ NGẮN (dưới 5 từ). Sơ đồ 5 tầng đã sát khổ trang; nhãn dài làm
   khối phải bọc thêm dòng và đẩy cả sơ đồ cao lên.
  
-- Mục 2: Liệt kê NHIỀU NHẤT 5 sản phẩm/dịch vụ chính của khách hàng và tỷ trọng của các sản phẩm này trong 2 năm gần nhất.
+- Mục 2: Liệt kê NHIỀU NHẤT 5 sản phẩm/dịch vụ chính của khách hàng và tỷ trọng của các sản phẩm này trong 2 năm gần nhất. Tỷ trọng = doanh số xuất của mặt hàng chia cho `totals.outflow_value` của chính sổ kho, TỪNG KỲ một — cột năm nào chia cho tổng của năm đó, không mượn tổng của kỳ kia.
  
 - Mục 3: Liệt kê NHIỀU NHẤT 5 khách hàng đầu ra lớn nhất theo chi tiết phát sinh nợ của sổ chi tiết phải 
-thu khách hàng (sổ 131) năm gần nhất. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu ra này
+thu khách hàng (sổ 131) năm gần nhất. Cột "Tỷ trọng" = phát sinh nợ của dòng chia cho `totals.debit_movement` của chính sổ 131. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu ra này
 NẾU hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo khảo sát, CIC, báo cáo ngành).
 Không có thì ghi "Không có dữ liệu" — KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com
 hay GSO theo trí nhớ.
  
 - Mục 4: Liệt kê NHIỀU NHẤT 5 khách hàng đầu vào lớn nhất theo chi tiết phát sinh có của sổ chi tiết phải 
-trả người bán (sổ 331) năm gần nhất. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu vào này
+trả người bán (sổ 331) năm gần nhất. Cột "Tỷ trọng" = phát sinh có của dòng chia cho `totals.credit_movement` của chính sổ 331. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu vào này
 NẾU hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo khảo sát, CIC, báo cáo ngành).
 Không có thì ghi "Không có dữ liệu" — KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com
 hay GSO theo trí nhớ.

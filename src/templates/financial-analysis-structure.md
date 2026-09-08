@@ -4,13 +4,13 @@
  
 | Thông tin chung | &nbsp; |
 | --------------- | ------ |
-| *Tên khách hàng* | {{TenKhachHang}} |
-| *Nguồn dữ liệu* | {{TenFile}} |
-| *Loại hồ sơ tài chính* | {{LoaiHoSo}} |
-| *Kỳ/Năm phân tích* | {{CacKyBaoCao}} |
-| *Đơn vị kiểm toán* | {{DonViKiemToan}} |
-| *Ý kiến kiểm toán* | {{YKienKiemToan}} |
-| *Mức độ tin cậy* | {{MucDoTinCay}} |
+| **Tên khách hàng** | {{TenKhachHang}} |
+| **Nguồn dữ liệu** | {{TenFile}} |
+| **Loại hồ sơ tài chính** | {{LoaiHoSo}} |
+| **Kỳ/Năm phân tích** | {{CacKyBaoCao}} |
+| **Đơn vị kiểm toán** | {{DonViKiemToan}} |
+| **Ý kiến kiểm toán** | {{YKienKiemToan}} |
+| **Mức độ tin cậy** | {{MucDoTinCay}} |
  
 ## 1. Đánh giá kết quả kinh doanh
  
@@ -81,7 +81,7 @@
 | Đầu tư tài chính dài hạn | | | | | | | Vốn góp chủ sở hữu | | | | | | |
 | Tài sản dài hạn khác | | | | | | | Lợi nhuận sau thuế chưa phân phối | | | | | | |
 ||||||||Nguồn kinh phí và quỹ khác | | | | | | |
-| *Tổng tài sản* |  | 100% |  | 100% |  | 100% | *Tổng nguồn vốn* |  | 100% |  | 100% |  | 100% |
+| TỔNG TÀI SẢN |  | 100% |  | 100% |  | 100% | TỔNG NGUỒN VỐN |  | 100% |  | 100% |  | 100% |
  
 (Đơn vị: tỷ VNĐ — "% TTS" là tỷ lệ trên tổng tài sản, "% TNV" là tỷ lệ trên tổng nguồn vốn)
  
@@ -119,14 +119,14 @@
  
 ##### a. Người mua trả tiền trước
  
-| Khách hàng | Dư nợ đầu kỳ | Phát sinh nợ | Phát sinh có | Dư nợ cuối kỳ | Tỷ trọng | Dư nợ cuối kỳ/phát sinh nợ * 365 (ngày) |
+| Khách hàng | Dư có đầu kỳ | Phát sinh nợ | Phát sinh có | Dư có cuối kỳ | Tỷ trọng | Dư có cuối kỳ/phát sinh có * 365 (ngày) |
 |---|---:|---:|---:|---:|---:|---:|
  
 (Đơn vị: tỷ VNĐ)
  
 ##### b. Phải trả người bán
  
-| Nhà cung cấp | Dư nợ đầu kỳ | Phát sinh nợ | Phát sinh có | Dư nợ cuối kỳ | Tỷ trọng | Dư nợ cuối kỳ/phát sinh nợ * 365 (ngày) |
+| Nhà cung cấp | Dư có đầu kỳ | Phát sinh nợ | Phát sinh có | Dư có cuối kỳ | Tỷ trọng | Dư có cuối kỳ/phát sinh có * 365 (ngày) |
 |---|---:|---:|---:|---:|---:|---:|
  
 (Đơn vị: tỷ VNĐ)
