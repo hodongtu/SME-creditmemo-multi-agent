@@ -235,6 +235,11 @@ when one counterparty holds nearly the whole balance — so the total row is ide
 label and never by its amount. Dropping that row silently loses the largest position in the
 account.
 
+Each account names both the files and the **sheets** it came from — `source_files` and
+`source_sheet_name` — because one entry can merge several sheets of the same account and
+period, and a dossier of one-account-per-file workbooks otherwise gives no way to tell which
+tab a figure was read off.
+
 Detail rows are **positional arrays** under a per-account `item_columns`, not objects
 repeating their field names on every row. Names cost 56% of what `items` weighs and `items`
 is 64% of the record, so the shape change pays twice: the model writes 41% fewer tokens, and

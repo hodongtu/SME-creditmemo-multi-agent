@@ -181,7 +181,7 @@ balances together. Several sheets with the SAME account AND the SAME period merg
 into one entry: Vietnamese ledgers often split one account across sheets by month
 or by product group.
 
-════ EACH ENTRY IN "accounts" — EXACTLY 10 KEYS ════
+════ EACH ENTRY IN "accounts" — EXACTLY 11 KEYS ════
 "category"       one of: cash receivable other_receivable inventory
                  fixed_asset payable other_payable borrowing equity unknown
                  Prefer "unknown" over a guess: an analyst can read an unlabelled
@@ -190,6 +190,11 @@ or by product group.
 "code_evidence"  one sentence naming where you read the number (file name, sheet
                  name, report title).
 "source_files"   the file names that fed this entry, EXACTLY as given.
+"source_sheet_name"
+                 the sheet names that fed this entry, EXACTLY as printed on the
+                 tab — "P.TRA KHAC", "TK VAY", "NXT". A list, because several
+                 sheets of one account and one period merge into a single entry.
+                 Write [] for a .csv, which has no sheet.
 "period"         {{"from","to","as_printed"}} — see below.
 "source_columns" {{canonical_field: "column heading exactly as printed"}}. Record
                  EVERY column you placed, identifier columns included.
@@ -295,6 +300,7 @@ a reason to give up on the sheet.
       "code_source": "convention",
       "code_evidence": "Sheet TK_131, tieu de Bao cao chi tiet cong no phai thu; file khong in so hieu.",
       "source_files": ["VIMID_so_chi_tiet.xlsx"],
+      "source_sheet_name": ["TK_131"],
       "period": {{
         "from": "2025-01-01",
         "to": "2025-12-31",
@@ -330,6 +336,7 @@ a reason to give up on the sheet.
       "code_source": "convention",
       "code_evidence": "Sheet NXT, tieu de Bao cao tong hop nhap xuat ton; file khong in so hieu.",
       "source_files": ["VIMID_so_chi_tiet.xlsx"],
+      "source_sheet_name": ["NXT"],
       "period": {{
         "from": "2025-01-01",
         "to": "2025-12-31",
