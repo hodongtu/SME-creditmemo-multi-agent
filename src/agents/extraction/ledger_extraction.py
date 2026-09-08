@@ -68,6 +68,31 @@ def _label_positions(columns: list[str]) -> list[int]:
 # "Tổng" holding the column sums, which would have every figure of that account
 # counted twice by anything adding the rows up.
 TOTAL_ROW_NAMES = {"tong", "tong cong", "cong", "total", "sum"}
+# How many rows each report section asks for. The guidance says "top 5" and
+# "NHIỀU NHẤT 5" throughout, so this is the number, not a budget to tune.
+TOP_ROWS = 5
+# Which column each report section ranks by, per account category. One account is
+# asked for under several of them — TK 131 appears in three sections sorted three
+# different ways — so a single "biggest rows" cut would serve one section and
+# starve the others. The rows kept are the UNION of the top 5 of each column here.
+#
+# Traced from src/templates: financial-analysis-guidance 1.1 / 2.2.1a-c / 2.2.2a-b
+# and business-activity-guidance mục 3 / mục 4.
+TOP_ROW_CRITERIA: dict[str, tuple[str, ...]] = {
+    "receivable": ("debit_movement", "closing_debit", "closing_credit"),
+    "other_receivable": ("debit_movement", "closing_debit", "closing_credit"),
+    "payable": ("credit_movement", "closing_debit", "closing_credit"),
+    "other_payable": ("credit_movement", "closing_debit", "closing_credit"),
+    "borrowing": ("credit_movement", "closing_credit"),
+    "inventory": ("outflow_value", "closing_value"),
+    # Nothing enumerates rows of these, but a category with no criterion would
+    # silently keep everything, so give them the two balance columns.
+    "cash": ("closing_debit", "closing_credit"),
+    "fixed_asset": ("closing_debit", "closing_credit"),
+    "equity": ("closing_debit", "closing_credit"),
+    "unknown": ("closing_debit", "closing_credit"),
+    "": ("closing_debit", "closing_credit"),
+}
 
 
 LEDGER_EXTRACTION_SYSTEM_PROMPT = """
@@ -181,7 +206,7 @@ balances together. Several sheets with the SAME account AND the SAME period merg
 into one entry: Vietnamese ledgers often split one account across sheets by month
 or by product group.
 
-════ EACH ENTRY IN "accounts" — EXACTLY 11 KEYS ════
+════ EACH ENTRY IN "accounts" — EXACTLY 12 KEYS ════
 "category"       one of: cash receivable other_receivable inventory
                  fixed_asset payable other_payable borrowing equity unknown
                  Prefer "unknown" over a guess: an analyst can read an unlabelled
@@ -200,11 +225,16 @@ or by product group.
                  EVERY column you placed, identifier columns included.
 "units"          {{field: "vnd" or "quantity"}}. Only for fields that actually
                  appear in "item_columns".
-"item_count"     exactly len(items).
+"totals"         {{field: number}} — the total for the WHOLE account, across
+                 every detail row, not only the ones you return. Read it off the
+                 printed "Tổng cộng" row when the sheet has one; otherwise add up
+                 all the detail rows before selecting. This is the denominator
+                 the report divides by to state a counterparty's share, so a
+                 total covering only the rows you kept is wrong.
+"item_count"     how many detail rows the SHEET holds — not len(items). It tells
+                 the reader the returned rows are 5 of 143.
 "item_columns"   the field names of a detail row, in the order the values come.
-"items"          every detail row, as an ARRAY per row — see below.
-
-Do NOT return a "totals" key. The program adds the columns up itself.
+"items"          the largest detail rows only — see "WHICH ROWS TO RETURN".
 
 ════ "period" ════
 "from"/"to"    ISO "YYYY-MM-DD", read from the banner line above the table.
@@ -218,6 +248,27 @@ Common phrasings and how they expand:
     "Tháng 12 năm 2024"                      -> 2024-12-01 / 2024-12-31
 If no line states a period, leave all three "" — do NOT infer one from a file
 name that merely contains a year.
+
+════ WHICH ROWS TO RETURN ════
+Return the LARGEST rows, not all of them. The report lists at most five
+counterparties or items per section, so everything past that is paid for and
+never read.
+
+Different sections rank by different columns, and one account is asked for under
+several of them. Rank by EACH column listed for the account's category, take the
+top 5 of each, and return the UNION with duplicates removed — a row that leads
+two rankings appears once:
+
+<<TOP_ROW_CRITERIA_TABLE>>
+
+Rank by ABSOLUTE value, so a large credit balance is not sorted below a small
+debit one.
+
+A sheet with 5 rows or fewer: return all of them. Never return fewer than five
+rows from a sheet that has five — the report has a shape to fill.
+
+"totals" still covers the whole account. "item_count" still counts the whole
+sheet. Only "items" is a selection.
 
 ════ "items" — THE EASIEST PART TO GET WRONG ════
 Name the columns ONCE per account in "item_columns", then give each detail row
@@ -253,8 +304,9 @@ Numbers are WHOLE ĐỒNG: no separators, no unit, no brackets.
 Negatives take a minus sign. An empty cell or a dash is 0.
 
 A PRINTED TOTAL ROW ("Tổng", "Tổng cộng", "Cộng", "Total") IS NOT A DETAIL ROW:
-leave it out entirely. The program sums the columns itself, so a total row left
-among the details counts every figure of that account twice.
+keep it out of "items" and use it to fill "totals" instead. It is the account's
+own figure for every row including the ones you are not returning, which is
+exactly what "totals" needs.
 
 A TOTAL ROW IS IDENTIFIED BY ITS LABEL, NEVER BY ITS FIGURES. Two traps:
 
@@ -324,6 +376,14 @@ a reason to give up on the sheet.
         "opening_credit": "vnd",
         "opening_debit": "vnd"
       }},
+      "totals": {{
+        "opening_debit": 225510140846,
+        "opening_credit": 10000000,
+        "debit_movement": 527543796658,
+        "credit_movement": 528855090000,
+        "closing_debit": 224188847504,
+        "closing_credit": 0
+      }},
       "item_count": 2,
       "item_columns": ["counterparty_code","counterparty_name","opening_debit","opening_credit","debit_movement","credit_movement","closing_debit"],
       "items": [
@@ -362,6 +422,16 @@ a reason to give up on the sheet.
         "opening_value": "vnd",
         "outflow_quantity": "quantity",
         "outflow_value": "vnd"
+      }},
+      "totals": {{
+        "opening_quantity": 705,
+        "opening_value": 775511777881,
+        "inflow_quantity": 3059,
+        "inflow_value": 3577157767500,
+        "outflow_quantity": 2206,
+        "outflow_value": 2564487338322,
+        "closing_quantity": 1558,
+        "closing_value": 1788182207060
       }},
       "item_count": 2,
       "item_columns": ["item_name","opening_quantity","opening_value","inflow_quantity","inflow_value","outflow_quantity","outflow_value","closing_quantity","closing_value"],
@@ -530,6 +600,33 @@ def fit_to_budget(
 
 # ── The pass itself: fence every file, one call, one shared record ─────────
 
+def _render_criteria_table() -> str:
+    """The criteria table as prompt text, grouped by the columns they share.
+
+    Written out of TOP_ROW_CRITERIA rather than alongside it: the model ranks by
+    what this table says and _note_slice_problems checks against the dict, so two
+    hand-kept copies would let a category be graded by a rule it was never given.
+    """
+
+    grouped: dict[tuple[str, ...], list[str]] = {}
+    for category, columns in TOP_ROW_CRITERIA.items():
+        if not category:  # the fallback entry has no name to show the model
+            continue
+        grouped.setdefault(columns, []).append(category)
+    names = [", ".join(cats) for cats in grouped.values()]
+    width = max(len(n) for n in names)
+    return "\n".join(
+        f"  {name:<{width}} : {', '.join(columns)}"
+        for name, columns in zip(names, grouped)
+    )
+
+
+LEDGER_EXTRACTION_SYSTEM_PROMPT = LEDGER_EXTRACTION_SYSTEM_PROMPT.replace(
+    "<<TOP_ROW_CRITERIA_TABLE>>", _render_criteria_table()
+)
+assert "<<TOP_ROW_CRITERIA_TABLE>>" not in LEDGER_EXTRACTION_SYSTEM_PROMPT
+
+
 def build_ledger_extraction_chain(llm: Any):
     """Build the JSON-output extraction chain for detail-ledger workbooks."""
 
@@ -670,47 +767,79 @@ def _drop_total_rows(record: dict[str, Any]) -> None:
         ]
         if len(kept) != len(rows):
             account["items"] = kept
-            account["item_count"] = len(kept)
+            # Decremented, not reassigned: item_count is the sheet's own detail
+            # row count and "items" is only the top-N slice of it, so setting it
+            # to len(kept) would shrink the sheet to the size of the excerpt. A
+            # printed total was never a detail row, so it comes off both.
+            declared = account.get("item_count")
+            if isinstance(declared, int):
+                account["item_count"] = max(
+                    len(kept), declared - (len(rows) - len(kept))
+                )
 
 
-def _note_truncated_output(record: dict[str, Any]) -> None:
-    """Say so when the model's answer was cut off mid-array.
+def _note_slice_problems(record: dict[str, Any]) -> None:
+    """Check the two things that stay true once "items" is only a slice.
 
-    Two different failures leave the same mark, and this cannot tell them apart:
+    ``item_count`` used to equal ``len(items)``, and comparing them caught a
+    reply cut off mid-array — ``JsonOutputParser`` repairs truncated JSON rather
+    than raising, so a cut answer arrives looking whole, and one live run had an
+    account declare 26 rows and carry 18. That comparison is now meaningless:
+    the two differ by design on every account with more than a handful of rows.
 
-    * the reply was cut at the token ceiling — ``JsonOutputParser`` repairs the
-      broken JSON rather than raising, closing the open braces so a truncated
-      answer arrives looking whole. One live run had an account declare 26 rows
-      and carry 18, the last missing four of its seven fields;
-    * the model simply wrote fewer rows than it counted. Measured on a 340-row
-      dossier: ``finish_reason`` was ``stop`` at 24,638 of 32,000 tokens, yet
-      two accounts still declared 60 and 50 rows while emitting 45 each.
+    What still holds of a top-N slice:
 
-    So the note names what was observed and lists both causes rather than
-    asserting one. Claiming the ceiling when the model merely stopped early
-    sends somebody to raise a limit that was never reached.
+    * it has at least ``TOP_ROWS`` rows whenever the sheet had that many — the
+      report asks for five, and fewer than five from a sheet that has them is a
+      failure, not a shorter answer. Verified against the sample workbook, where
+      every account with 5+ rows produced a union of 6 or more;
+    * its column sums cannot exceed the account's own totals. A part is never
+      larger than the whole, so exceeding means either the wrong rows were kept
+      or ``totals`` is not the account's.
 
-    ``item_count`` against ``len(items)`` is the model's own self-contradiction,
-    and the only trace either failure leaves behind.
+    Neither notices a model that quietly picked the wrong five. Nothing here can:
+    that would need the rows it did not send.
     """
 
-    cut = []
+    problems = []
     for key, account in (record.get("accounts") or {}).items():
         if not isinstance(account, dict):
             continue
+        columns = account.get("item_columns") or []
+        rows = account.get("items") or []
         declared = account.get("item_count")
-        actual = len(account.get("items") or [])
-        if isinstance(declared, int) and declared > actual:
-            cut.append(f"{key} declared {declared} rows, received {actual}")
-    if cut:
+
+        if isinstance(declared, int) and len(rows) < min(declared, TOP_ROWS):
+            problems.append(
+                f"{key}: sheet has {declared} rows but only {len(rows)} came back"
+            )
+
+        totals = account.get("totals") or {}
+        for index, column in enumerate(columns):
+            cap = totals.get(column)
+            if not isinstance(cap, (int, float)) or isinstance(cap, bool):
+                continue
+            got = sum(
+                row[index] for row in rows
+                if index < len(row)
+                and isinstance(row[index], (int, float))
+                and not isinstance(row[index], bool)
+            )
+            # Rounding in the printed total is normal; a slice genuinely bigger
+            # than its account is not.
+            if abs(got) > abs(cap) + 1:
+                problems.append(
+                    f"{key}.{column}: rows sum to {got:,.0f}, above the account "
+                    f"total of {cap:,.0f}"
+                )
+
+    if problems:
         record["extraction_notes"].append(
-            "WARNING: the model returned fewer rows than it counted — "
-            + "; ".join(cut)
-            + ". The figures below are INCOMPLETE. Either the answer was cut at "
-            "the token ceiling (raise the pass's max_tokens_env, e.g. "
-            "LLM_LEDGER_MAX_TOKENS; run testing/probe_max_tokens.py for the "
-            "model's real ceiling) or the model stopped early on its own — in "
-            "which case split the dossier and run again."
+            "WARNING: the top-row selection does not hold together — "
+            + "; ".join(problems)
+            + ". Either the model kept the wrong rows, or its answer was cut "
+            "short (raise the pass's max_tokens_env, e.g. LLM_LEDGER_MAX_TOKENS; "
+            "run testing/probe_max_tokens.py for the model's real ceiling)."
         )
 
 
@@ -759,9 +888,10 @@ def extract_ledger_batch(
             f"sheet(s) were not sent: {', '.join(dropped[:10])}."
         )
 
-    # Before _drop_total_rows, which rewrites item_count to match and would
-    # erase the evidence.
-    _note_truncated_output(record)
+    # Before _drop_total_rows, which rewrites item_count and would erase the
+    # evidence — item_count now means the sheet's own row count, so dropping a
+    # printed total row must not touch it.
+    _note_slice_problems(record)
     _drop_total_rows(record)
 
     # The model has dropped whole sheets in silence — on the sample workbook it

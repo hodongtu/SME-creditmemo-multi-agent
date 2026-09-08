@@ -245,9 +245,24 @@ repeating their field names on every row. Names cost 56% of what `items` weighs 
 is 64% of the record, so the shape change pays twice: the model writes 41% fewer tokens, and
 the rendered block drops 55% — which matters more than the saving, because that block is
 capped at 40,000 characters and a 342-row dossier used to reach the agent with only 102 of
-its rows. It now arrives whole, and the ceiling holds 384 rows instead of 114. `totals` is
-summed by the program rather than returned; `item_count` stays, at 0.7% of the record,
-because comparing it to `len(items)` is the only thing that notices a truncated answer.
+its rows. It now arrives whole, and the ceiling holds 384 rows instead of 114.
+
+`items` is also no longer every row. The report lists **at most five** counterparties or
+stock items per section, so everything past the fifth was paid for and never read. But the
+sections do not agree on what "largest" means, and one account is asked for under several of
+them at once — TK 131 by movement for turnover, by closing debit for the receivable ageing,
+by closing credit for customer prepayments. So a single "biggest rows" cut would serve one
+section and starve the others. The model ranks by **each** column that account category is
+read by (`TOP_ROW_CRITERIA`, traced line by line to the guidance templates), takes the top
+five of each, and returns the **union**. On a 342-row dossier that keeps 60 rows and 64% of
+the block's tokens go away; on a sheet of five rows or fewer it keeps everything.
+
+The union only works if the reader knows what it is holding, so `totals` came back into the
+schema after two rounds of removing it. It was safe to drop while `items` was complete — the
+program could just add the rows up. Against a slice, adding them up gives the balance of five
+counterparties and calls it the account's, which is exactly the denominator the report divides
+by to say "customer X is 40% of receivables". `totals` now covers the **whole** account, read
+off the printed "Tổng cộng" row, and `item_count` counts the whole sheet.
 
 That last part is a deliberate trade. `.xls` and `.csv` ledgers work now, where the previous
 `openpyxl` reader could not open them at all — but no figure is guaranteed exact any more.
@@ -260,8 +275,10 @@ printed total row, misplaced top-level keys); none of them checks arithmetic.
 The first of those exists because `JsonOutputParser` **repairs** a truncated reply rather
 than raising: it closes the open braces and hands back a valid dict, so an answer cut off at
 the token ceiling arrives looking complete. One live run returned 2 accounts out of 15
-sheets that way, one of them declaring 26 rows and carrying 18. `item_count` against
-`len(items)` is the model's own self-contradiction and the only trace the repair leaves.
+sheets that way, one of them declaring 26 rows and carrying 18. That used to be caught by
+comparing `item_count` to `len(items)`; since the two differ by design now, the guard reads
+the two things a slice still cannot do — come back with fewer than five rows from a sheet
+that has five, or sum to more than `totals`.
 `LLM_MAX_TOKENS` now sets the ceiling explicitly — left unset, the gateway picks its own.
 
 **The ceiling is per pass, because one number cannot fit the whole fleet.** Measured by

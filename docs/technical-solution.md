@@ -569,14 +569,36 @@ That read the sample workbook exactly, but it could not open `.xls` or `.csv` at
 its header/total heuristics were tuned to one accounting package. The trade was made
 knowingly: `.xls` and `.csv` ledgers work now, and no figure is guaranteed exact.
 
-Nothing checks the numbers. Three structural guards remain, and they are about shape, not
+**`items` is a slice, not the account.** The report lists at most five counterparties or
+stock items per section, so the pass asks for five — but the sections disagree on what
+"largest" means, and one account is read under several at once (TK 131 by movement for
+turnover, by closing debit for the ageing, by closing credit for prepayments). Ranking by
+one column would serve one section and starve the rest, so `TOP_ROW_CRITERIA` names every
+column each category is ranked by, traced line by line to `financial-analysis-guidance`
+1.1 / 2.2.1a-c / 2.2.2a-b and `business-activity-guidance` mục 3 / mục 4. The model takes
+the top five of each and returns the union; a row leading two rankings appears once. A
+342-row dossier keeps 60 rows and sheds 64% of the block's tokens.
+
+The prompt does not restate that table — it is rendered from the dict at import time. The
+model ranks by what the table says and the guard grades against the dict, so two hand-kept
+copies would let an account be marked down under a rule it was never given.
+
+`totals` returned to the schema for the same reason it was removable before, read backwards.
+While `items` held every row the program could add them up; against a slice, adding them up
+yields the balance of five counterparties under the name of the account's — and that number
+is the denominator §2.2 divides by to write "customer X is 40% of receivables". `totals` now
+covers the whole account, taken from the printed `Tổng cộng` row, and `item_count` counts the
+whole sheet. The block says so in three sentences, because the agent has been adding `items`
+up since the pass existed and was right to until now.
+
+Nothing checks the numbers. Six structural guards remain, and they are about shape, not
 arithmetic:
 
 | Guard | What it catches |
 |---|---|
 | Table units | A `tỷ VNĐ` suffix inside a table cell, whether this pipeline added it or the model wrote it. The table states its unit in the caption above; one report repeated it in 56 rows because the rule only governed figures the converter itself had scaled |
 | Column alignment | Every row exactly as wide as `item_columns`. A short row shifts every value after the gap into the next column, and the JSON stays valid while the figures stop meaning anything |
-| Truncated output | `item_count` against `len(items)`. Two failures leave this one mark and it cannot separate them: a reply cut at the token ceiling, or a model that wrote fewer rows than it counted — measured at `finish_reason: stop`, 24,638 of 32,000 tokens, with two accounts still declaring 60 and 50 rows while emitting 45. The note lists both causes rather than asserting one. `JsonOutputParser` repairs a reply cut off at the token ceiling instead of raising, so the record arrives looking complete — one live run returned 2 accounts out of 15 sheets. `LLM_MAX_TOKENS` sets the ceiling explicitly; left unset the gateway picks its own |
+| Slice integrity | Two things a legitimate top-five slice cannot do: come back with fewer than five rows from a sheet that has five, or sum past `totals` in any column. This replaced `item_count` against `len(items)`, which was the trace a truncated reply left until the two were made to differ by design — a guard that fires on every account is as useless as one that never fires. It still cannot separate its two causes: a reply cut at the token ceiling, or a model that kept the wrong rows — measured at `finish_reason: stop`, 24,638 of 32,000 tokens, with two accounts declaring 60 and 50 rows while emitting 45. The note lists both rather than asserting one. `JsonOutputParser` repairs a truncated reply instead of raising, so the record arrives looking complete — one live run returned 2 accounts out of 15 sheets. `LLM_MAX_TOKENS` sets the ceiling explicitly; left unset the gateway picks its own |
 | Sheet count | Input sheets vs accounts returned; a shortfall is written into `extraction_notes`, because the model drops whole sheets in silence |
 | Total-row removal | A printed `Tổng` row left among `items`, which would have every figure of that account counted twice |
 | Nesting repair | `unmapped_columns` / `extraction_notes` returned inside `accounts`, where they read as two more accounts |
@@ -1122,7 +1144,7 @@ Each item below was **measured on a real run**, not anticipated. None is fixed.
 | L2 | OCR fails on low-quality scans | 47% of money-shaped tokens malformed in the 72 DPI file vs 2% in the 200 DPI one; 14/16 cross-checked rows disagreed between two documents printing the same year | **High** — no detector today; the consequence is L1 |
 | L3 | §2.1 percentage denominators drift | Detail rows divide by the subtotal above them instead of total assets, despite the header and guidance naming the denominator | Medium — percentages are internally inconsistent |
 | L4 | §2.2 day-count column ignores its own formula | Every row read `365,0` against computed values of 155,1 / 1.801,9 / 166,1 | Medium — a receivables-turnover figure a reviewer would rely on |
-| L5 | §2.2 percentage column writes `100%` on every row | No denominator is defined anywhere; the base *is* available in the ledger block (`totals.closing_debit`) | Medium |
+| L5 | §2.2 percentage column writes `100%` on every row | No denominator was defined anywhere. `totals.closing_debit` is back in the block and named as the denominator in so many words; unverified against a live run | Medium |
 | L6 | `.xls` / `.csv` ledgers keep raw OCR | Only `.xlsx` goes through the deterministic reader | Low — affects a minority of dossiers |
 | L7 | No PII handling | See §2.4 | **High** for production, none for the POC |
 | L8 | No tests, no CI | Three behaviour baselines exist but live outside the repository; two regressions this month were caught only by running them by hand | **High** — every measured guarantee is unenforced |
