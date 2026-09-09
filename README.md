@@ -247,15 +247,30 @@ the rendered block drops 55% — which matters more than the saving, because tha
 capped at 40,000 characters and a 342-row dossier used to reach the agent with only 102 of
 its rows. It now arrives whole, and the ceiling holds 384 rows instead of 114.
 
-`items` is also no longer every row. The report lists **at most five** counterparties or
-stock items per section, so everything past the fifth was paid for and never read. But the
-sections do not agree on what "largest" means, and one account is asked for under several of
-them at once — TK 131 by movement for turnover, by closing debit for the receivable ageing,
-by closing credit for customer prepayments. So a single "biggest rows" cut would serve one
-section and starve the others. The model ranks by **each** column that account category is
-read by (`TOP_ROW_CRITERIA`, traced line by line to the guidance templates), takes the top
-five of each, and returns the **union**. On a 342-row dossier that keeps 60 rows and 64% of
-the block's tokens go away; on a sheet of five rows or fewer it keeps everything.
+`items` is also no longer every row, and it is no longer one list. The report lists **at
+most five** counterparties or stock items per section, so everything past the fifth was paid
+for and never read. But the sections do not agree on what "largest" means, and one account is
+asked for under several of them at once — TK 131 by movement for turnover, by closing debit
+for the receivable ageing, by closing credit for customer prepayments.
+
+The first attempt asked for the **union** of those top fives as a single list. A live run
+showed why that fails: computing a union of three rankings is several steps of arithmetic
+done in the head, and nothing in the answer lets a checker see whether it came out right.
+Every account with more than five rows came back with exactly five, and TK 341 dropped the
+lender ranked 2nd by movement and 4th by balance while keeping one that led no ranking at
+all — while the guard, which only counted rows, stayed silent.
+
+So an account now carries **one ranked list per criterion**, in `rankings`, each labelled
+with the `sorted_by` column it was ordered by. The model's task per list is a single step —
+sort by this column, take five — and both the order and the count are checkable from the
+answer itself. A counterparty leading two rankings appears in both, with the same figures;
+each report section reads the one list built for it (`TOP_ROW_CRITERIA`, traced line by line
+to the guidance templates, and rendered into the prompt from that same dict).
+
+The criteria table also shrank. Nothing enumerates rows of TK 341, 338 or 138 — FA 2.2.2c is
+prose with no table, and 2.2.1e/2.2.2e take their figures from the balance sheet — so those
+categories get one list by their closing balance instead of two or three. On the sample
+dossier the two effects nearly cancel: 41 rows under the union shape, 46 under this one.
 
 The union only works if the reader knows what it is holding, so `totals` came back into the
 schema after two rounds of removing it. It was safe to drop while `items` was complete — the
@@ -277,8 +292,12 @@ than raising: it closes the open braces and hands back a valid dict, so an answe
 the token ceiling arrives looking complete. One live run returned 2 accounts out of 15
 sheets that way, one of them declaring 26 rows and carrying 18. That used to be caught by
 comparing `item_count` to `len(items)`; since the two differ by design now, the guard reads
-the two things a slice still cannot do — come back with fewer than five rows from a sheet
-that has five, or sum to more than `totals`.
+what a set of single-criterion rankings still cannot do: skip a criterion the category calls
+for, name a `sorted_by` that is not a real column, come back out of order by its own column,
+give one counterparty different figures in two lists, return fewer than five rows from a
+sheet that has five, or sum past `totals`. Three of those six only became checkable once
+each list was cut down to one criterion. None of them catches a model that quietly picked the
+wrong five and ordered them correctly — that would need the rows it never sent.
 `LLM_MAX_TOKENS` now sets the ceiling explicitly — left unset, the gateway picks its own.
 
 **The ceiling is per pass, because one number cannot fit the whole fleet.** Measured by

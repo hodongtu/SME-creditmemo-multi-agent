@@ -569,15 +569,26 @@ That read the sample workbook exactly, but it could not open `.xls` or `.csv` at
 its header/total heuristics were tuned to one accounting package. The trade was made
 knowingly: `.xls` and `.csv` ledgers work now, and no figure is guaranteed exact.
 
-**`items` is a slice, not the account.** The report lists at most five counterparties or
-stock items per section, so the pass asks for five — but the sections disagree on what
-"largest" means, and one account is read under several at once (TK 131 by movement for
-turnover, by closing debit for the ageing, by closing credit for prepayments). Ranking by
-one column would serve one section and starve the rest, so `TOP_ROW_CRITERIA` names every
-column each category is ranked by, traced line by line to `financial-analysis-guidance`
-1.1 / 2.2.1a-c / 2.2.2a-b and `business-activity-guidance` mục 3 / mục 4. The model takes
-the top five of each and returns the union; a row leading two rankings appears once. A
-342-row dossier keeps 60 rows and sheds 64% of the block's tokens.
+**An account carries one ranked list per criterion, not one list of rows.** The report lists
+at most five counterparties or stock items per section, so the pass asks for five — but the
+sections disagree on what "largest" means, and one account is read under several at once
+(TK 131 by movement for turnover, by closing debit for the ageing, by closing credit for
+prepayments). `TOP_ROW_CRITERIA` names every column each category is ranked by, traced line
+by line to `financial-analysis-guidance` 1.1 / 2.2.1a-c / 2.2.2a-b and
+`business-activity-guidance` mục 1 / 2 / 3 / 4.
+
+Asking for the **union** of those top fives as a single list did not work. The union is
+several steps of arithmetic with no trace left in the answer, so no checker could see it go
+wrong — and on 2026-09-08 it did: every account with more than five rows returned exactly
+five, and TK 341 dropped the lender ranked 2nd by movement and 4th by balance while keeping
+one that led no ranking at all. Each criterion now gets its own entry in `rankings`, carrying
+`sorted_by` and its own five rows. The task per entry is one step, a counterparty leading two
+rankings appears in both, and each report section reads the list built for it.
+
+Categories nothing enumerates were trimmed at the same time: FA 2.2.2c is prose with no
+table and 2.2.1e/2.2.2e read the balance sheet, so TK 341, 338 and 138 get one list by their
+closing balance rather than two or three. On the sample dossier the split and the trim nearly
+cancel — 41 rows under the union shape, 46 under this one.
 
 The prompt does not restate that table — it is rendered from the dict at import time. The
 model ranks by what the table says and the guard grades against the dict, so two hand-kept
@@ -598,7 +609,7 @@ arithmetic:
 |---|---|
 | Table units | A `tỷ VNĐ` suffix inside a table cell, whether this pipeline added it or the model wrote it. The table states its unit in the caption above; one report repeated it in 56 rows because the rule only governed figures the converter itself had scaled |
 | Column alignment | Every row exactly as wide as `item_columns`. A short row shifts every value after the gap into the next column, and the JSON stays valid while the figures stop meaning anything |
-| Slice integrity | Two things a legitimate top-five slice cannot do: come back with fewer than five rows from a sheet that has five, or sum past `totals` in any column. This replaced `item_count` against `len(items)`, which was the trace a truncated reply left until the two were made to differ by design — a guard that fires on every account is as useless as one that never fires. It still cannot separate its two causes: a reply cut at the token ceiling, or a model that kept the wrong rows — measured at `finish_reason: stop`, 24,638 of 32,000 tokens, with two accounts declaring 60 and 50 rows while emitting 45. The note lists both rather than asserting one. `JsonOutputParser` repairs a truncated reply instead of raising, so the record arrives looking complete — one live run returned 2 accounts out of 15 sheets. `LLM_MAX_TOKENS` sets the ceiling explicitly; left unset the gateway picks its own |
+| Slice integrity | Six things a legitimate set of single-criterion rankings cannot do: skip a criterion its category calls for, name a `sorted_by` that is not one of `item_columns`, come out of order by its own column, give one counterparty different figures in two lists, return fewer than five rows from a sheet that has five, or sum past `totals`. The first three only became checkable once each list was cut down to one criterion — the union shape left no trace of how it was computed. This replaced `item_count` against `len(items)`, which was the trace a truncated reply left until the two were made to differ by design — a guard that fires on every account is as useless as one that never fires. It still cannot separate its two causes: a reply cut at the token ceiling, or a model that kept the wrong rows — measured at `finish_reason: stop`, 24,638 of 32,000 tokens, with two accounts declaring 60 and 50 rows while emitting 45. The note lists both rather than asserting one. `JsonOutputParser` repairs a truncated reply instead of raising, so the record arrives looking complete — one live run returned 2 accounts out of 15 sheets. `LLM_MAX_TOKENS` sets the ceiling explicitly; left unset the gateway picks its own |
 | Sheet count | Input sheets vs accounts returned; a shortfall is written into `extraction_notes`, because the model drops whole sheets in silence |
 | Total-row removal | A printed `Tổng` row left among `items`, which would have every figure of that account counted twice |
 | Nesting repair | `unmapped_columns` / `extraction_notes` returned inside `accounts`, where they read as two more accounts |

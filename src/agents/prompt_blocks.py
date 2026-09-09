@@ -502,17 +502,31 @@ def _build_ledger_structured_block(
         '"closing_debit"/"closing_credit" là dư cuối kỳ; hàng tồn kho dùng '
         '"opening_/inflow_/outflow_/closing_" kèm "_quantity" hoặc "_value". '
         '"source_columns" cho biết mỗi trường ứng với cột nào trong file gốc.',
-        '"items" KHÔNG phải toàn bộ dòng chi tiết: đó là các dòng LỚN NHẤT, lấy '
-        'top 5 theo từng tiêu chí mà báo cáo cần rồi gộp lại (phải thu: phát '
-        'sinh nợ, dư nợ cuối kỳ, dư có cuối kỳ; phải trả: phát sinh có, dư nợ '
-        'cuối kỳ, dư có cuối kỳ; hàng tồn kho: giá trị xuất, giá trị tồn cuối '
-        'kỳ). "item_count" cho biết sheet gốc có bao nhiêu dòng.',
-        'MẪU SỐ ĐỂ TÍNH TỶ TRỌNG LÀ "totals", KHÔNG PHẢI TỔNG CỦA "items". '
-        '"totals" là số của cả tài khoản kể cả những dòng không được liệt kê; '
-        'cộng "items" lại chỉ ra số dư của vài đối tác lớn nhất. Viết "khách '
-        'hàng X chiếm N% dư nợ" thì N = giá trị dòng chia cho "totals".',
+        'MỘT TÀI KHOẢN CÓ NHIỀU BẢNG XẾP HẠNG, nằm trong "rankings". Mỗi bảng '
+        'khai "sorted_by" là cột nó đã sắp theo, và "items" là 5 dòng lớn nhất '
+        'THEO CỘT ĐÓ. Cùng một đối tác có thể xuất hiện ở nhiều bảng — đó là '
+        'bình thường, không phải trùng lặp. Mỗi mục báo cáo ĐỌC ĐÚNG MỘT BẢNG:',
+        '  · FA 1.1 bảng sản phẩm và BA mục 2 → sorted_by "outflow_value" của '
+        'sổ kho. · FA 1.1 bảng khách hàng đầu ra, BA mục 3 và nhánh đầu ra của '
+        'sơ đồ BA mục 1 → sorted_by "debit_movement" của sổ 131. · FA 2.2.1a → '
+        '"closing_debit" của sổ 131. · FA 2.2.1b → "closing_debit" của sổ 331. '
+        '· FA 2.2.1c → "closing_value" của sổ kho. · FA 2.2.2a → '
+        '"closing_credit" của sổ 131. · FA 2.2.2b, BA mục 4 và nhánh đầu vào '
+        'của sơ đồ BA mục 1 → "credit_movement" của sổ 331 cho mục 4 và sơ đồ, '
+        '"closing_credit" cho FA 2.2.2b.',
+        'KHÔNG lấy bảng của tiêu chí khác cho tiện. Bảng sắp theo dư nợ và bảng '
+        'sắp theo phát sinh nợ là hai danh sách khác nhau, và dùng nhầm thì cả '
+        'thứ tự lẫn tỷ trọng đều sai.',
+        '"item_count" cho biết sheet gốc có bao nhiêu dòng — mỗi bảng chỉ giữ 5 '
+        'dòng đầu của sheet đó.',
+        'MẪU SỐ ĐỂ TÍNH TỶ TRỌNG LÀ "totals", KHÔNG PHẢI TỔNG CỦA MỘT BẢNG. '
+        '"totals" nằm ở mức tài khoản và là số của CẢ tài khoản kể cả những '
+        'dòng không được liệt kê; cộng các dòng trong một bảng chỉ ra số dư của '
+        'vài đối tác lớn nhất. Viết "khách hàng X chiếm N% dư nợ" thì N = giá '
+        'trị dòng chia cho "totals".',
         'Mỗi dòng là một MẢNG giá trị theo ĐÚNG thứ tự khai ở "item_columns" của '
-        'chính tài khoản đó. Đọc giá trị thứ i của dòng ứng với tên cột thứ i — '
+        'chính tài khoản đó — một "item_columns" dùng chung cho mọi bảng của tài '
+        'khoản ấy. Đọc giá trị thứ i của dòng ứng với tên cột thứ i — '
         'hai tài khoản có thể khai thứ tự cột khác nhau, nên phải đọc '
         '"item_columns" của tài khoản đang xem, không dùng lại thứ tự của tài '
         'khoản trước.',
@@ -520,8 +534,7 @@ def _build_ledger_structured_block(
         '"counterparty_name" là tên — trích dẫn theo TÊN, chỉ dùng mã khi không '
         'có tên. Sổ nhập xuất tồn dùng "item_name". '
         f'Nếu có dòng mang tên "{ledger_extraction.RESIDUAL_LABEL} (N)" thì đó '
-        'là tổng gộp của N dòng nhỏ không liệt kê riêng, nên cộng toàn bộ "items" '
-        'vẫn ra đúng tổng của tài khoản.',
+        'là tổng gộp của N dòng nhỏ không liệt kê riêng trong CHÍNH bảng đó.',
 
         '"code_source": "printed" nghĩa là số hiệu tài khoản in trong file; '
         '"convention" nghĩa là file không in số hiệu và chương trình xếp theo '
@@ -530,9 +543,9 @@ def _build_ledger_structured_block(
     ]
     for record in records:
         # Totals come from the record, not from adding up the rows in it. They
-        # were computed here while "items" held every row; it now holds only the
-        # largest five per ranking, so summing them would give the balance of
-        # five counterparties and call it the account's.
+        # were computed here while "items" held every row; a ranking now holds
+        # only the largest five by one column, so summing one would give the
+        # balance of five counterparties and call it the account's.
         parts.append(
             ledger_extraction.render_record(
                 ledger_extraction.fit_to_budget(record)

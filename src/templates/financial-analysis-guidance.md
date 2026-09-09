@@ -34,9 +34,13 @@ description: >-
   phải từ sổ chi tiết. TUYỆT ĐỐI KHÔNG lấy một chỉ tiêu BCTC làm mẫu số cho các
   dòng đọc từ sổ: hai bên khác phạm vi, số dư chi tiết và số dư trên bảng cân đối
   thường lệch nhau rất xa, nên phép chia đó vô nghĩa dù hai số đều có thật.
-  - KHÔNG CỘNG "items" LẠI ĐỂ LÀM MẪU SỐ. "items" chỉ chứa các dòng lớn nhất, không
-  phải toàn bộ tài khoản; cộng chúng lại ra số dư của vài đối tác lớn nhất và dùng
-  nó làm mẫu số sẽ thổi phồng mọi tỷ trọng. Chỉ `totals` mới là số của cả tài khoản.
+  - KHÔNG CỘNG CÁC DÒNG CỦA MỘT BẢNG LẠI ĐỂ LÀM MẪU SỐ. Mỗi bảng trong `rankings`
+  chỉ chứa 5 dòng lớn nhất theo một cột, không phải toàn bộ tài khoản; cộng chúng
+  lại ra số dư của vài đối tác lớn nhất và dùng nó làm mẫu số sẽ thổi phồng mọi tỷ
+  trọng. `totals` nằm ở MỨC TÀI KHOẢN, ngoài `rankings`, và chỉ nó mới là số của cả
+  tài khoản.
+  - Cũng KHÔNG cộng các bảng lại với nhau. Một đối tác lớn xuất hiện ở cả ba bảng
+  của sổ 131, nên cộng ba bảng sẽ đếm nó ba lần.
   - CỘT TỶ TRỌNG KHÔNG CẦN CỘNG THÀNH 100%, và thường sẽ nhỏ hơn — phần còn lại của
   tài khoản không được liệt kê. Đó là ĐÚNG. Không co giãn các con số cho tổng thành
   100%, không thêm dòng "Khác" để bù cho đủ.
@@ -53,15 +57,22 @@ description: >-
   - CÂU VĂN DƯỚI BẢNG dùng lại đúng con số phần trăm đã ghi trong bảng, không tính
   lại bằng mẫu số khác — cùng quy tắc đã áp cho cột "% DTT".
 
-  | Mục | Tử số của từng dòng | Khoá `totals` làm mẫu số | Tài khoản |
+  | Mục | Tài khoản | Đọc bảng `sorted_by` | Mẫu số `totals` |
   |---|---|---|---|
-  | 1.1 sản phẩm/dịch vụ | doanh số xuất trong kỳ | `outflow_value` | sổ kho (155/156/154…) |
-  | 1.1 khách hàng đầu ra | phát sinh nợ | `debit_movement` | 131 |
-  | 2.2.1a Phải thu khách hàng | dư nợ cuối kỳ | `closing_debit` | 131 |
-  | 2.2.1b Trả trước người bán | dư nợ cuối kỳ | `closing_debit` | 331 |
-  | 2.2.1c Hàng tồn kho | tồn cuối kỳ | `closing_value` | sổ kho |
-  | 2.2.2a Người mua trả tiền trước | dư có cuối kỳ | `closing_credit` | 131 |
-  | 2.2.2b Phải trả người bán | dư có cuối kỳ | `closing_credit` | 331 |
+  | 1.1 sản phẩm/dịch vụ | sổ kho (155/156/154…) | `outflow_value` | `outflow_value` |
+  | 1.1 khách hàng đầu ra | 131 | `debit_movement` | `debit_movement` |
+  | 2.2.1a Phải thu khách hàng | 131 | `closing_debit` | `closing_debit` |
+  | 2.2.1b Trả trước người bán | 331 | `closing_debit` | `closing_debit` |
+  | 2.2.1c Hàng tồn kho | sổ kho | `closing_value` | `closing_value` |
+  | 2.2.2a Người mua trả tiền trước | 131 | `closing_credit` | `closing_credit` |
+  | 2.2.2b Phải trả người bán | 331 | `closing_credit` | `closing_credit` |
+
+  Khối `[EXTRACTED DETAIL LEDGER]` đưa mỗi tài khoản kèm NHIỀU bảng xếp hạng trong
+  `rankings`, mỗi bảng khai `sorted_by` là cột nó đã sắp theo. **Lấy đúng bảng có
+  `sorted_by` bằng cột ghi ở dòng trên, đừng lấy bảng khác cho tiện** — bảng sắp
+  theo dư nợ và bảng sắp theo phát sinh nợ là hai danh sách khác nhau, dùng nhầm
+  thì cả thứ tự dòng lẫn tỷ trọng đều sai. Một đối tác xuất hiện ở nhiều bảng là
+  bình thường, không phải trùng lặp.
 
   Bảng nào có hai cột năm thì mỗi cột chia cho `totals` của CHÍNH KỲ ĐÓ, không mượn
   tổng của kỳ kia.
@@ -95,9 +106,9 @@ description: >-
       - Nếu khách hàng thuộc lĩnh vực Xây dựng/dịch vụ xây lắp: ưu tiên sổ/tài khoản 154, 156
       - Nếu khách hàng thuộc lĩnh vực Thương mại/Dịch vụ: ưu tiên sổ/tài khoản 156, 155
     - Liệt kê top 5 khách hàng có doanh số phát sinh nợ lớn nhất (nguồn: số liệu phát sinh nợ trong kỳ từ sổ/tài khoản 131). 
-    - Cột "Tỷ trọng" của bảng sản phẩm chia cho `totals.outflow_value` của chính sổ
-    kho đã dùng; của bảng khách hàng đầu ra chia cho `totals.debit_movement` của sổ
-    131. Đọc kỹ QUY TẮC MẪU SỐ ở đầu phần này trước khi điền hai cột đó.
+    - Bảng sản phẩm lấy bảng xếp hạng `sorted_by: "outflow_value"` của sổ kho, cột
+    "Tỷ trọng" chia cho `totals.outflow_value`. Bảng khách hàng đầu ra lấy bảng
+    `sorted_by: "debit_movement"` của sổ 131, chia cho `totals.debit_movement`. Đọc kỹ QUY TẮC MẪU SỐ ở đầu phần này trước khi điền hai cột đó.
     - Đánh giá cơ cấu doanh thu, diễn biến so với kỳ trước
   và nguyên nhân. Chỉ liệt kê đúng số lượng thực có, không dựng đủ 5 dòng cho đẹp.
   - Mục 1.2: đánh giá cơ cấu giá vốn, biến động các thành phần lớn so với kỳ trước.
@@ -130,12 +141,12 @@ description: >-
     dòng đó khác nhau thì số liệu chưa cân, nêu rõ chứ không sửa số cho khớp.
 
 - Mục 2.2.1: 
-    - a. Dựa trên sổ/tài khoản 131, liệt kê top 5 khách hàng có *dư nợ cuối kỳ* lớn nhất trong năm báo cáo. Cột "Tỷ trọng" = dư nợ cuối kỳ của dòng chia cho `totals.closing_debit` của chính sổ 131. Cảnh báo dấu hiệu tồn đọng, chậm luân chuyển nếu có các signals sau:
+    - a. Dựa trên sổ/tài khoản 131, liệt kê top 5 khách hàng có *dư nợ cuối kỳ* lớn nhất trong năm báo cáo — lấy nguyên bảng xếp hạng `sorted_by: "closing_debit"`, đã sắp sẵn đúng thứ tự. Cột "Tỷ trọng" = dư nợ cuối kỳ của dòng chia cho `totals.closing_debit` của chính sổ 131. Cảnh báo dấu hiệu tồn đọng, chậm luân chuyển nếu có các signals sau:
       - Giá trị thu hồi công nợ < Số dư phải thu đầu kỳ.
       - Khoản phải thu cảnh báo = Số dư Nợ phải thu đầu kỳ − Giá trị phát sinh Có.
   
-    - b. Dựa trên sổ/tài khoản 331, liệt kê top 5 nhà cung cấp có *dư nợ cuối kỳ* lớn nhất trong năm báo cáo. Cột "Tỷ trọng" = dư nợ cuối kỳ của dòng chia cho `totals.closing_debit` của chính sổ 331. Mục này là bên NỢ của sổ 331; sổ 331 không có số dư nợ cuối kỳ thì ghi "Không có dữ liệu", không lấy sổ 338 hay sổ 341 điền vào.
-    - c. Dựa trên các sổ/tài khoản 152, 153, 154, 155, 156, liệt kê top 5 sản phẩm/dịch vụ có dư nợ/tồn kỳ cuối kỳ lớn nhất trong năm và so sánh với năm trước. Cột "Tỷ trọng" = tồn cuối kỳ của dòng chia cho `totals.closing_value` của chính sổ kho đó.
+    - b. Dựa trên sổ/tài khoản 331, liệt kê top 5 nhà cung cấp có *dư nợ cuối kỳ* lớn nhất trong năm báo cáo — lấy bảng `sorted_by: "closing_debit"` của sổ 331. Cột "Tỷ trọng" = dư nợ cuối kỳ của dòng chia cho `totals.closing_debit` của chính sổ 331. Mục này là bên NỢ của sổ 331; sổ 331 không có số dư nợ cuối kỳ thì ghi "Không có dữ liệu", không lấy sổ 338 hay sổ 341 điền vào.
+    - c. Dựa trên các sổ/tài khoản 152, 153, 154, 155, 156, liệt kê top 5 sản phẩm/dịch vụ có dư nợ/tồn kỳ cuối kỳ lớn nhất trong năm và so sánh với năm trước — lấy bảng `sorted_by: "closing_value"`, KHÔNG lấy bảng `outflow_value` (đó là bảng của mục 1.1). Cột "Tỷ trọng" = tồn cuối kỳ của dòng chia cho `totals.closing_value` của chính sổ kho đó.
       - Nếu khách hàng thuộc lĩnh vực Sản xuất: ưu tiên sổ/tài khoản 155, 156
       - Nếu khách hàng thuộc lĩnh vực Xây dựng/dịch vụ xây lắp: ưu tiên sổ/tài khoản 154, 156
       - Nếu khách hàng thuộc lĩnh vực Thương mại/Dịch vụ: ưu tiên sổ/tài khoản 156, 155
@@ -146,9 +157,9 @@ description: >-
       khoản đầu tư/xây dựng cơ bản dở dang lớn và tiến độ (nếu hồ sơ có).
     - e. Liệt kê các khoản mục tài sản >10% tổng tài sản, tập trung vào các khoản mục lớn và có mức độ biến động vượt quá 20% kỳ trước. Lưu ý: các khoản mục này không bao gồm các mục a, b, c, d ở trên
 - Mục 2.2.2:
-    - a. Dựa trên sổ/tài khoản 131, liệt kê top 5 khách hàng có *dư có cuối kỳ* lớn nhất trong năm báo cáo. Cột "Tỷ trọng" = dư có cuối kỳ của dòng chia cho `totals.closing_credit` của chính sổ 131 — KHÔNG chia cho chỉ tiêu "Người mua trả tiền trước ngắn hạn" của BCTC. Sổ 131 không có số dư có cuối kỳ thì ghi "Không có dữ liệu", không lấy sổ khác điền vào.
-    - b. Dựa trên sổ/tài khoản 331, liệt kê top 5 nhà cung cấp có dư có cuối kỳ lớn nhất trong năm và so sánh với năm trước. Cột "Tỷ trọng" = dư có cuối kỳ của dòng chia cho `totals.closing_credit` của chính sổ 331 — KHÔNG chia cho chỉ tiêu "Phải trả người bán ngắn hạn" của BCTC, và KHÔNG dùng tổng của sổ 341.
-    - c. Đối chiếu dữ liệu tín dụng tại CIC hoặc sổ vay nợ (mã 341). Mô tả xu hướng dư nợ.
+    - a. Dựa trên sổ/tài khoản 131, liệt kê top 5 khách hàng có *dư có cuối kỳ* lớn nhất trong năm báo cáo — lấy bảng `sorted_by: "closing_credit"` của sổ 131. Cột "Tỷ trọng" = dư có cuối kỳ của dòng chia cho `totals.closing_credit` của chính sổ 131 — KHÔNG chia cho chỉ tiêu "Người mua trả tiền trước ngắn hạn" của BCTC. Sổ 131 không có số dư có cuối kỳ thì ghi "Không có dữ liệu", không lấy sổ khác điền vào.
+    - b. Dựa trên sổ/tài khoản 331, liệt kê top 5 nhà cung cấp có dư có cuối kỳ lớn nhất trong năm và so sánh với năm trước — lấy bảng `sorted_by: "closing_credit"` của sổ 331. Cột "Tỷ trọng" = dư có cuối kỳ của dòng chia cho `totals.closing_credit` của chính sổ 331 — KHÔNG chia cho chỉ tiêu "Phải trả người bán ngắn hạn" của BCTC, và KHÔNG dùng tổng của sổ 341.
+    - c. Đối chiếu dữ liệu tín dụng tại CIC hoặc sổ vay nợ (mã 341). Mô tả xu hướng dư nợ. Mục này là văn xuôi, không có bảng; sổ 341 chỉ có một bảng xếp hạng `sorted_by: "closing_credit"` — dùng nó để gọi tên các bên cho vay lớn nhất, và `totals.closing_credit` cho tổng dư nợ vay.
     - d. Đánh giá cơ cấu và xu hướng, so sánh với thông tin vốn điều lệ.
     - e. Liệt kê các khoản mục chiếm >10% tổng nguồn vốn, tập trung vào các khoản mục lớn và có mức độ biến động vượt quá 20% kỳ trước. Lưu ý: các khoản mục này không bao gồm các mục a, b, c, d ở trên
  

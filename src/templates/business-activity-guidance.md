@@ -16,18 +16,30 @@ description: >-
   - Mẫu số nằm ở `totals` của khối [EXTRACTED DETAIL LEDGER], LẤY ĐÚNG CỘT ĐANG TÍNH
   của ĐÚNG TÀI KHOẢN mà mục đó yêu cầu:
 
-  | Mục | Tử số của từng dòng | Khoá `totals` làm mẫu số | Tài khoản |
+  | Mục | Tài khoản | Đọc bảng `sorted_by` | Mẫu số `totals` |
   |---|---|---|---|
-  | 2 sản phẩm/dịch vụ | doanh số xuất trong kỳ | `outflow_value` | sổ kho (155/156/154…) |
-  | 3 Đầu ra | phát sinh nợ | `debit_movement` | 131 |
-  | 4 Đầu vào | phát sinh có | `credit_movement` | 331 |
+  | 1 sơ đồ, nhánh đầu ra | 131 | `debit_movement` | `debit_movement` |
+  | 1 sơ đồ, nhánh đầu vào | 331 | `credit_movement` | `credit_movement` |
+  | 2 sản phẩm/dịch vụ | sổ kho (155/156/154…) | `outflow_value` | `outflow_value` |
+  | 3 Đầu ra | 131 | `debit_movement` | `debit_movement` |
+  | 4 Đầu vào | 331 | `credit_movement` | `credit_movement` |
+
+  Khối `[EXTRACTED DETAIL LEDGER]` đưa mỗi tài khoản kèm NHIỀU bảng xếp hạng trong
+  `rankings`, mỗi bảng khai `sorted_by` là cột nó đã sắp theo. **Lấy đúng bảng có
+  `sorted_by` bằng cột ghi ở dòng trên** — sổ 131 và sổ 331 mỗi sổ có ba bảng, và
+  lấy nhầm bảng thì cả thứ tự đối tác lẫn tỷ trọng đều sai. Sơ đồ mục 1 và bảng
+  mục 3/mục 4 đọc CÙNG một bảng, nên hai chỗ khớp nhau là chuyện tự nhiên chứ
+  không phải việc phải đối chiếu bằng tay.
 
   - TỬ SỐ VÀ MẪU SỐ PHẢI CÙNG MỘT NGUỒN. Dòng đọc từ sổ chi tiết thì mẫu số cũng
   phải từ sổ chi tiết. TUYỆT ĐỐI KHÔNG lấy một chỉ tiêu BCTC (doanh thu thuần, phải
   thu khách hàng, phải trả người bán…) làm mẫu số cho các dòng đọc từ sổ: hai bên
   khác phạm vi nên phép chia đó vô nghĩa dù hai số đều có thật.
-  - KHÔNG CỘNG "items" LẠI ĐỂ LÀM MẪU SỐ. "items" chỉ chứa các dòng lớn nhất, không
-  phải toàn bộ tài khoản. Chỉ `totals` mới là số của cả tài khoản.
+  - KHÔNG CỘNG CÁC DÒNG CỦA MỘT BẢNG LẠI ĐỂ LÀM MẪU SỐ. Mỗi bảng trong `rankings`
+  chỉ chứa 5 dòng lớn nhất theo một cột, không phải toàn bộ tài khoản. `totals` nằm
+  ở MỨC TÀI KHOẢN, ngoài `rankings`, và chỉ nó mới là số của cả tài khoản. Cũng
+  không cộng các bảng lại với nhau — một đối tác lớn có mặt ở nhiều bảng, cộng vào
+  là đếm nó nhiều lần.
   - CỘT TỶ TRỌNG KHÔNG CẦN CỘNG THÀNH 100%, và thường sẽ nhỏ hơn vì chỉ liệt kê 5
   đối tác lớn nhất. Đó là ĐÚNG. Không co giãn các con số cho tổng thành 100%, không
   thêm dòng "Khác" để bù cho đủ.
@@ -107,10 +119,10 @@ flowchart LR
 - Mục 1: Vẽ sơ đồ mô hình sản xuất kinh doanh theo đúng khung của bố cục: sản phẩm
 đầu vào -> NHIỀU NHẤT 5 đối tác đầu vào -> doanh nghiệp -> NHIỀU NHẤT 5 đối tác đầu
 ra -> sản phẩm đầu ra.
-  - Đầu vào: xếp theo tỷ trọng phát sinh CÓ của sổ chi tiết phải trả người bán (331)
-  năm gần nhất, lấy từ trên xuống cho tới hết 5 dòng.
-  - Đầu ra: xếp theo tỷ trọng phát sinh NỢ của sổ chi tiết phải thu khách hàng (131)
-  năm gần nhất, lấy từ trên xuống cho tới hết 5 dòng.
+  - Đầu vào: lấy bảng `sorted_by: "credit_movement"` của sổ 331 — đã sắp sẵn theo
+  phát sinh CÓ, lấy từ trên xuống cho tới hết 5 dòng.
+  - Đầu ra: lấy bảng `sorted_by: "debit_movement"` của sổ 131 — đã sắp sẵn theo
+  phát sinh NỢ, lấy từ trên xuống cho tới hết 5 dòng.
   - Hồ sơ có ít hơn 5 đối tác một bên thì XOÁ HẲN các dòng thừa trong khung — liệt kê
   đúng số có thật, KHÔNG bịa tên và KHÔNG gộp phần còn lại thành một khối "khác" nếu
   hồ sơ không nêu như vậy.
@@ -130,16 +142,16 @@ ra -> sản phẩm đầu ra.
   - Tên mặt hàng giữ NGẮN (dưới 5 từ). Sơ đồ 5 tầng đã sát khổ trang; nhãn dài làm
   khối phải bọc thêm dòng và đẩy cả sơ đồ cao lên.
  
-- Mục 2: Liệt kê NHIỀU NHẤT 5 sản phẩm/dịch vụ chính của khách hàng và tỷ trọng của các sản phẩm này trong 2 năm gần nhất. Tỷ trọng = doanh số xuất của mặt hàng chia cho `totals.outflow_value` của chính sổ kho, TỪNG KỲ một — cột năm nào chia cho tổng của năm đó, không mượn tổng của kỳ kia.
+- Mục 2: Liệt kê NHIỀU NHẤT 5 sản phẩm/dịch vụ chính của khách hàng và tỷ trọng của các sản phẩm này trong 2 năm gần nhất — lấy bảng `sorted_by: "outflow_value"` của sổ kho, KHÔNG lấy bảng `closing_value` (đó là bảng của FA mục 2.2.1c). Tỷ trọng = doanh số xuất của mặt hàng chia cho `totals.outflow_value` của chính sổ kho, TỪNG KỲ một — cột năm nào chia cho tổng của năm đó, không mượn tổng của kỳ kia.
  
 - Mục 3: Liệt kê NHIỀU NHẤT 5 khách hàng đầu ra lớn nhất theo chi tiết phát sinh nợ của sổ chi tiết phải 
-thu khách hàng (sổ 131) năm gần nhất. Cột "Tỷ trọng" = phát sinh nợ của dòng chia cho `totals.debit_movement` của chính sổ 131. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu ra này
+thu khách hàng (sổ 131) năm gần nhất — lấy bảng `sorted_by: "debit_movement"`, đã sắp sẵn đúng thứ tự. Cột "Tỷ trọng" = phát sinh nợ của dòng chia cho `totals.debit_movement` của chính sổ 131. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu ra này
 NẾU hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo khảo sát, CIC, báo cáo ngành).
 Không có thì ghi "Không có dữ liệu" — KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com
 hay GSO theo trí nhớ.
  
 - Mục 4: Liệt kê NHIỀU NHẤT 5 khách hàng đầu vào lớn nhất theo chi tiết phát sinh có của sổ chi tiết phải 
-trả người bán (sổ 331) năm gần nhất. Cột "Tỷ trọng" = phát sinh có của dòng chia cho `totals.credit_movement` của chính sổ 331. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu vào này
+trả người bán (sổ 331) năm gần nhất — lấy bảng `sorted_by: "credit_movement"`, đã sắp sẵn đúng thứ tự. Cột "Tỷ trọng" = phát sinh có của dòng chia cho `totals.credit_movement` của chính sổ 331. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu vào này
 NẾU hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo khảo sát, CIC, báo cáo ngành).
 Không có thì ghi "Không có dữ liệu" — KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com
 hay GSO theo trí nhớ.

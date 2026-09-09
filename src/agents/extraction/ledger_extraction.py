@@ -71,25 +71,37 @@ TOTAL_ROW_NAMES = {"tong", "tong cong", "cong", "total", "sum"}
 # How many rows each report section asks for. The guidance says "top 5" and
 # "NHIỀU NHẤT 5" throughout, so this is the number, not a budget to tune.
 TOP_ROWS = 5
-# Which column each report section ranks by, per account category. One account is
-# asked for under several of them — TK 131 appears in three sections sorted three
-# different ways — so a single "biggest rows" cut would serve one section and
-# starve the others. The rows kept are the UNION of the top 5 of each column here.
+# Which column each report section ranks by, per account category. ONE RANKING PER
+# COLUMN — the account comes back holding a separate ordered list for each entry
+# here, each labelled with the column it was sorted by.
+#
+# The earlier design asked for the UNION of those top fives as a single list. A
+# live run showed why that fails: computing a union of three rankings is several
+# steps of arithmetic done in the head, and nothing in the answer lets a checker
+# see whether it came out right. On 2026-09-08 every account with more than five
+# rows came back with exactly five, and TK 341 dropped the lender ranked 2nd by
+# movement and 4th by balance while keeping one that led no ranking at all. Split
+# into one list per column, the task is "sort by this column, take five" — one
+# step, and both the order and the count are checkable from the answer itself.
 #
 # Traced from src/templates: financial-analysis-guidance 1.1 / 2.2.1a-c / 2.2.2a-b
-# and business-activity-guidance mục 3 / mục 4.
+# and business-activity-guidance mục 1 (sơ đồ) / mục 2 / mục 3 / mục 4.
 TOP_ROW_CRITERIA: dict[str, tuple[str, ...]] = {
     "receivable": ("debit_movement", "closing_debit", "closing_credit"),
-    "other_receivable": ("debit_movement", "closing_debit", "closing_credit"),
     "payable": ("credit_movement", "closing_debit", "closing_credit"),
-    "other_payable": ("credit_movement", "closing_debit", "closing_credit"),
-    "borrowing": ("credit_movement", "closing_credit"),
     "inventory": ("outflow_value", "closing_value"),
-    # Nothing enumerates rows of these, but a category with no criterion would
-    # silently keep everything, so give them the two balance columns.
-    "cash": ("closing_debit", "closing_credit"),
-    "fixed_asset": ("closing_debit", "closing_credit"),
-    "equity": ("closing_debit", "closing_credit"),
+    # No section enumerates rows of these. FA 2.2.2c (vay nợ) is prose with no
+    # table, and 2.2.1e/2.2.2e take their figures from the balance sheet, not the
+    # ledger. One ranking by the closing balance of the side the account sits on
+    # is enough to let the prose name its largest counterparties; asking for the
+    # movement columns too was work nobody reads.
+    "borrowing": ("closing_credit",),
+    "other_payable": ("closing_credit",),
+    "other_receivable": ("closing_debit",),
+    "cash": ("closing_debit",),
+    "fixed_asset": ("closing_debit",),
+    "equity": ("closing_credit",),
+    # Which side this sheet sits on is exactly what is unknown, so keep both.
     "unknown": ("closing_debit", "closing_credit"),
     "": ("closing_debit", "closing_credit"),
 }
@@ -234,7 +246,9 @@ or by product group.
 "item_count"     how many detail rows the SHEET holds — not len(items). It tells
                  the reader the returned rows are 5 of 143.
 "item_columns"   the field names of a detail row, in the order the values come.
-"items"          the largest detail rows only — see "WHICH ROWS TO RETURN".
+"rankings"       a LIST of {{"sorted_by": "<column>", "items": [rows]}} — one
+                 entry per column listed for this category, each holding that
+                 column's top 5. See "WHICH ROWS TO RETURN".
 
 ════ "period" ════
 "from"/"to"    ISO "YYYY-MM-DD", read from the banner line above the table.
@@ -249,30 +263,42 @@ Common phrasings and how they expand:
 If no line states a period, leave all three "" — do NOT infer one from a file
 name that merely contains a year.
 
-════ WHICH ROWS TO RETURN ════
+════ WHICH ROWS TO RETURN — "rankings" ════
 Return the LARGEST rows, not all of them. The report lists at most five
 counterparties or items per section, so everything past that is paid for and
 never read.
 
 Different sections rank by different columns, and one account is asked for under
-several of them. Rank by EACH column listed for the account's category, take the
-top 5 of each, and return the UNION with duplicates removed — a row that leads
-two rankings appears once:
+several of them. So an account does NOT come back with one list of rows. It comes
+back with ONE SEPARATE LIST PER COLUMN, each labelled with the column it was
+sorted by. Here is which columns each category gets a list for:
 
 <<TOP_ROW_CRITERIA_TABLE>>
 
-Rank by ABSOLUTE value, so a large credit balance is not sorted below a small
-debit one.
+Build each list on its own, and do NOT merge them:
 
-A sheet with 5 rows or fewer: return all of them. Never return fewer than five
-rows from a sheet that has five — the report has a shape to fill.
+  1. Take the column named on the line for this account's category.
+  2. Sort EVERY detail row of the sheet by that column, largest first, by
+     ABSOLUTE value — so a large credit balance is not sorted below a small
+     debit one.
+  3. Keep the first 5. A sheet with fewer than 5 detail rows: keep all of them.
+  4. Write {{"sorted_by": "<that column name>", "items": [ ...those rows... ]}}.
+  5. Repeat from step 1 for the next column on the line.
 
-"totals" still covers the whole account. "item_count" still counts the whole
-sheet. Only "items" is a selection.
+A counterparty that leads two of the lists APPEARS IN BOTH, with the same figures
+in both. Do not remove it from one of them, and do not try to combine the lists
+into a single de-duplicated list — the report reads one list per section and each
+section needs its own order.
 
-════ "items" — THE EASIEST PART TO GET WRONG ════
+"sorted_by" must be one of the names in "item_columns", spelled identically.
+
+"totals" still covers the WHOLE account and "item_count" still counts the WHOLE
+sheet, no matter how few rows the lists hold.
+
+════ THE ROWS INSIDE "items" — THE EASIEST PART TO GET WRONG ════
 Name the columns ONCE per account in "item_columns", then give each detail row
 as an ARRAY of values in that exact order. Never repeat the field names on a row.
+The same "item_columns" governs the rows of EVERY list in "rankings".
 
 Debt sheets (receivables, payables, borrowings) — the CODE and the NAME are
 SEPARATE COLUMNS. A live run put "HSCANTHO" where the counterparty name belonged
@@ -386,9 +412,19 @@ a reason to give up on the sheet.
       }},
       "item_count": 2,
       "item_columns": ["counterparty_code","counterparty_name","opening_debit","opening_credit","debit_movement","credit_movement","closing_debit"],
-      "items": [
-        ["","NGUYỄN XUÂN VĨ",0,0,20738000,20738000,0],
-        ["","ĐỒNG VĂN NGỌC",0,10000000,1391300000,1381300000,0]
+      "rankings": [
+        {{"sorted_by": "debit_movement", "items": [
+          ["","ĐỒNG VĂN NGỌC",0,10000000,1391300000,1381300000,0],
+          ["","NGUYỄN XUÂN VĨ",0,0,20738000,20738000,0]
+        ]}},
+        {{"sorted_by": "closing_debit", "items": [
+          ["","NGUYỄN XUÂN VĨ",0,0,20738000,20738000,0],
+          ["","ĐỒNG VĂN NGỌC",0,10000000,1391300000,1381300000,0]
+        ]}},
+        {{"sorted_by": "closing_credit", "items": [
+          ["","NGUYỄN XUÂN VĨ",0,0,20738000,20738000,0],
+          ["","ĐỒNG VĂN NGỌC",0,10000000,1391300000,1381300000,0]
+        ]}}
       ]
     }},
     "156@20250101-20251231": {{
@@ -435,9 +471,15 @@ a reason to give up on the sheet.
       }},
       "item_count": 2,
       "item_columns": ["item_name","opening_quantity","opening_value","inflow_quantity","inflow_value","outflow_quantity","outflow_value","closing_quantity","closing_value"],
-      "items": [
-        ["Mooc",49,22017037516,113,48305699921,112,48335332899,50,21987404538],
-        ["Đầu kéo",191,205670531917,1381,1590661714792,1001,1156312267740,571,640019978969]
+      "rankings": [
+        {{"sorted_by": "outflow_value", "items": [
+          ["Đầu kéo",191,205670531917,1381,1590661714792,1001,1156312267740,571,640019978969],
+          ["Mooc",49,22017037516,113,48305699921,112,48335332899,50,21987404538]
+        ]}},
+        {{"sorted_by": "closing_value", "items": [
+          ["Đầu kéo",191,205670531917,1381,1590661714792,1001,1156312267740,571,640019978969],
+          ["Mooc",49,22017037516,113,48305699921,112,48335332899,50,21987404538]
+        ]}}
       ]
     }}
   }},
@@ -477,6 +519,13 @@ def render_record(record: dict[str, Any], indent: int = 2) -> str:
                 for row in value
             )
             return f"[\n{rows}\n{pad}]"
+        # "rankings" is a list of dicts. Without this branch it falls through to
+        # the compact dump at the bottom and the whole thing — every ranking,
+        # every row — lands on one line, undoing the row-per-line shape the
+        # budget was measured against.
+        if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
+            body = ",\n".join(inner + encode(item, depth + 1) for item in value)
+            return f"[\n{body}\n{pad}]"
         if isinstance(value, dict):
             body = ",\n".join(
                 f"{inner}{json.dumps(key, ensure_ascii=False)}: {encode(item, depth + 1)}"
@@ -488,31 +537,15 @@ def render_record(record: dict[str, Any], indent: int = 2) -> str:
     return encode(record, 0)
 
 
-def account_totals(account: dict[str, Any]) -> dict[str, Any]:
-    """Column sums for one account, added up rather than asked for.
+def _row_value(row: list[Any], index: int) -> float:
+    """One column of a row as a magnitude, for ranking. Missing reads as zero."""
 
-    The model used to return these. It cost 6.3% of the record to carry figures
-    that are the sum of the rows underneath them — verified equal on all 38
-    fields of a real record before the field was dropped.
-
-    What that lost: a printed total row is a witness independent of the detail
-    rows, so when the model drops rows the two disagree and the gap shows. That
-    job now belongs to ``item_count``, one number instead of six.
-    """
-
-    columns = account.get("item_columns") or []
-    rows = account.get("items") or []
-    totals: dict[str, float] = {}
-    for index, column in enumerate(columns):
-        values = [
-            row[index] for row in rows
-            if index < len(row)
-            and isinstance(row[index], (int, float))
-            and not isinstance(row[index], bool)
-        ]
-        if values:
-            totals[column] = round(sum(values), 2)
-    return totals
+    if index >= len(row):
+        return 0.0
+    value = row[index]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return abs(float(value))
 
 
 def _magnitude(row: list[Any], label_at: set[int]) -> float:
@@ -568,16 +601,34 @@ def fit_to_budget(
     def shrink(keep: int) -> dict[str, Any]:
         accounts = {}
         for key, account in (record.get("accounts") or {}).items():
-            rows = account.get("items") or []
-            if len(rows) <= keep:
-                accounts[key] = account
-                continue
             columns = account.get("item_columns") or []
             label_at = set(_label_positions(columns))
-            ordered = sorted(rows, key=lambda r: _magnitude(r, label_at), reverse=True)
-            accounts[key] = {**account,
-                             "items": ordered[:keep]
-                             + [_aggregate(ordered[keep:], columns)]}
+            # Trim each ranking on its own. Merging them first and cutting once
+            # would let a heavy list eat a light one's allowance, and the whole
+            # point of the split is that a section reads its own list.
+            rankings = []
+            for ranking in account.get("rankings") or []:
+                rows = ranking.get("items") or []
+                if len(rows) <= keep:
+                    rankings.append(ranking)
+                    continue
+                # Sort again here rather than trusting the order that arrived.
+                # _note_slice_problems reports a badly ordered list, but reporting
+                # happens after this trim, and taking rows[:keep] off a list the
+                # model shuffled would throw away the largest row for good. The
+                # aggregate row stands for the tail of THIS list, so it stays in it.
+                at = columns.index(ranking["sorted_by"]) \
+                    if ranking.get("sorted_by") in columns else None
+                ordered = sorted(
+                    rows,
+                    key=(lambda r: _row_value(r, at)) if at is not None
+                    else (lambda r: _magnitude(r, label_at)),
+                    reverse=True,
+                )
+                rankings.append({**ranking,
+                                 "items": ordered[:keep]
+                                 + [_aggregate(ordered[keep:], columns)]})
+            accounts[key] = {**account, "rankings": rankings}
         return {**record, "accounts": accounts}
 
     def size(candidate: dict[str, Any]) -> int:
@@ -585,8 +636,9 @@ def fit_to_budget(
 
     if size(record) <= budget:
         return record
-    widest = max((len(a.get("items") or [])
-                  for a in (record.get("accounts") or {}).values()), default=0)
+    widest = max((len(r.get("items") or [])
+                  for a in (record.get("accounts") or {}).values()
+                  for r in (a.get("rankings") or [])), default=0)
     # Monotone in `keep`, so a binary search costs ~log2(rows) renders.
     low, high = 0, widest
     while low < high:
@@ -616,7 +668,8 @@ def _render_criteria_table() -> str:
     names = [", ".join(cats) for cats in grouped.values()]
     width = max(len(n) for n in names)
     return "\n".join(
-        f"  {name:<{width}} : {', '.join(columns)}"
+        f"  {name:<{width}} : {len(columns)} list"
+        f"{'s' if len(columns) > 1 else ''} — {', '.join(columns)}"
         for name, columns in zip(names, grouped)
     )
 
@@ -756,30 +809,43 @@ def _drop_total_rows(record: dict[str, Any]) -> None:
     for account in (record.get("accounts") or {}).values():
         if not isinstance(account, dict):
             continue
-        rows = account.get("items") or []
         label_at = _label_positions(account.get("item_columns") or [])
-        kept = [
-            row for row in rows
-            if not any(
-                i < len(row) and normalize_text(str(row[i])) in TOTAL_ROW_NAMES
-                for i in label_at
-            )
-        ]
-        if len(kept) != len(rows):
-            account["items"] = kept
+        # The same printed total row can land in several rankings, so count the
+        # distinct labels dropped rather than the drops: subtracting once per
+        # ranking would take one real detail row off item_count for every extra
+        # list the account happens to carry.
+        dropped_labels: set[str] = set()
+        for ranking in account.get("rankings") or []:
+            if not isinstance(ranking, dict):
+                continue
+            rows = ranking.get("items") or []
+            kept = []
+            for row in rows:
+                names = [
+                    normalize_text(str(row[i])) for i in label_at if i < len(row)
+                ]
+                hit = [n for n in names if n in TOTAL_ROW_NAMES]
+                if hit:
+                    dropped_labels.add(hit[0])
+                else:
+                    kept.append(row)
+            if len(kept) != len(rows):
+                ranking["items"] = kept
+        if dropped_labels:
             # Decremented, not reassigned: item_count is the sheet's own detail
-            # row count and "items" is only the top-N slice of it, so setting it
-            # to len(kept) would shrink the sheet to the size of the excerpt. A
-            # printed total was never a detail row, so it comes off both.
+            # row count and a ranking is only the top-N slice of it, so setting
+            # it to a list length would shrink the sheet to the size of an
+            # excerpt. A printed total was never a detail row, so it comes off.
             declared = account.get("item_count")
+            longest = max((len(r.get("items") or [])
+                           for r in (account.get("rankings") or [])
+                           if isinstance(r, dict)), default=0)
             if isinstance(declared, int):
-                account["item_count"] = max(
-                    len(kept), declared - (len(rows) - len(kept))
-                )
+                account["item_count"] = max(longest, declared - len(dropped_labels))
 
 
 def _note_slice_problems(record: dict[str, Any]) -> None:
-    """Check the two things that stay true once "items" is only a slice.
+    """Check what stays true once each ranking is a top-N slice of one column.
 
     ``item_count`` used to equal ``len(items)``, and comparing them caught a
     reply cut off mid-array — ``JsonOutputParser`` repairs truncated JSON rather
@@ -787,18 +853,22 @@ def _note_slice_problems(record: dict[str, Any]) -> None:
     account declare 26 rows and carry 18. That comparison is now meaningless:
     the two differ by design on every account with more than a handful of rows.
 
-    What still holds of a top-N slice:
+    Five things still hold, and the first three only became checkable when each
+    list was cut down to a single criterion:
 
-    * it has at least ``TOP_ROWS`` rows whenever the sheet had that many — the
-      report asks for five, and fewer than five from a sheet that has them is a
-      failure, not a shorter answer. Verified against the sample workbook, where
-      every account with 5+ rows produced a union of 6 or more;
+    * every column named in ``TOP_ROW_CRITERIA`` for this category has a list,
+      and every list's ``sorted_by`` is a real column of ``item_columns``;
+    * each list is ordered by its own column, largest absolute value first;
+    * a counterparty appearing in two lists carries the same figures in both;
+    * a list holds at least ``TOP_ROWS`` rows whenever the sheet had that many —
+      the report asks for five, and fewer than five from a sheet that has them is
+      a failure, not a shorter answer;
     * its column sums cannot exceed the account's own totals. A part is never
       larger than the whole, so exceeding means either the wrong rows were kept
       or ``totals`` is not the account's.
 
-    Neither notices a model that quietly picked the wrong five. Nothing here can:
-    that would need the rows it did not send.
+    None of these notices a model that quietly picked the wrong five and ordered
+    them correctly. Nothing here can: that would need the rows it did not send.
     """
 
     problems = []
@@ -806,32 +876,77 @@ def _note_slice_problems(record: dict[str, Any]) -> None:
         if not isinstance(account, dict):
             continue
         columns = account.get("item_columns") or []
-        rows = account.get("items") or []
         declared = account.get("item_count")
-
-        if isinstance(declared, int) and len(rows) < min(declared, TOP_ROWS):
-            problems.append(
-                f"{key}: sheet has {declared} rows but only {len(rows)} came back"
-            )
-
         totals = account.get("totals") or {}
-        for index, column in enumerate(columns):
-            cap = totals.get(column)
-            if not isinstance(cap, (int, float)) or isinstance(cap, bool):
-                continue
-            got = sum(
-                row[index] for row in rows
-                if index < len(row)
-                and isinstance(row[index], (int, float))
-                and not isinstance(row[index], bool)
+        rankings = [r for r in (account.get("rankings") or []) if isinstance(r, dict)]
+
+        wanted = TOP_ROW_CRITERIA.get(account.get("category") or "", ())
+        got_by = [r.get("sorted_by") for r in rankings]
+        missing = [c for c in wanted if c not in got_by]
+        if missing:
+            problems.append(
+                f"{key}: missing ranking(s) for {', '.join(missing)} — expected "
+                f"{len(wanted)}, got {len(rankings)}"
             )
-            # Rounding in the printed total is normal; a slice genuinely bigger
-            # than its account is not.
-            if abs(got) > abs(cap) + 1:
+        for column in got_by:
+            if column not in columns:
                 problems.append(
-                    f"{key}.{column}: rows sum to {got:,.0f}, above the account "
-                    f"total of {cap:,.0f}"
+                    f"{key}: sorted_by {column!r} is not one of item_columns"
                 )
+
+        # Same counterparty, two lists, two sets of figures — one of them is a
+        # transcription the model invented on the second pass over the sheet.
+        label_at = _label_positions(columns)
+        seen: dict[str, tuple[Any, ...]] = {}
+        for ranking in rankings:
+            for row in ranking.get("items") or []:
+                name = "|".join(str(row[i]) for i in label_at if i < len(row))
+                if not name:
+                    continue
+                figures = tuple(row)
+                if name in seen and seen[name] != figures:
+                    problems.append(
+                        f"{key}: rows for {name!r} disagree between rankings"
+                    )
+                seen.setdefault(name, figures)
+
+        for ranking in rankings:
+            column = ranking.get("sorted_by")
+            rows = ranking.get("items") or []
+            label = f"{key}[{column}]"
+
+            if column in columns:
+                at = columns.index(column)
+                values = [_row_value(row, at) for row in rows]
+                if any(a < b for a, b in zip(values, values[1:])):
+                    problems.append(
+                        f"{label}: rows are not sorted by {column} — "
+                        f"{[f'{v:,.0f}' for v in values[:6]]}"
+                    )
+
+            if isinstance(declared, int) and len(rows) < min(declared, TOP_ROWS):
+                problems.append(
+                    f"{label}: sheet has {declared} rows but only {len(rows)} "
+                    "came back"
+                )
+
+            for index, name in enumerate(columns):
+                cap = totals.get(name)
+                if not isinstance(cap, (int, float)) or isinstance(cap, bool):
+                    continue
+                got = sum(
+                    row[index] for row in rows
+                    if index < len(row)
+                    and isinstance(row[index], (int, float))
+                    and not isinstance(row[index], bool)
+                )
+                # Rounding in the printed total is normal; a slice genuinely
+                # bigger than its account is not.
+                if abs(got) > abs(cap) + 1:
+                    problems.append(
+                        f"{label}.{name}: rows sum to {got:,.0f}, above the "
+                        f"account total of {cap:,.0f}"
+                    )
 
     if problems:
         record["extraction_notes"].append(
