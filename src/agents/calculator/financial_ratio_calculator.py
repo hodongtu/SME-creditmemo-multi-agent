@@ -15,6 +15,10 @@ from src.agents.extraction.financial_statement_extraction import (
 )
 
 
+from src.agents.extraction.financial_statement_extraction import (
+    iter_line_items,
+)
+
 BALANCE_SHEET = "balance_sheet"
 INCOME_STATEMENT = "income_statement"
 CASH_FLOW = "cash_flow_statement"
@@ -554,12 +558,7 @@ class FinancialRatioCalculator:
                 statement = extraction.get(statement_key)
                 if not isinstance(statement, dict):
                     continue
-                for line_item in statement.get("line_items") or []:
-                    if not isinstance(line_item, dict):
-                        continue
-                    values = line_item.get("values")
-                    if not isinstance(values, dict):
-                        continue
+                for _, _, values, _ in iter_line_items(statement):
                     for year in values:
                         label = normalize_period_label(
                             year, current_year, previous_year
@@ -606,17 +605,14 @@ class FinancialRatioCalculator:
                 statement = extraction.get(statement_key)
                 if not isinstance(statement, dict):
                     continue
-                for line_item in statement.get("line_items") or []:
-                    if not isinstance(line_item, dict):
-                        continue
-                    label = line_item.get("label") or ""
-                    values = line_item.get("values")
-                    if not label or not isinstance(values, dict):
+                for label, code, values, _ in iter_line_items(statement):
+                    label = label or ""
+                    if not label or not values:
                         continue
 
                     matched = self.match_metric(
                         label,
-                        line_item.get("code"),
+                        code,
                         statement_key,
                     )
                     if matched is None:
@@ -733,12 +729,10 @@ class FinancialRatioCalculator:
         years = sorted(yearly_metrics)
         lines = [
             METRICS_BLOCK_HEADING,
-            "The following figures were calculated deterministically from extracted documents before LLM analysis.",
-            "Use these values as the primary source for ratio tables when available.",
-            "If a value is missing, say it is unavailable instead of estimating it.",
-            "Đơn vị mọi giá trị tiền tệ (line items) trong block này: **ĐỒNG**, "
-            "giống mọi khối dữ liệu khác trong prompt. Chép nguyên con số, "
-            "chương trình tự quy đổi khi dựng báo cáo.",
+            "Computed by the program from the extracted documents — use these "
+            "as the primary source for every ratio table. Money is in đồng; "
+            "copy the figure as printed and the program converts it. Where a "
+            "value is missing, say so rather than estimating it.",
             "",
         ]
         # Above the numbers, not below them: a reader who has already worked
@@ -757,9 +751,9 @@ class FinancialRatioCalculator:
         if source_files:
             lines.extend(
                 [
-                    "NGUỒN SỐ LIỆU — dùng tên file dưới đây khi trích dẫn. "
-                    "\"[PRE-COMPUTED FINANCIAL METRICS]\" là tên khối kỹ thuật "
-                    "trong prompt, TUYỆT ĐỐI không ghi tên khối này vào báo cáo:",
+                    "SOURCE FILES — cite by the filenames below. "
+                    "\"[PRE-COMPUTED FINANCIAL METRICS]\" is this block's "
+                    "internal label; never write it into the report:",
                 ]
             )
             lines.extend(
@@ -767,8 +761,10 @@ class FinancialRatioCalculator:
                 for year, names in source_files.items()
             )
             lines.append("")
-        lines.append("Important formula notes from the financial analysis template:")
-        lines.extend(f"- {ratio.label}: {ratio.formula}" for ratio in self.RATIO_DEFINITIONS)
+        # Công thức KHÔNG in ra ở đây. Bảng "Computed financial ratios" bên
+        # dưới đã có cột "Công thức", và đối chiếu cho thấy cả 21 công thức của
+        # danh sách này lặp nguyên văn xuống đó — 504 token nói lại điều bảng
+        # đang nói.
         lines.extend(
             [
                 "",

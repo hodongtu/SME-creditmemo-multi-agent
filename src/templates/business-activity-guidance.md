@@ -5,13 +5,10 @@ description: >-
 ---
  
 #### NGUYÊN TẮC CHUNG
-- Bố cục là khung tham khảo, không phải biểu mẫu bắt buộc điền kín.
-- Chỉ trình bày dòng/mục thực sự có căn cứ trong hồ sơ; xoá hẳn dòng không có dữ liệu.
+- Được BỎ DÒNG không có dữ liệu, KHÔNG được đổi CỘT của bảng trong bố cục; mục nào
+  hồ sơ không đề cập thì bỏ luôn bảng/sơ đồ của mục đó.
 - Không tự dựng danh sách "Top 3/Top 5" nếu hồ sơ không nêu — liệt kê đúng số lượng có thật.
-- Mục nào hồ sơ không đề cập thì ghi "Không có dữ liệu" và bỏ bảng/sơ đồ.
-- Mọi tỷ trọng phần trăm — trong bảng lẫn trên dây nối sơ đồ — làm tròn 1 chữ số
-  thập phân, dấu phẩy thập phân: `35,2%`. Làm tròn xong mà phần thập phân là 0 thì
-  bỏ hẳn: viết `8%`, không viết `8,0%`. Không viết `35,17%`.
+- Số trên dây nối sơ đồ làm tròn như mọi phần trăm khác (xem NUMBER FORMAT RULE).
 - MẪU SỐ CỦA MỌI CỘT "Tỷ trọng" (mục 2, 3, 4) VÀ MỌI SỐ TRÊN DÂY NỐI SƠ ĐỒ:
   - Mẫu số nằm ở `totals` của khối [EXTRACTED DETAIL LEDGER], LẤY ĐÚNG CỘT ĐANG TÍNH
   của ĐÚNG TÀI KHOẢN mà mục đó yêu cầu:
@@ -54,9 +51,6 @@ description: >-
   341 vào đó thì cả bảng lẫn mẫu số đều sai theo.
   - CÂU VĂN dùng lại đúng con số phần trăm đã ghi trong bảng, không tính lại bằng
   mẫu số khác.
-- Ô bảng có giá trị đúng bằng không thì viết dấu gạch ngang `-`, không viết `0` hay
-  `0,00%`. Ô THIẾU dữ liệu vẫn để trống — trống là hồ sơ không nêu, `-` là hồ sơ nêu
-  và bằng không.
  
 #### QUY TẮC VẼ SƠ ĐỒ
 - SƠ ĐỒ (mục 1 và mục 5):
@@ -72,8 +66,7 @@ description: >-
   dài hơn thì nhãn cao hơn cả sợi dây và át mất sơ đồ. Viết "trả chậm 30 ngày",
   không viết "thanh toán trong vòng 30 ngày kể từ ngày nghiệm thu". Chi tiết đầy
   đủ để ở bảng hoặc phần bình luận.
-    - Tỷ trọng trên dây nối làm tròn như mọi chỗ khác (xem NGUYÊN TẮC CHUNG):
-  `35,2%`, và `8%` chứ không `8,0%`. Số trên dây nối phải khớp cột Tỷ trọng của bảng,
+    - Số trên dây nối phải khớp cột Tỷ trọng của bảng,
   kể cả cách làm tròn — hai chỗ lệch nhau là mâu thuẫn trong cùng một trang.
     - Nhãn tỷ trọng chỉ ghi PHẦN TRĂM, KHÔNG kèm số tuyệt đối. Viết `-->|6,03%|`,
   không viết `-->|6,03%<br/>3,65 tỷ|` hay `-->|6,03% (3,65 tỷ)|`. Số tuyệt đối
@@ -144,17 +137,18 @@ ra -> sản phẩm đầu ra.
  
 - Mục 2: Liệt kê NHIỀU NHẤT 5 sản phẩm/dịch vụ chính của khách hàng và tỷ trọng của các sản phẩm này trong 2 năm gần nhất — lấy bảng `sorted_by: "outflow_value"` của sổ kho, KHÔNG lấy bảng `closing_value` (đó là bảng của FA mục 2.2.1c). Tỷ trọng = doanh số xuất của mặt hàng chia cho `totals.outflow_value` của chính sổ kho, TỪNG KỲ một — cột năm nào chia cho tổng của năm đó, không mượn tổng của kỳ kia.
  
-- Mục 3: Liệt kê NHIỀU NHẤT 5 khách hàng đầu ra lớn nhất theo chi tiết phát sinh nợ của sổ chi tiết phải 
-thu khách hàng (sổ 131) năm gần nhất — lấy bảng `sorted_by: "debit_movement"`, đã sắp sẵn đúng thứ tự. Cột "Tỷ trọng" = phát sinh nợ của dòng chia cho `totals.debit_movement` của chính sổ 131. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu ra này
-NẾU hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo khảo sát, CIC, báo cáo ngành).
-Không có thì ghi "Không có dữ liệu" — KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com
-hay GSO theo trí nhớ.
- 
-- Mục 4: Liệt kê NHIỀU NHẤT 5 khách hàng đầu vào lớn nhất theo chi tiết phát sinh có của sổ chi tiết phải 
-trả người bán (sổ 331) năm gần nhất — lấy bảng `sorted_by: "credit_movement"`, đã sắp sẵn đúng thứ tự. Cột "Tỷ trọng" = phát sinh có của dòng chia cho `totals.credit_movement` của chính sổ 331. Nêu trạng thái hoạt động, doanh thu, vốn chủ sở hữu của các đầu vào này
-NẾU hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo khảo sát, CIC, báo cáo ngành).
-Không có thì ghi "Không có dữ liệu" — KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com
-hay GSO theo trí nhớ.
+- Mục 3: Liệt kê NHIỀU NHẤT 5 khách hàng đầu ra lớn nhất — lấy bảng
+`sorted_by: "debit_movement"` của sổ 131, đã sắp sẵn đúng thứ tự. Cột "Tỷ trọng" =
+phát sinh nợ của dòng chia cho `totals.debit_movement` của chính sổ đó.
+
+- Mục 4: Liệt kê NHIỀU NHẤT 5 khách hàng đầu vào lớn nhất — lấy bảng
+`sorted_by: "credit_movement"` của sổ 331. Cột "Tỷ trọng" = phát sinh có của dòng
+chia cho `totals.credit_movement` của chính sổ đó.
+
+- Mục 3 và mục 4 dùng chung một luật về thông tin đối tác: nêu trạng thái hoạt động,
+doanh thu, vốn chủ sở hữu CHỈ KHI hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo
+khảo sát, CIC, báo cáo ngành). KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com hay GSO
+theo trí nhớ.
  
 - Mục 5: Vẽ sơ đồ quy trình sản xuất, quy trình ký kết hợp đồng theo báo cáo am hiểu ngành (nếu có).
  

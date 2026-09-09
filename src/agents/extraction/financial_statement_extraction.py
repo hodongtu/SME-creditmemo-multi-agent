@@ -13,6 +13,22 @@ from src.agents.extraction.structured_extraction import (
 from src.utils.common import normalize_text
 
 
+# Keys the block prints, in the order the schema declares them. A record read
+# back from logs/ or a cache can still carry keys the schema has since dropped —
+# "notes_summary" was 2,182 tokens per file — and the block would print them
+# without anything noticing. Filtering against this list means removing a key
+# from the schema is enough; nothing has to be cleaned up downstream.
+BLOCK_KEYS = (
+    "customer",
+    "document_type",
+    "reporting_period",
+    "audit_opinion",
+    "balance_sheet",
+    "income_statement",
+    "cash_flow_statement",
+    "extraction_notes",
+)
+
 REQUIRED_TOP_LEVEL_KEYS = {
     "document_type",
     "reporting_period",
@@ -20,7 +36,6 @@ REQUIRED_TOP_LEVEL_KEYS = {
     "balance_sheet",
     "income_statement",
     "cash_flow_statement",
-    "notes_summary",
 }
 
 FINANCIAL_STATEMENT_EXTRACTION_SYSTEM_PROMPT = """
@@ -51,8 +66,7 @@ MONEY UNITS:
 - Keep the sign: negative for items shown negative or in parentheses.
 - Each statement's "source_unit" records the unit printed at the head of THAT
   statement: "dong" | "trieu dong" | "ty dong". A statement with no unit note
-  gets "dong". If the notes carry their own unit, record it in the source_unit
-  of "notes_summary" — do not copy the main statement's unit across.
+  gets "dong".
 
 The OCR text carries "--- Page N ---" markers at page boundaries, used to cite
 sources for the reader. For EVERY STATEMENT you must fill in its "page" (the
@@ -60,15 +74,6 @@ page the statement starts on). For an individual line, fill in "page" when you
 can determine it and null when you cannot — but this must NEVER reduce the
 number of lines you extract. Complete lines matter more than complete page
 numbers. Do not invent a page number.
-
-"notes_summary" condenses the notes to the financial statements — usually the
-longest section. Keep only what bears on credit underwriting, without copying it
-out verbatim: material accounting policies, related-party transactions,
-contingent liabilities, events after the reporting date, and the breakdown of
-large items (borrowings, large receivables/payables, inventory, and so on). Use
-"other_material_disclosures" for any other significant point that fits none of
-those buckets — never drop material information just because there is no
-ready-made slot for it.
 
 REPORTING PERIOD LABELS — applies to EVERY period label anywhere in the JSON:
 write exactly "Năm YYYY" and no other form.
@@ -112,39 +117,31 @@ Return EXACTLY this JSON schema and no other text:
     "source_unit": "dong | trieu dong | ty dong — the unit PRINTED at the head of the statement, default dong",
     "page": <page the statement starts on, required when determinable>,
     "years": ["every period in the statement, each written as 'Năm YYYY'"],
+    "item_columns": ["label", "code", "Năm YYYY", "Năm YYYY", "page"],
     "line_items": [
-      {{"label": "line name", "code": "code if any, otherwise null",
-        "values": {{"Năm YYYY": <number exactly as printed>}}, "page": <integer page number or null>}}
+      ["line name", "code if any else null", <number>, <number>, <page or null>]
       // LIST EVERY LINE OF THE STATEMENT, no shortening
     ]
   }},
   "income_statement": {{"unit": "VNĐ", "source_unit": "dong | trieu dong | ty dong",
-                       "page": <page number>, "years": [], "line_items": []}},
+                       "page": <page number>, "years": [], "item_columns": [], "line_items": []}},
   "cash_flow_statement": {{"unit": "VNĐ", "source_unit": "dong | trieu dong | ty dong",
-                          "page": <page number>, "years": [], "line_items": []}},
-  "notes_summary": {{
-    "source_unit": "dong | trieu dong | ty dong — the unit PRINTED in the notes, default dong",
-    "accounting_policies": "brief summary or an empty string (ending with '(trang N)' when determinable)",
-    "related_party_transactions": [
-      {{"counterparty": "...", "nature": "...", "amount": <number exactly as printed, or null>, "year": "...",
-        "page": <integer page number or null>}}
-    ],
-    "contingent_liabilities": ["... (trang N)"],
-    "subsequent_events": ["... (trang N)"],
-    "key_item_breakdowns": [
-      {{"item": "e.g. Vay và nợ thuê tài chính", "breakdown": "...", "amount": <number exactly as printed, or null>,
-        "page": <integer page number or null>}}
-    ],
-    "other_material_disclosures": ["... (trang N)"]
-  }},
+                          "page": <page number>, "years": [], "item_columns": [], "line_items": []}},
   "extraction_notes": ["notes on missing data, uncertainty, or poor OCR"]
 }}
 
-For the free-text entries (contingent_liabilities, subsequent_events,
-other_material_disclosures, accounting_policies): append "(trang N)" to the
-string when you can determine the page; when you cannot, leave the string
-without it — never write "(trang null)" or anything like it. The suffix stays
-Vietnamese because it is printed in the report.
+════ "line_items" — POSITIONAL ARRAYS, NOT OBJECTS ════
+Name the columns ONCE per statement in "item_columns", then give each line as an
+ARRAY of values in that exact order. Never repeat "label"/"code"/"values"/"page"
+on a row: the names were 40% of what the statement weighed.
+
+"item_columns" is always ["label", "code", <one entry per period, newest first>,
+"page"]. The periods are the same ones listed in "years", written the same way.
+
+A line whose every period figure is empty is a GROUP HEADING, not data — leave it
+out. "I. LƯU CHUYỂN TIỀN TỪ HOẠT ĐỘNG KINH DOANH" with no figures beside it names
+the block underneath and carries nothing to underwrite on. A line with a figure
+in one period and none in another STAYS, with null for the empty period.
 """
 
 
@@ -261,6 +258,110 @@ def normalize_period_label(
     return text
 
 
+# Columns of a line-item row that are not a reporting period. Everything else in
+# "item_columns" names a year, which is what lets one declaration at the top of a
+# statement replace a "values" dict repeated on all 108 rows.
+ROW_META_COLUMNS = ("label", "code", "page")
+
+
+def iter_line_items(statement: Any):
+    """Yield (label, code, values, page) for each row, in either shape.
+
+    Two shapes exist on purpose. Rows are positional arrays under
+    "item_columns" now; before that each row was an object repeating
+    label/code/values/page, and every record already written to logs/ is in that
+    older shape. Readers go through here so neither the ratio calculator nor the
+    period normaliser has to know which one it is holding.
+    """
+
+    if not isinstance(statement, dict):
+        return
+    rows = statement.get("line_items") or []
+    columns = statement.get("item_columns")
+
+    if not isinstance(columns, list):
+        for row in rows:
+            if isinstance(row, dict):
+                values = row.get("values")
+                yield (
+                    row.get("label"),
+                    row.get("code"),
+                    values if isinstance(values, dict) else {},
+                    row.get("page"),
+                )
+        return
+
+    at = {name: index for index, name in enumerate(columns)}
+    years = [c for c in columns if c not in ROW_META_COLUMNS]
+
+    def cell(row: list[Any], name: str) -> Any:
+        index = at.get(name)
+        return row[index] if index is not None and index < len(row) else None
+
+    for row in rows:
+        if isinstance(row, list):
+            yield (
+                cell(row, "label"),
+                cell(row, "code"),
+                {year: cell(row, year) for year in years},
+                cell(row, "page"),
+            )
+
+
+def map_line_item_values(statement: Any, convert) -> None:
+    """Apply ``convert(value)`` to every period figure, in either shape."""
+
+    if not isinstance(statement, dict):
+        return
+    columns = statement.get("item_columns")
+    rows = statement.get("line_items") or []
+
+    if not isinstance(columns, list):
+        for row in rows:
+            if isinstance(row, dict) and isinstance(row.get("values"), dict):
+                row["values"] = {
+                    period: convert(value)
+                    for period, value in row["values"].items()
+                }
+        return
+
+    numeric = [i for i, name in enumerate(columns)
+               if name not in ROW_META_COLUMNS]
+    for row in rows:
+        if isinstance(row, list):
+            for index in numeric:
+                if index < len(row):
+                    row[index] = convert(row[index])
+
+
+def rename_line_item_periods(statement: Any, rename) -> None:
+    """Rewrite period labels with ``rename(label)``, in either shape.
+
+    Columnar records carry the period once in "item_columns", so the rename
+    happens there; object rows carry it on every row's "values" key.
+    """
+
+    if not isinstance(statement, dict):
+        return
+    columns = statement.get("item_columns")
+    if isinstance(columns, list):
+        statement["item_columns"] = [
+            c if c in ROW_META_COLUMNS else rename(c) for c in columns
+        ]
+        return
+    for row in statement.get("line_items") or []:
+        if isinstance(row, dict):
+            row["values"] = _normalize_values_by_period_map(
+                row.get("values"), rename
+            )
+
+
+def _normalize_values_by_period_map(values: Any, rename) -> dict[str, Any]:
+    if not isinstance(values, dict):
+        return {}
+    return {rename(period): value for period, value in values.items()}
+
+
 def resolve_report_years(result: Any) -> tuple[str | None, str | None]:
     """Read (current_year, previous_year) out of an extraction's own period block."""
 
@@ -327,19 +428,11 @@ def normalize_extraction_periods(result: dict[str, Any]) -> dict[str, Any]:
                 if label not in seen:
                     seen.append(label)
             statement["years"] = seen
-        for line_item in statement.get("line_items") or []:
-            if isinstance(line_item, dict):
-                line_item["values"] = _normalize_values_by_period(
-                    line_item.get("values"), current_year, previous_year
-                )
+        rename_line_item_periods(
+            statement,
+            lambda label: normalize_period_label(label, current_year, previous_year),
+        )
 
-    notes = result.get("notes_summary")
-    if isinstance(notes, dict):
-        for entry in notes.get("related_party_transactions") or []:
-            if isinstance(entry, dict) and entry.get("year"):
-                entry["year"] = normalize_period_label(
-                    entry["year"], current_year, previous_year
-                )
     return result
 
 
@@ -358,23 +451,36 @@ def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(statement, dict):
             continue
         multiplier = resolve_money_multiplier(statement.get("source_unit"))
-        for line_item in statement.get("line_items") or []:
-            if not isinstance(line_item, dict):
-                continue
-            values = line_item.get("values")
-            if isinstance(values, dict):
-                line_item["values"] = {
-                    period: scale_amount(value, multiplier)
-                    for period, value in values.items()
-                }
+        map_line_item_values(
+            statement, lambda value: scale_amount(value, multiplier)
+        )
 
-    notes = result.get("notes_summary")
-    if isinstance(notes, dict):
-        multiplier = resolve_money_multiplier(notes.get("source_unit"))
-        for field in ("related_party_transactions", "key_item_breakdowns"):
-            for entry in notes.get(field) or []:
-                if isinstance(entry, dict):
-                    entry["amount"] = scale_amount(entry.get("amount"), multiplier)
+    return result
+
+
+def drop_heading_rows(result: dict[str, Any]) -> dict[str, Any]:
+    """Remove line items that carry no figure in any period, in place.
+
+    A cash-flow statement prints block headings as ordinary rows — "I. LƯU CHUYỂN
+    TIỀN TỪ HOẠT ĐỘNG KINH DOANH" with every period empty. They name what follows
+    and carry nothing to underwrite on, and there were 11 of them in one real
+    statement. The prompt asks the model to leave them out; this is the guard,
+    because a prompt rule is a request.
+
+    A row with a figure in one period and none in another is real data and stays.
+    """
+
+    for key in _STATEMENT_KEYS:
+        statement = result.get(key)
+        if not isinstance(statement, dict):
+            continue
+        rows = statement.get("line_items") or []
+        keep_at = [
+            index for index, (_, _, values, _) in enumerate(iter_line_items(statement))
+            if any(v is not None for v in values.values())
+        ]
+        if len(keep_at) != len(rows):
+            statement["line_items"] = [rows[i] for i in keep_at]
     return result
 
 
@@ -413,5 +519,7 @@ def extract_financial_statement_data(
         content,
         REQUIRED_TOP_LEVEL_KEYS,
         "No financial statement extraction LLM configured.",
-        lambda result: normalize_amounts(normalize_extraction_periods(result)),
+        lambda result: drop_heading_rows(
+            normalize_amounts(normalize_extraction_periods(result))
+        ),
     )

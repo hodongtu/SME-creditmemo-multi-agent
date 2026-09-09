@@ -218,7 +218,7 @@ balances together. Several sheets with the SAME account AND the SAME period merg
 into one entry: Vietnamese ledgers often split one account across sheets by month
 or by product group.
 
-════ EACH ENTRY IN "accounts" — EXACTLY 12 KEYS ════
+════ EACH ENTRY IN "accounts" — EXACTLY 10 KEYS ════
 "category"       one of: cash receivable other_receivable inventory
                  fixed_asset payable other_payable borrowing equity unknown
                  Prefer "unknown" over a guess: an analyst can read an unlabelled
@@ -233,10 +233,6 @@ or by product group.
                  sheets of one account and one period merge into a single entry.
                  Write [] for a .csv, which has no sheet.
 "period"         {{"from","to","as_printed"}} — see below.
-"source_columns" {{canonical_field: "column heading exactly as printed"}}. Record
-                 EVERY column you placed, identifier columns included.
-"units"          {{field: "vnd" or "quantity"}}. Only for fields that actually
-                 appear in "item_columns".
 "totals"         {{field: number}} — the total for the WHOLE account, across
                  every detail row, not only the ones you return. Read it off the
                  printed "Tổng cộng" row when the sheet has one; otherwise add up
@@ -366,9 +362,10 @@ measure underneath it:
     Loại xe | Số lượng | Giá trị  | Số lượng | Giá trị  | ...
 
 Join them top-to-bottom before mapping: "Dư đầu" + "Số lượng" -> opening_quantity,
-"Nhập vào" + "Giá trị" -> inflow_value. Record the joined text in
-"source_columns" ("Dư đầu - Số lượng"). Two header rows are a normal layout, not
-a reason to give up on the sheet.
+"Nhập vào" + "Giá trị" -> inflow_value. The joined result shows up as the field
+name in "item_columns" — a stock sheet whose headers were read correctly ends up
+with opening_quantity, opening_value, inflow_quantity … in there. Two header rows
+are a normal layout, not a reason to give up on the sheet.
 
 ════ WORKED EXAMPLE (one debt entry, one stock entry) ════
 {{
@@ -383,24 +380,6 @@ a reason to give up on the sheet.
         "from": "2025-01-01",
         "to": "2025-12-31",
         "as_printed": "Từ ngày 01/01/2025 đến ngày 31/12/2025"
-      }},
-      "source_columns": {{
-        "counterparty_code": "Mã khách hàng",
-        "counterparty_name": "Tên khách hàng",
-        "opening_debit": "Dư nợ đầu kỳ",
-        "opening_credit": "Dư có đầu kỳ",
-        "debit_movement": "Phát sinh nợ",
-        "credit_movement": "Phát sinh có",
-        "closing_debit": "Dư nợ cuối kỳ",
-        "closing_credit": "Dư có cuối kỳ",
-        "booking_unit": "Tên đơn vị"
-      }},
-      "units": {{
-        "closing_debit": "vnd",
-        "credit_movement": "vnd",
-        "debit_movement": "vnd",
-        "opening_credit": "vnd",
-        "opening_debit": "vnd"
       }},
       "totals": {{
         "opening_debit": 225510140846,
@@ -437,27 +416,6 @@ a reason to give up on the sheet.
         "from": "2025-01-01",
         "to": "2025-12-31",
         "as_printed": "Từ ngày 01/01/2025 đến ngày 31/12/2025"
-      }},
-      "source_columns": {{
-        "item_name": "Loại xe",
-        "opening_quantity": "Dư đầu - Số lượng",
-        "opening_value": "Dư đầu - Giá trị",
-        "inflow_quantity": "Nhập vào - Số lượng",
-        "inflow_value": "Nhập vào - Giá trị",
-        "outflow_quantity": "Xuất ra - Số lượng",
-        "outflow_value": "Xuất ra - Giá trị",
-        "closing_quantity": "Dư cuối - Số lượng",
-        "closing_value": "Dư cuối - Giá trị"
-      }},
-      "units": {{
-        "closing_quantity": "quantity",
-        "closing_value": "vnd",
-        "inflow_quantity": "quantity",
-        "inflow_value": "vnd",
-        "opening_quantity": "quantity",
-        "opening_value": "vnd",
-        "outflow_quantity": "quantity",
-        "outflow_value": "vnd"
       }},
       "totals": {{
         "opening_quantity": 705,

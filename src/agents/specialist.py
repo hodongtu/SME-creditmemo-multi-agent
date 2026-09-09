@@ -156,9 +156,8 @@ class SpecialistAgent:
 
         LANGUAGE RULE:
         - Always write the whole report in Vietnamese, regardless of the language
-        of the user's request. The report template, the required wordings
-        ("Không có dữ liệu") and the downstream checks are all
-        Vietnamese, so an English answer would break them.
+        of the user's request. The template, the fixed wordings and the downstream
+        checks are all Vietnamese, so an English answer would break them.
         - If the user writes in another language, still answer in Vietnamese; you
         may restate their question in Vietnamese first.
         - Keep official names, system codes (T24, CIC, AASC), account names and
@@ -209,10 +208,10 @@ class SpecialistAgent:
         [PRE-COMPUTED FINANCIAL METRICS] block, or a tool result). Never use
         knowledge from outside the dossier.
         - Where a figure or a piece of information is NOT in the dossier, write
-        exactly the string "Không có dữ liệu". Do not estimate, do not
-        guess, do not put in 0 or "-" to fill the gap. (The "-" in a table is only
-        for a figure that was read and equals zero — see NUMBER FORMAT RULE. A
-        cell with no data stays empty.)
+        exactly the string "Không có dữ liệu" — the one wording for this, used
+        everywhere. Do not estimate, do not guess, do not put in 0 or "-" to fill
+        the gap (see NUMBER FORMAT RULE for what "-" does mean). A row, table or
+        section with nothing behind it is deleted outright, not left empty.
         - Do not carry a value from one period over into another to fill a row. If
         only one period has figures, present only that period.
         - For any figure you compute yourself (ratios, growth, indices), state the
@@ -239,9 +238,8 @@ class SpecialistAgent:
         will not recognise a list and will render it wrong (the "-" is swallowed
         into the sentence above and the bullet disappears).
         - Exception: where a section has EXACTLY ONE short thing to say (reporting
-        missing data, for instance), write it as a plain sentence, do NOT make it
-        a lone bullet:
-        Không có dữ liệu.
+        missing data, for instance), write it as a plain sentence, not a lone
+        bullet.
         - One bullet may carry both a fact read from the dossier and your own
         inference, written one after the other where they belong to the same
         point. The reader must still be able to tell them apart, and does so BY
@@ -255,8 +253,8 @@ class SpecialistAgent:
         - Do not assign causes or judge good/bad as though it were fact. Where
         there is not enough basis to infer, still write the bullet with the fact
         you read and say plainly "Chưa đủ cơ sở để đánh giá".
-        - Where there is no fact at all for a section, write exactly one sentence:
-        Không có dữ liệu.
+        - Where there is no fact at all for a section, write the one sentence
+        EVIDENCE RULE gives, and nothing else.
 
         RIGHT example (no label line, and a blank line before the first bullet; if
         your section is under CITATION RULE below, attach [^N] to the facts as in
@@ -289,25 +287,15 @@ class SpecialistAgent:
         - The layout is only headings and empty table frames. Your job is to FILL
         it in, not to copy the frame back.
         - Anything of the form {{{{TenTruong}}}} is a slot to replace with a real
-        value from the dossier. Where there is no value, write "Không có dữ liệu".
+        value from the dossier; where there is none, EVIDENCE RULE applies.
         NEVER leave {{{{ }}}} in your answer.
-        - The "Hồ sơ"/"Nguồn dữ liệu" field at the top of the report: the system
-        has already prepared that list in the
-        [SOURCE LIST — COPY VERBATIM] block in the evidence. COPY those
-        lines exactly, one sub-line each. NEVER merge them, shorten them, or add
-        or drop a line — the grouping and the period collapsing were computed by
-        the system, and redoing them yourself produces the wrong document count.
-        Each sub-line is indented EXACTLY FOUR spaces relative to the "-" of the
-        "Hồ sơ" line above it — fewer than four and the markdown renderer will not
-        see a sub-list and will render it flat, wrong against the layout given.
+        - The "Hồ sơ"/"Nguồn dữ liệu" field is filled from the
+        [SOURCE LIST — COPY VERBATIM] block, which says how. Indent each sub-line
+        EXACTLY FOUR spaces under the "-" of the "Hồ sơ" line — fewer and the
+        renderer flattens the sub-list.
         - Prefer bullets wherever the layout needs several items of the same kind
-        listed (several documents, several line items, several conditions...)
-        rather than one sentence separated by commas. The commentary after each
-        table follows the bullet shape set out separately in COMMENTARY RULE (no
-        label line, at most 5 bullets, mandatory blank line before the first
-        bullet).
-        - Delete a row, table or section with no data outright rather than leaving
-        it empty or filling it with "-".
+        listed, rather than one sentence separated by commas. Commentary follows
+        COMMENTARY RULE.
 
         {self.output_template}
         """

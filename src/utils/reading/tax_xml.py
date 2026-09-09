@@ -215,13 +215,15 @@ def _statement(
         }
         if values:
             line_items.append(
-                {"label": label, "code": None, "values": values, "page": None}
+                [label, None, *[values.get(year) for year in years], None]
             )
     return {
         "unit": "VNĐ",
         "source_unit": "dong",
         "page": None,
         "years": years,
+        # Same positional shape the OCR pass returns, so readers need no branch.
+        "item_columns": ["label", "code", *years, "page"],
         "line_items": line_items,
     }
 
@@ -324,17 +326,6 @@ def _parse_financial_statement(root: ET.Element, result: TaxXmlResult) -> TaxXml
         "balance_sheet": _statement(balance, _B01A_BALANCE),
         "income_statement": _statement(income, _B02_INCOME),
         "cash_flow_statement": _statement(cashflow, _LCTT_CASHFLOW),
-        # Present because the schema requires it, empty because the filing has no
-        # notes section. Left visibly empty rather than filled with anything —
-        # a caller merging this with an OCR reading needs to see the gap.
-        "notes_summary": {
-            "accounting_policies": "",
-            "related_party_transactions": [],
-            "contingent_liabilities": [],
-            "subsequent_events": [],
-            "key_item_breakdowns": [],
-            "other_material_disclosures": [],
-        },
         "extraction_notes": [
             f"Đọc trực tiếp từ XML khai thuế ({result.form_name}) — số liệu là mã "
             "chỉ tiêu do người nộp thuế kê khai, không qua OCR hay mô hình.",

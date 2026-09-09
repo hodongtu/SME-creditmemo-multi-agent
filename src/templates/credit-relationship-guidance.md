@@ -6,9 +6,7 @@ description: >-
 ---
  
 #### NGUYÊN TẮC CHUNG
-- Bố cục được cung cấp là khung tham khảo, không phải biểu mẫu bắt buộc điền kín.
-- Không lặp giá trị của kỳ này sang kỳ khác để lấp ô trống.
-- Bảng biểu chỉ hiển thị những kỳ/năm có số liệu.
+- Được BỎ DÒNG không có dữ liệu, KHÔNG được đổi CỘT của bảng trong bố cục.
 - Mục 1 lấy từ khối [INTERNAL CREDIT FACILITIES]; mục 2 lấy từ khối CIC,
   dù khối đó đọc từ file khách nộp hay truy vấn từ hệ thống. Không lấy số của mục này điền cho
   mục kia — một bên là dư nợ tại chính ngân hàng mình, một bên là tại các TCTD khác.

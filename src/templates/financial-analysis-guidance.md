@@ -5,11 +5,8 @@ description: >-
 ---
  
 #### NGUYÊN TẮC CHUNG
-- Bố cục được cung cấp là khung tham khảo, không phải biểu mẫu bắt buộc điền kín.
-- Không lặp giá trị của kỳ này sang kỳ khác để lấp ô trống.
-- Bảng biểu chỉ hiển thị những kỳ/năm có số liệu.
-- Nếu cả một bảng không có dữ liệu, bỏ bảng đó và ghi "Không có dữ liệu".
-- Tuân thủ TUYỆT ĐỐI cấu trúc bảng đã được định nghĩa.
+- Được BỎ DÒNG không có dữ liệu, KHÔNG được đổi CỘT: giữ nguyên số cột và tên cột
+  của mọi bảng trong bố cục, còn dòng nào hồ sơ không nêu thì xoá hẳn dòng đó.
 - SỐ CỘT NĂM (quan trọng — người dùng có thể nộp nhiều bộ BCTC)
   - Bố cục minh hoạ 3 cột năm ({{Nam1}}, {{Nam2}}, {{Nam3}}) vì 2 file BCTC thường cho 3 năm (mỗi file có năm hiện tại + năm so sánh, gối nhau 1 năm).
   - Số cột năm THỰC TẾ phải bằng đúng số kỳ liệt kê ở dòng "Các kỳ báo cáo có dữ

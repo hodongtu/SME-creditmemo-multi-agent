@@ -4,10 +4,10 @@
  
 | Thông tin chung | &nbsp; |
 | --------------- | ------ |
-| *Tên khách hàng* | {{TenKhachHang}} |
-| *Nguồn dữ liệu* | {{TenFile}} |
-| *Ngành nghề kinh doanh* | {{NganhNghe}} |
-| *Mức độ tin cậy* | {{MucDoTinCay}} |
+| **Tên khách hàng** | {{TenKhachHang}} |
+| **Nguồn dữ liệu** | {{TenFile}} |
+| **Ngành nghề kinh doanh** | {{NganhNghe}} |
+| **Mức độ tin cậy** | {{MucDoTinCay}} |
  
 ## 1. Mô hình sản xuất kinh doanh
  

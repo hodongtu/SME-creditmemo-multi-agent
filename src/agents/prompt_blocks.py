@@ -12,6 +12,7 @@ from src.agents.calculator.financial_ratio_calculator import (
     _format_number,
 )
 from src.agents.documents.document_matrix import get_type
+from src.agents.extraction import financial_statement_extraction
 from src.agents.extraction import ledger_extraction
 from src.types import ClassifiedDocument
 from src.agents.extraction.vat_revenue import merge_vat_series, parse_vat_revenue_block
@@ -146,14 +147,15 @@ def _build_source_list_block(
     return "\n".join(
         [
             SOURCE_LIST_BLOCK_HEADING,
-            "Danh sách dưới đã được hệ thống lập sẵn từ đúng những tài liệu "
-            "bạn đang đọc. CHÉP NGUYÊN VĂN vào ô \"Nguồn dữ liệu\" của bảng "
-            "Thông tin chung, giữ nguyên cả thẻ <em>. TUYỆT ĐỐI không gom "
-            "thêm, không rút gọn thêm, không bỏ dòng nào, không đổi thứ tự, "
-            "không bỏ đuôi tệp.",
-            "Cả danh sách nằm trong MỘT ô, các dòng nối với nhau bằng <br> "
-            "(không xuống dòng thật, vì xuống dòng sẽ phá vỡ bảng). Dạng đúng: "
-            "- dòng 1<br>- dòng 2<br>- dòng 3",
+            # "Copy verbatim" already implies not regrouping, not shortening,
+            # not dropping a line, not reordering and not trimming extensions —
+            # spelling those five out only dilutes the two constraints it does
+            # NOT cover: keep the <em> tags, and join with <br> because the whole
+            # list lives in one cell.
+            "COPY THE LIST BELOW VERBATIM into the \"Nguồn dữ liệu\" cell of "
+            "the general-information table, <em> tags included. The whole list "
+            "sits in ONE cell, so join the lines with <br> rather than real "
+            "newlines: - line 1<br>- line 2<br>- line 3",
             "",
             *(f"- {line}" for line in lines),
         ]
@@ -237,15 +239,16 @@ def _build_credit_need_block(
         return ""
     lines = [
         CREDIT_NEED_BLOCK_HEADING,
-        "Bảng dưới đã được hệ thống TÍNH SẴN bằng công thức cố định. Dùng "
-        "thẳng các con số này, TUYỆT ĐỐI không tự tính lại từ số liệu thô.",
-        "ĐƠN VỊ: các dòng tiền ghi bằng **ĐỒNG**, giống mọi khối dữ liệu khác "
-        "trong prompt này; dòng ghi % và ngày giữ nguyên đơn vị của nó. Chép "
-        "nguyên con số, chương trình tự quy đổi khi dựng báo cáo.",
-        "CỘT \"Nguồn\" cho biết con số đến từ đâu và BẮT BUỘC phải nêu lại "
-        "khi diễn giải: \"mặc định\" nghĩa là hồ sơ KHÔNG nêu và hệ thống "
-        "dùng tỷ lệ chính sách — không được trình bày như số liệu của khách "
-        "hàng. \"tính toán\" là suy ra từ các dòng khác trong chính bảng này.",
+        "The table below was computed by the program from fixed formulas. Use "
+        "these figures as they stand; never recompute them from raw data.",
+        "Money rows are in đồng, as everywhere else in this prompt; % and day "
+        "rows keep their own unit. Copy the figure as printed — the program "
+        "converts it when the report is assembled.",
+        "The \"Nguồn\" column says where each figure came from, and you MUST "
+        "carry that over when you write about it: \"mặc định\" means the "
+        "dossier does NOT state it and the program applied a policy rate — "
+        "never present that as the customer's own figure. \"tính toán\" means "
+        "derived from other rows of this same table.",
         "",
         f"| Chỉ tiêu | {table.latest_year} | {table.plan_year} | Đơn vị | Nguồn | Ghi chú |",
         "|---|---:|---:|---|---|---|",
@@ -308,11 +311,12 @@ def _build_proposal_structured_block(
         selected, "is_proposal", "proposal_extraction",
         PROPOSAL_BLOCK_HEADING,
         [
-            "Trích xuất từ mục B (phương án sử dụng vốn, kế hoạch kinh doanh, "
-            "hiệu quả, phương án trả nợ), mục C (tài sản bảo đảm) và mục D "
-            "(đề nghị cấp tín dụng) của giấy đề nghị.",
-            "Mọi số tiền đã quy về ĐỒNG (VNĐ). Trường \"source_unit\" là đơn vị "
-            "ghi trên bản gốc, chỉ để đối chiếu — không nhân/chia lại lần nữa.",
+            "Read from the credit application form: section B (use of funds, "
+            "business plan, projected results, repayment plan), section C "
+            "(collateral) and section D (facility requested).",
+            "Every amount is already in đồng. \"source_unit\" records the unit "
+            "printed on the original, for cross-checking only — do not scale "
+            "again.",
         ],
     )
 
@@ -406,15 +410,17 @@ def _build_cic_s10a_structured_block(
         selected, "is_cic_s10a", "cic_s10a_extraction",
         CIC_S10A_BLOCK_HEADING,
         [
-            "Trích xuất từ Báo cáo chi tiết quan hệ tín dụng CIC (mã phiếu S10A): "
-            "dư nợ hiện tại theo từng TCTD, diễn biến dư nợ 12 tháng gần nhất, "
-            "cam kết ngoại bảng, xếp hạng tín dụng và lịch sử cảnh báo.",
-            "ĐƠN VỊ: các trường VNĐ (\"vnd\", \"du_no_vay\", \"du_no_the\", "
-            "\"tong_du_no\") đã quy về ĐỒNG. Các trường ngoại tệ (\"ngoai_te\") "
-            "giữ NGUYÊN TỆ theo bản gốc — không quy đổi, không cộng với cột VNĐ.",
-            "Dư nợ trong \"du_no_12_thang\" ĐÃ bao gồm dư nợ ngoại tệ quy đổi; "
-            "không cộng thêm số ngoại tệ ở khối khác vào, sẽ thành tính hai lần.",
-            "Giá trị null nghĩa là kỳ đó thiếu số liệu báo cáo — KHÔNG phải bằng 0.",
+            "Read from the CIC credit-relationship detail report (form S10A): "
+            "current balance per lender, the last 12 months of balances, "
+            "off-balance-sheet commitments, credit rating and warning history.",
+            "UNITS: the VNĐ fields (\"vnd\", \"du_no_vay\", \"du_no_the\", "
+            "\"tong_du_no\") are already in đồng. The foreign-currency fields "
+            "(\"ngoai_te\") are left IN THEIR OWN CURRENCY as printed — do not "
+            "convert them, and never add them to a VNĐ column.",
+            "\"du_no_12_thang\" ALREADY includes foreign-currency debt "
+            "converted; adding the foreign figures from another block counts "
+            "them twice.",
+            "A null means that period has no reported figure — NOT zero.",
         ],
     )
 
@@ -428,19 +434,18 @@ def _build_cic_r21_structured_block(
         selected, "is_cic_r21", "cic_r21_extraction",
         CIC_R21_BLOCK_HEADING,
         [
-            "Trích xuất từ Báo cáo thông tin bảo đảm tiền vay CIC (mã phiếu "
-            "R20/R21): danh sách tổ chức tín dụng đang nhận bảo đảm và chi "
-            "tiết từng tài sản bảo đảm theo tổ chức tín dụng đó.",
-            "ĐƠN VỊ: trường \"gia_tri_trieu_vnd\" đã quy về ĐỒNG dù tên trường "
-            "vẫn giữ nguyên (đơn vị gốc trên giấy là triệu đồng).",
-            "\"loai_tai_san\" là MÃ SỐ hai chữ số của CIC (vd \"08\"), không "
-            "phải nhãn mô tả — báo cáo không kèm bảng chú giải mã, không tự "
-            "suy diễn ý nghĩa mã này.",
-            "\"ngay_giai_chap\" là null nghĩa là tài sản CHƯA giải chấp (vẫn "
-            "đang thế chấp), không phải thiếu dữ liệu.",
-            "Một khối có \"mo_ta_tai_san\": \"Không có bảo đảm tiền vay bằng "
-            "tài sản\" nghĩa là tổ chức tín dụng đó xác nhận KHÔNG nhận tài "
-            "sản bảo đảm nào — đây là thông tin có thật, không phải lỗi.",
+            "Read from the CIC collateral report (form R20/R21): which lenders "
+            "hold security, and each pledged asset under that lender.",
+            "UNITS: \"gia_tri_trieu_vnd\" is already in đồng despite the field "
+            "name (the printed unit was triệu đồng).",
+            "\"loai_tai_san\" is CIC's two-digit CODE (e.g. \"08\"), not a "
+            "description — the report ships no code legend, so do not infer "
+            "what a code means.",
+            "\"ngay_giai_chap\": null means the asset is still pledged, NOT "
+            "that the date is missing.",
+            "A block whose \"mo_ta_tai_san\" reads \"Không có bảo đảm tiền vay "
+            "bằng tài sản\" means that lender confirms it holds NO security — "
+            "that is a real finding, not an extraction failure.",
         ],
     )
 
@@ -472,74 +477,62 @@ def _build_ledger_structured_block(
 
     parts = [
         LEDGER_BLOCK_HEADING,
-        "Trích từ sổ chi tiết / bảng cân đối phát sinh công nợ khách hàng nộp "
-        "dưới dạng Excel, gộp mọi file thành một bản. Khoá của \"accounts\" "
-        "luôn có dạng <số hiệu tài khoản>@<YYYYMMDD>-<YYYYMMDD>, ví dụ "
-        "\"131@20250101-20251231\". Mỗi khoá là MỘT kỳ; hai khoá cùng số hiệu "
-        "khác kỳ là hai mục riêng — số dư của chúng KHÔNG được cộng vào nhau. "
-        "Kỳ chuẩn để đối chiếu là \"period\": \"from\"/\"to\" là ngày đầu và "
-        "cuối kỳ, \"as_printed\" là dòng in trên file. Dùng \"period\" để xếp "
-        "số liệu vào đúng cột năm, đừng đọc năm từ tên khoá.",
-        "SỐ LIỆU ĐƯỢC ĐỌC LẠI TỪ NỘI DUNG FILE EXCEL, không qua OCR ảnh. Đây "
-        "là bản chép của bảng gốc chứ không phải trích xuất từng ô, nên khi một "
-        "con số quyết định kết luận tín dụng thì hãy nêu rõ nó lấy từ file nào, "
-        "tài khoản nào, để người thẩm định đối chiếu lại bảng gốc. \"units\" "
-        "ghi đơn vị từng trường: \"vnd\" là ĐỒNG, \"quantity\" là số lượng.",
-        'Báo cáo trình bày theo TỶ VNĐ. Khi chép một số "vnd" vào báo cáo, hãy '
-        'GHI NGUYÊN SỐ ĐỒNG CÓ DẤU PHÂN CÁCH NGHÌN (ví dụ 225.510.140.846) và '
-        'để chương trình tự quy đổi — đừng tự chia cho một tỷ. Một lượt chạy '
-        'trước đã chia nhầm cho một triệu và biến 225,51 tỷ thành 225.510,14.',
-        'ĐÂY LÀ DỮ LIỆU ĐỂ ĐIỀN VÀO BÁO CÁO, không phải khung mẫu. "category" '
-        'cho biết điền vào mục nào của báo cáo: "receivable" → Phải thu khách '
-        'hàng; "payable" → Phải trả người bán (số dư bên NỢ của tài khoản này '
-        'là Trả trước cho người bán); "inventory" → Hàng tồn kho; '
-        '"fixed_asset" → Tài sản cố định, tài sản dở dang dài hạn; "cash" → '
-        'Tiền và các khoản tương đương tiền; "borrowing" → Vay nợ ngắn hạn và '
-        'dài hạn; "equity" → Vốn chủ sở hữu; "other_receivable" → Các khoản '
-        'mục tài sản khác; "other_payable" → Các khoản mục nguồn vốn khác.',
-        'Tên trường: "opening_debit"/"opening_credit" là dư đầu kỳ bên nợ/có, '
-        '"debit_movement"/"credit_movement" là phát sinh nợ/có, '
-        '"closing_debit"/"closing_credit" là dư cuối kỳ; hàng tồn kho dùng '
-        '"opening_/inflow_/outflow_/closing_" kèm "_quantity" hoặc "_value". '
-        '"source_columns" cho biết mỗi trường ứng với cột nào trong file gốc.',
-        'MỘT TÀI KHOẢN CÓ NHIỀU BẢNG XẾP HẠNG, nằm trong "rankings". Mỗi bảng '
-        'khai "sorted_by" là cột nó đã sắp theo, và "items" là 5 dòng lớn nhất '
-        'THEO CỘT ĐÓ. Cùng một đối tác có thể xuất hiện ở nhiều bảng — đó là '
-        'bình thường, không phải trùng lặp. Mỗi mục báo cáo ĐỌC ĐÚNG MỘT BẢNG:',
-        '  · FA 1.1 bảng sản phẩm và BA mục 2 → sorted_by "outflow_value" của '
-        'sổ kho. · FA 1.1 bảng khách hàng đầu ra, BA mục 3 và nhánh đầu ra của '
-        'sơ đồ BA mục 1 → sorted_by "debit_movement" của sổ 131. · FA 2.2.1a → '
-        '"closing_debit" của sổ 131. · FA 2.2.1b → "closing_debit" của sổ 331. '
-        '· FA 2.2.1c → "closing_value" của sổ kho. · FA 2.2.2a → '
-        '"closing_credit" của sổ 131. · FA 2.2.2b, BA mục 4 và nhánh đầu vào '
-        'của sơ đồ BA mục 1 → "credit_movement" của sổ 331 cho mục 4 và sơ đồ, '
-        '"closing_credit" cho FA 2.2.2b.',
-        'KHÔNG lấy bảng của tiêu chí khác cho tiện. Bảng sắp theo dư nợ và bảng '
-        'sắp theo phát sinh nợ là hai danh sách khác nhau, và dùng nhầm thì cả '
-        'thứ tự lẫn tỷ trọng đều sai.',
-        '"item_count" cho biết sheet gốc có bao nhiêu dòng — mỗi bảng chỉ giữ 5 '
-        'dòng đầu của sheet đó.',
-        'MẪU SỐ ĐỂ TÍNH TỶ TRỌNG LÀ "totals", KHÔNG PHẢI TỔNG CỦA MỘT BẢNG. '
-        '"totals" nằm ở mức tài khoản và là số của CẢ tài khoản kể cả những '
-        'dòng không được liệt kê; cộng các dòng trong một bảng chỉ ra số dư của '
-        'vài đối tác lớn nhất. Viết "khách hàng X chiếm N% dư nợ" thì N = giá '
-        'trị dòng chia cho "totals".',
-        'Mỗi dòng là một MẢNG giá trị theo ĐÚNG thứ tự khai ở "item_columns" của '
-        'chính tài khoản đó — một "item_columns" dùng chung cho mọi bảng của tài '
-        'khoản ấy. Đọc giá trị thứ i của dòng ứng với tên cột thứ i — '
-        'hai tài khoản có thể khai thứ tự cột khác nhau, nên phải đọc '
-        '"item_columns" của tài khoản đang xem, không dùng lại thứ tự của tài '
-        'khoản trước.',
-        'Sổ công nợ có HAI cột riêng cho đối tác: "counterparty_code" là mã, '
-        '"counterparty_name" là tên — trích dẫn theo TÊN, chỉ dùng mã khi không '
-        'có tên. Sổ nhập xuất tồn dùng "item_name". '
-        f'Nếu có dòng mang tên "{ledger_extraction.RESIDUAL_LABEL} (N)" thì đó '
-        'là tổng gộp của N dòng nhỏ không liệt kê riêng trong CHÍNH bảng đó.',
+        "Read from detail ledgers / debt trial balances the customer supplied "
+        "as Excel, every file merged into one record. A key under \"accounts\" "
+        "is always <account number>@<YYYYMMDD>-<YYYYMMDD>, e.g. "
+        "\"131@20250101-20251231\". One key is ONE period; two keys with the "
+        "same account number and different periods are separate entries and "
+        "their balances must NEVER be added together. Read the period from "
+        "\"period\" — \"from\"/\"to\" are the boundary dates and "
+        "\"as_printed\" is the line printed on the file — and use it to place "
+        "figures in the right year column. Do not read the year off the key.",
+        "THESE FIGURES WERE READ FROM THE EXCEL CONTENT, not from OCR of an "
+        "image. It is a transcription of the original table rather than a "
+        "cell-by-cell extraction, so when a figure decides a credit conclusion, "
+        "say which file (\"source_files\"), which sheet "
+        "(\"source_sheet_name\") and which account it came from, so the "
+        "reviewer can check it against the original.",
+        "UNITS COME FROM THE FIELD NAME; there is no separate key. A field "
+        "ending in \"_quantity\" is a COUNT (units, pieces — not money); every "
+        "other numeric field is đồng. Never write \"tỷ VNĐ\" after a "
+        "\"_quantity\" figure, and never add a count to a value.",
+        'THIS IS DATA TO FILL THE REPORT WITH, not a layout. "category" says '
+        'which section it belongs to: "receivable" → Phải thu khách hàng; '
+        '"payable" → Phải trả người bán (a DEBIT balance on this account is '
+        'Trả trước cho người bán); "inventory" → Hàng tồn kho; "fixed_asset" → '
+        'Tài sản cố định, tài sản dở dang dài hạn; "cash" → Tiền và các khoản '
+        'tương đương tiền; "borrowing" → Vay nợ ngắn hạn và dài hạn; "equity" → '
+        'Vốn chủ sở hữu; "other_receivable" → Các khoản mục tài sản khác; '
+        '"other_payable" → Các khoản mục nguồn vốn khác.',
+        'Field names: "opening_debit"/"opening_credit" are the opening debit and '
+        'credit balances, "debit_movement"/"credit_movement" the movements, '
+        '"closing_debit"/"closing_credit" the closing balances; stock ledgers use '
+        '"opening_/inflow_/outflow_/closing_" with "_quantity" or "_value".',
+        # Ở đây chỉ nói KHOÁ NGHĨA LÀ GÌ. Mục báo cáo nào đọc bảng nào, và mẫu
+        # số để tính tỷ trọng, nằm ở file guidance — văn khối này in lại cho mỗi
+        # tài liệu ledger, còn guidance in đúng một lần.
+        '"rankings" holds one ranked list per account, each declaring the column '
+        'it was sorted by in "sorted_by", with "items" the five largest rows BY '
+        'THAT COLUMN. The same counterparty appearing in several lists is '
+        'normal. "item_count" is how many rows the source sheet holds; "totals" '
+        'is the figure for the WHOLE account, listed rows and unlisted alike. '
+        'The analysis guidance says which list each report section reads.',
+        'Each row is an ARRAY of values in exactly the order declared in '
+        '"item_columns" for that account — one "item_columns" governs every list '
+        'of that account. Value i belongs to column name i. Two accounts may '
+        'declare different column orders, so read the "item_columns" of the '
+        'account in front of you rather than reusing the previous one.',
+        'Debt ledgers keep the counterparty in TWO columns: '
+        '"counterparty_code" is the code, "counterparty_name" the name — cite '
+        'by NAME, and fall back to the code only when there is no name. Stock '
+        'ledgers use "item_name". '
+        f'A row named "{ledger_extraction.RESIDUAL_LABEL} (N)" is the aggregate '
+        'of N small rows not listed individually WITHIN THAT LIST.',
 
-        '"code_source": "printed" nghĩa là số hiệu tài khoản in trong file; '
-        '"convention" nghĩa là file không in số hiệu và chương trình xếp theo '
-        'quy ước hệ thống tài khoản. Đừng trích dẫn số hiệu "convention" như '
-        'thể khách hàng đã ghi nó.',
+        '"code_source": "printed" means the account number was printed in the '
+        'file; "convention" means the file printed none and the program assigned '
+        'one from the chart of accounts. Never cite a "convention" number as '
+        'though the customer had written it.',
     ]
     for record in records:
         # Totals come from the record, not from adding up the rows in it. They
@@ -600,20 +593,20 @@ def _build_sitevisit_structured_block(
         selected, "is_sitevisit", "sitevisit_extraction",
         SITEVISIT_BLOCK_HEADING,
         [
-            "Trích xuất từ Báo cáo khảo sát thực địa: thông tin cuộc khảo sát, "
-            "ngành nghề và mã GSO, sản phẩm/dịch vụ chính, đầu vào - đầu ra, "
-            "kế hoạch kinh doanh năm tiếp theo, và kết luận của cán bộ khảo sát.",
-            "ĐƠN VỊ: mọi số tiền trong \"business_plan_next_year\" đã quy về "
-            "ĐỒNG. Trường \"source_unit\" ghi đơn vị gốc in trên báo cáo.",
-            "QUAN TRỌNG - khối \"conclusion\" (overall_assessment, risks_noted, "
-            "recommendation, conditions) là Ý KIẾN CHỦ QUAN của cán bộ khảo "
-            "sát, KHÔNG phải dữ kiện đo được. Được dùng làm tham khảo và phải "
-            "nói rõ là nhận định của cán bộ khảo sát khi nhắc tới; TUYỆT ĐỐI "
-            "không trích dẫn như dữ kiện đọc từ hồ sơ.",
-            "\"gso_code\" là null nghĩa là báo cáo không in mã ngành GSO - "
-            "không tự tra cứu hay suy ra từ tên ngành.",
-            "Các khối còn lại là quan sát tại chỗ: dùng để đối chiếu với số "
-            "liệu trên BCTC, chênh lệch giữa hai nguồn là thông tin đáng nêu.",
+            "Read from the site-visit report: the visit itself, sector and GSO "
+            "code, main products, inputs and outputs, next year's business "
+            "plan, and the visiting officer's conclusions.",
+            "UNITS: every amount under \"business_plan_next_year\" is already "
+            "in đồng. \"source_unit\" records the unit printed on the report.",
+            "IMPORTANT — the \"conclusion\" block (overall_assessment, "
+            "risks_noted, recommendation, conditions) is the visiting officer's "
+            "OPINION, not a measurement. Use it as context and say whose "
+            "judgement it is whenever you carry it over; never cite it as a "
+            "fact read from the dossier.",
+            "\"gso_code\": null means the report prints no GSO sector code — "
+            "do not look one up or infer it from the sector name.",
+            "The remaining blocks are on-site observations: use them against the "
+            "financial statements, and a gap between the two is worth reporting.",
         ],
     )
 
@@ -636,15 +629,19 @@ def _build_financial_statement_block(
         return ""
     parts = [FINANCIAL_STATEMENT_BLOCK_HEADING]
     for doc in financial_statement_docs:
-        extraction = doc.financial_statement_extraction
+        extraction = {
+            key: value
+            for key, value in (doc.financial_statement_extraction or {}).items()
+            if key in financial_statement_extraction.BLOCK_KEYS
+        }
         if statements is not None:
             extraction = {
                 key: value
                 for key, value in extraction.items()
                 if key in statements
             }
-            if not extraction:
-                continue
+        if not extraction:
+            continue
         parts.append(
             f"--- {doc.filename} ---\n"
             + json.dumps(extraction, ensure_ascii=False, indent=2)

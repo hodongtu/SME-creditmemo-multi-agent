@@ -240,6 +240,29 @@ Each account names both the files and the **sheets** it came from — `source_fi
 period, and a dossier of one-account-per-file workbooks otherwise gives no way to tell which
 tab a figure was read off.
 
+**The same shape now carries the financial statements.** Measured on a real dossier, the
+FA user prompt was 26,716 tokens, of which `[EXTRACTED FINANCIAL STATEMENTS]` alone was
+17,591 — more than everything else combined. Its `line_items` repeated `label`/`code`/
+`values`/`page` on all 108 rows of each filing, so they became positional arrays under an
+`item_columns` that names the periods once. Rows whose every period is empty are group
+headings, not data — a cash-flow statement carried 11 of them — and `drop_heading_rows`
+removes them because the prompt asking for it is a request, not a guarantee.
+`notes_summary` went too, at 2,182 tokens per file.
+
+That last one is a real loss, recorded here so the reason survives: it was the only
+evidence behind §2.2.1d/e and §2.2.2e — pledged assets, items over 10% of the balance
+sheet, related-party dealings. A recent report wrote "thuyết minh nêu tiền gửi thế chấp
+đảm bảo khoản vay 1.148,20 tỷ VNĐ"; that sentence can no longer be written. It was
+dropped knowingly.
+
+Two other cuts came from the same measurement. The metrics block printed a list of 21
+formulas immediately above a table whose "Công thức" column holds the same 21, word for
+word. And the ledger block restated the `sorted_by`-to-section lookup and the `totals`
+denominator rule that both guidance files already carry — the block prints once per
+ledger document, the guidance once per run. Rules tied to a **report section** now live
+only in the guidance; the block prose says only what the JSON keys mean. Together:
+**26,716 → 16,904 tokens, 37% off.**
+
 Detail rows are **positional arrays** under a per-account `item_columns`, not objects
 repeating their field names on every row. Names cost 56% of what `items` weighs and `items`
 is 64% of the record, so the shape change pays twice: the model writes 41% fewer tokens, and

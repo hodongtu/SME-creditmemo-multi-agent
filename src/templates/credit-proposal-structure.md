@@ -4,9 +4,9 @@
  
 | Thông tin chung | &nbsp; |
 | --------------- | ------ |
-| *Tên khách hàng* | {{TenKhachHang}} |
-| *Nguồn dữ liệu* | {{TenFile}} |
-| *Mức độ tin cậy* | {{MucDoTinCay}} |
+| **Tên khách hàng** | {{TenKhachHang}} |
+| **Nguồn dữ liệu** | {{TenFile}} |
+| **Mức độ tin cậy** | {{MucDoTinCay}} |
  
 ## 1. Nhu cầu cấp tín dụng:
  
