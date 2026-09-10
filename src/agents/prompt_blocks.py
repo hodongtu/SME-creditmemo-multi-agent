@@ -1,13 +1,11 @@
 """The data blocks that go into a specialist's prompt, lifted out of Supervisor."""
 
-import json
 from dataclasses import asdict
 from typing import Any
 
 from src.agents.extraction.cic_s10a_extraction import merge_debt_series
 from src.agents.calculator.credit_need_calculator import build_credit_need_table
 from src.agents.calculator.financial_ratio_calculator import (
-    METRICS_BLOCK_HEADING,
     FinancialRatioCalculator,
     _format_number,
 )
@@ -38,13 +36,7 @@ def _vat_revenue_from_xml(
 
 
 def _format_credit_need_value(value: float | None, unit: str) -> str:
-    """One cell of the credit-need table.
-
-    Money goes through the metrics block's own formatter (đồng, Vietnamese
-    separators). The other two units do not: percentages in this table are
-    already on a 0-100 scale, and _format_number would multiply them by 100
-    again.
-    """
+    """One cell of the credit-need table. """
 
     if value is None:
         return ""
@@ -60,9 +52,6 @@ METRICS_BLOCK_AGENTS = (
 )
 
 CREDIT_NEED_BLOCK_AGENTS = ("CREDIT_PROPOSAL_AGENT",)
-# Every block name is declared exactly once here. Three of them used to be
-# typed out in two files apiece, which is how two copies of one label drift
-# apart without anything failing.
 FINANCIAL_STATEMENT_BLOCK_HEADING = "[EXTRACTED FINANCIAL STATEMENTS]"
 PROPOSAL_BLOCK_HEADING = "[EXTRACTED CREDIT APPLICATION]"
 CREDIT_NEED_BLOCK_HEADING = "[CREDIT NEED CALCULATION]"
@@ -83,11 +72,7 @@ def _document_block_header(
     doc: ClassifiedDocument,
     target_agent: str,
 ) -> str:
-    """The metadata lines that precede a document's content in the prompt.
-
-    Split out from block assembly so _build_user_input can measure the
-    overhead before dividing the remaining characters between documents.
-    """
+    """The metadata lines that precede a document's content in the prompt."""
 
     level = doc.agent_relevance.get(target_agent)
     if level == "R":
@@ -122,19 +107,7 @@ def _document_block_header(
 def _build_source_list_block(
     documents: list[ClassifiedDocument],
 ) -> str:
-    """The finished "Nguồn thông tin" list, for the agent to copy verbatim.
-
-    Computed rather than described because describing it did not work: the
-    rule that used to ask the model to group these itself shipped with worked
-    examples, and the model returned one of the examples instead of reading
-    the sixteen files in front of it. Collapsing a file list is arithmetic,
-    and arithmetic asked of a model comes back wrong quietly.
-
-    Built from the documents that survived extraction, which is the set the
-    report is actually written from — a file that failed to extract is named
-    in the run summary but contributed no evidence, so listing it as a source
-    would overstate the memo the same way the old bug understated it.
-    """
+    """The finished "Nguồn thông tin" list, for the agent to copy verbatim."""
 
     lines = build_source_lines(
         [
@@ -147,11 +120,6 @@ def _build_source_list_block(
     return "\n".join(
         [
             SOURCE_LIST_BLOCK_HEADING,
-            # "Copy verbatim" already implies not regrouping, not shortening,
-            # not dropping a line, not reordering and not trimming extensions —
-            # spelling those five out only dilutes the two constraints it does
-            # NOT cover: keep the <em> tags, and join with <br> because the whole
-            # list lives in one cell.
             "COPY THE LIST BELOW VERBATIM into the \"Nguồn dữ liệu\" cell of "
             "the general-information table, <em> tags included. The whole list "
             "sits in ONE cell, so join the lines with <br> rather than real "
@@ -166,13 +134,7 @@ def _build_financial_metrics_block(
     documents: list[ClassifiedDocument],
     target_agent: str,
 ) -> str:
-    """Deterministic ratio block for the agents that reason about figures.
-
-    Built from every successfully-extracted document rather than the target
-    agent's routed subset: the ratios are a derived fact about the customer,
-    and the risk agent is routed risk documents, not the BCTC the figures
-    come from — filtering by its own selection would yield an empty block.
-    """
+    """Deterministic ratio block for the agents that reason about figures."""
 
     if target_agent not in METRICS_BLOCK_AGENTS:
         return ""
@@ -193,18 +155,7 @@ def _build_credit_need_block(
     documents: list[ClassifiedDocument],
     target_agent: str,
 ) -> str:
-    """Render the computed credit-need table for the credit proposal prompt.
-
-    Built from every successfully-extracted document rather than the target
-    agent's routed subset, for the same reason _build_financial_metrics_block
-    is: these are derived facts about the customer, and the CIC report the
-    other-lender balance comes from is not routed to the proposal agent.
-
-    The source column is the part that must survive into the report. With a
-    real credit application most guarantee and LC rows fall back to policy
-    defaults, and a reviewer who cannot tell those from figures read off the
-    customer's paperwork is being shown an assumption as evidence.
-    """
+    """Render the computed credit-need table for the credit proposal prompt."""
 
     if target_agent not in CREDIT_NEED_BLOCK_AGENTS:
         return ""
@@ -275,14 +226,7 @@ def _render_structured_records(
 ) -> str:
     """Shared shape of the four "extracted JSON" blocks below: filter to the
     documents this report type actually produced, then dump each one's JSON
-    under the heading and the reading rules specific to that report.
-
-    Four independent copies of this used to exist. Left alone they are the
-    kind of duplication that drifts silently — the same bug shape as the four
-    unrelated ``_scale`` helpers before ``scale_amount`` unified them: nothing
-    stops one copy from quietly losing ``ensure_ascii=False`` or the
-    ``--- {filename} ---`` separator while the other three keep it.
-    """
+    under the heading and the reading rules specific to that report."""
 
     matched = [doc for doc in docs if getattr(doc, flag_attr) and getattr(doc, extraction_attr)]
     if not matched:
@@ -291,7 +235,7 @@ def _render_structured_records(
     for doc in matched:
         parts.append(
             f"--- {doc.filename} ---\n"
-            + json.dumps(getattr(doc, extraction_attr), ensure_ascii=False, indent=2)
+            + ledger_extraction.render_record(getattr(doc, extraction_attr))
         )
     return "\n\n".join(parts)
 
@@ -299,13 +243,7 @@ def _render_structured_records(
 def _build_proposal_structured_block(
     selected: list[ClassifiedDocument],
 ) -> str:
-    """Render the extracted credit application records.
-
-    Amounts arrive already converted to đồng by the extraction pass, and the
-    unit each figure was read in is kept in ``source_unit`` — the form mixes
-    đồng, triệu đồng and tỷ đồng between adjacent tables, so the note says so
-    rather than leaving the agent to infer it.
-    """
+    """Render the extracted credit application records."""
 
     return _render_structured_records(
         selected, "is_proposal", "proposal_extraction",
@@ -325,21 +263,7 @@ def _build_debt_chart_block(
     documents: list[ClassifiedDocument],
     sub_agent_outputs: dict[str, str],
 ) -> tuple[str, str]:
-    """Build the ```linechart block from extracted CIC data.
-
-    Returns ``(block, title)``, or ``("", "")`` when there is no chart to
-    draw. The title travels with the block because it varies with the data
-    (see DEBT_CHART_TITLE_DEBT_ONLY) and _insert_debt_chart needs the same
-    string for its fallback heading.
-
-    The debt series is written here rather than by the agent on purpose:
-    these are 24 figures traced to section 2.6 of a named file, and a
-    model asked to retype them into a chart is a model given 24 chances to
-    invent one. Revenue keeps that same guarantee by a different route —
-    it comes from Credit Relationship's own ```vat-doanh-thu block (see
-    vat_revenue.py), so the number that reaches the chart is still a
-    straight transcription, not something re-typed into a table cell.
-    """
+    """Build the ```linechart block from extracted CIC data."""
 
     if "CREDIT_RELATIONSHIP_AGENT" not in sub_agent_outputs:
         return "", ""
@@ -349,8 +273,6 @@ def _build_debt_chart_block(
         for doc in documents
         if doc.is_cic_s10a and doc.cic_s10a_extraction
     )
-    # One point is a dot, not a trend. Below two the chart says nothing the
-    # balance table does not already say better.
     if len(series) < 2:
         return "", ""
 
@@ -397,14 +319,7 @@ def _build_debt_chart_block(
 def _build_cic_s10a_structured_block(
     selected: list[ClassifiedDocument],
 ) -> str:
-    """Render the extracted CIC S10A records for the prompt.
-
-    Units are spelled out because the source report uses two at once and the
-    extraction only rescales one of them: VND figures were printed in triệu
-    đồng and are now in đồng, while foreign-currency figures were printed in
-    their own unit and are unchanged. An agent told only "amounts are in
-    đồng" would read a USD commitment as a đồng one.
-    """
+    """Render the extracted CIC S10A records for the prompt."""
 
     return _render_structured_records(
         selected, "is_cic_s10a", "cic_s10a_extraction",
@@ -453,18 +368,7 @@ def _build_cic_r21_structured_block(
 def _build_ledger_structured_block(
     selected: list[ClassifiedDocument],
 ) -> str:
-    """Render the detail-ledger record for the prompt.
-
-    JSON like the other four, and deliberately so. A markdown table is denser,
-    but it was measurably worse: the agent's own report template is markdown
-    tables, so evidence in that shape reads as scaffolding rather than data —
-    the same run rendered as a table left the receivables and inventory sections
-    empty that JSON had filled.
-
-    One record covers every ledger file, so it is rendered ONCE no matter how
-    many documents carry it. ``fit_to_budget`` bounds the whole thing at once;
-    budgeting per document gave six files six full allowances against one prompt.
-    """
+    """Render the detail-ledger record for the prompt."""
 
     records = []
     for doc in selected:
@@ -483,9 +387,8 @@ def _build_ledger_structured_block(
         "\"131@20250101-20251231\". One key is ONE period; two keys with the "
         "same account number and different periods are separate entries and "
         "their balances must NEVER be added together. Read the period from "
-        "\"period\" — \"from\"/\"to\" are the boundary dates and "
-        "\"as_printed\" is the line printed on the file — and use it to place "
-        "figures in the right year column. Do not read the year off the key.",
+        "\"period\" — \"from\"/\"to\" are the boundary dates — and use it to "
+        "place figures in the right year column. Do not read the year off the key.",
         "THESE FIGURES WERE READ FROM THE EXCEL CONTENT, not from OCR of an "
         "image. It is a transcription of the original table rather than a "
         "cell-by-cell extraction, so when a figure decides a credit conclusion, "
@@ -552,18 +455,7 @@ def _build_tool_result_block(
     record: dict[str, Any],
     provenance: str = "",
 ) -> str:
-    """Render one reference-data tool's result for the prompt.
-
-    One function for every tool, because a tool already carries what used to be
-    written out per block: the heading in ``extras``, and the reading rules in
-    its docstring, which is where LangChain puts a tool's description and where
-    a reader looks first.
-
-    The provenance line is the point of writing a header at all. Every other
-    block in this prompt is a model's reading of a page; this one is rows the
-    bank's own systems returned, for a customer identified by a tax code that
-    was itself read off a page. The agent should know both halves of that.
-    """
+    """Render one reference-data tool's result for the prompt."""
 
     if not record:
         return ""
@@ -573,21 +465,14 @@ def _build_tool_result_block(
         parts.append(provenance)
     if query_tool.description:
         parts.append(query_tool.description.strip())
-    parts.append(json.dumps(record, ensure_ascii=False, indent=2))
+    parts.append(ledger_extraction.render_record(record))
     return "\n\n".join(parts)
 
 
 def _build_sitevisit_structured_block(
     selected: list[ClassifiedDocument],
 ) -> str:
-    """Render the extracted site-visit report for the prompt.
-
-    The warning about ``conclusion`` is the point of writing a header at
-    all. Every other extracted block is measurement — a balance figure is
-    the balance figure. This one ends with one person's judgement, and an
-    agent that cites it the same way would be telling the reader the file
-    records a fact when it records an opinion.
-    """
+    """Render the extracted site-visit report for the prompt."""
 
     return _render_structured_records(
         selected, "is_sitevisit", "sitevisit_extraction",
@@ -615,12 +500,7 @@ def _build_financial_statement_block(
     selected: list[ClassifiedDocument],
     statements: tuple[str, ...] | None = None,
 ) -> str:
-    """Render the extracted BCTC records, optionally trimmed to some statements.
-
-    ``statements=None`` emits the whole record. Narrowing it keeps an agent
-    that only reasons about one statement from spending its entire character
-    budget on the other two — see FINANCIAL_STATEMENT_JSON_AGENTS.
-    """
+    """Render the extracted BCTC records, optionally trimmed to some statements."""
 
     financial_statement_docs = [
         doc for doc in selected if doc.is_financial_statement and doc.financial_statement_extraction
@@ -644,6 +524,6 @@ def _build_financial_statement_block(
             continue
         parts.append(
             f"--- {doc.filename} ---\n"
-            + json.dumps(extraction, ensure_ascii=False, indent=2)
+            + ledger_extraction.render_record(extraction)
         )
     return "\n\n".join(parts) if len(parts) > 1 else ""

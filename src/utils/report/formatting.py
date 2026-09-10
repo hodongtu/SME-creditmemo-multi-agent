@@ -2,21 +2,17 @@
 
 import re
 
+from src.utils.common import CODE_FENCE as _FENCE
+
 VND_PER_BILLION = 1_000_000_000
 
 _AMOUNT_TOKEN = re.compile(r"[+-]?\d{1,3}(?:[.,]\d{3})+(?![\d.,])")
 _TRAILING_CURRENCY = re.compile(r"\s*(?:VN[ĐD]|đồng|VND)\b", re.IGNORECASE)
 _ALREADY_SCALED = re.compile(r"^\s*(?:tỷ|triệu|nghìn\s+tỷ|ngàn\s+tỷ)\b", re.IGNORECASE)
-# A markdown table row. Cells in one drop the "tỷ VNĐ" suffix because the table
-# already carries its unit on the line below it, and repeating it in all eighty
-# cells of a statement is noise. A figure standing in a sentence has no such
-# label, so it keeps the unit.
+_ZERO_DECIMALS = re.compile(r"(?<=\d)[.,]0+(?=\s*%)")
+_ZERO_CELL = re.compile(r"^\*{0,2}0(?:[.,]0+)?\s*%?\*{0,2}$")
+_TABLE_RULE = re.compile(r"^[\s|:-]+$")
 _TABLE_ROW = re.compile(r"^\s*\|")
-# A "tỷ VNĐ" the model wrote itself. The converter only ever sees raw đồng, so a
-# figure that arrived already scaled slipped past the table rule entirely — one
-# report carried the unit in 99 table rows. Matched with the figure in front of
-# it so the substitution cannot eat a bare unit standing on its own, such as the
-# "(Đơn vị: tỷ VNĐ)" caption above the table.
 _SCALED_IN_CELL = re.compile(r"(?<=\d)\s*(?:tỷ|triệu|nghìn\s+tỷ|ngàn\s+tỷ)\s*VN[ĐD]\b",
                              re.IGNORECASE)
 
@@ -28,18 +24,7 @@ def format_vn_number(value: float, decimals: int = 2) -> str:
 
 
 def render_money(value: float | None) -> str:
-    """A đồng amount the way every prompt block writes it.
-
-    One function so the blocks cannot drift apart on formatting, and no division
-    in it: đồng is what the extraction passes and the calculators produce, and
-    đồng is what the blocks say. Turning it into tỷ VNĐ belongs to
-    convert_amounts_in_text at the end of the run and to nobody else.
-
-    Grouped rather than bare on purpose — that final converter only recognises a
-    figure by its thousands separators, which is what keeps it off tax codes and
-    account numbers. A block writing 225510140846 would reach the report as a
-    number nothing downstream can read as money.
-    """
+    """A đồng amount the way every prompt block writes it."""
 
     if value is None:
         return "N/A"
@@ -74,24 +59,10 @@ def _parse_grouped_amount(token: str) -> float | None:
 
 
 def convert_amounts_in_text(text: str, decimals: int = 2) -> str:
-    """Convert every raw đồng amount in a markdown/text block to tỷ VNĐ.
-
-    Skips percentages, values already expressed in tỷ/triệu/nghìn tỷ, and
-    contiguous identifier digits (tax codes, registration numbers). Absorbs a
-    trailing "VNĐ"/"đồng" so the result is not double-labelled. Writes the unit
-    after figures in prose and leaves it off inside table cells — see _TABLE_ROW.
-
-    A table cell is also stripped of a unit the MODEL wrote, not just one this
-    function would have added. The rule is about the finished table, and until
-    now it only governed the half of the figures that arrived as raw đồng.
-    """
+    """Convert every raw đồng amount in a markdown/text block to tỷ VNĐ."""
     if not text:
         return text
 
-    # Line by line so each figure knows whether it is in a table. Safe because
-    # _AMOUNT_TOKEN matches only digits and separators, so no match can span a
-    # newline; split and join on the same character, so a trailing newline
-    # survives.
     def one(line: str) -> str:
         in_table = bool(_TABLE_ROW.match(line))
         converted = _convert_line(line, decimals, suffix=not in_table)
@@ -125,8 +96,7 @@ def _convert_line(text: str, decimals: int, suffix: bool) -> str:
 
         currency = _TRAILING_CURRENCY.match(tail)
         replacement = to_billion_vnd(value, decimals, suffix)
-        # Preserve an explicit leading "+" (deltas / chênh lệch); the "-" sign is
-        # already produced by number formatting for negative values.
+
         if token.lstrip()[:1] == "+" and value >= 0:
             replacement = "+" + replacement
         result.append(replacement)
@@ -134,3 +104,28 @@ def _convert_line(text: str, decimals: int, suffix: bool) -> str:
 
     result.append(text[cursor:])
     return "".join(result)
+
+
+def tidy_numbers(text: str) -> str:
+    """Drop all-zero decimals from percentages, and write a zero cell as "-"."""
+
+    if not text:
+        return text
+
+    out: list[str] = []
+    in_code = False
+    for line in text.splitlines():
+        if _FENCE.match(line):
+            in_code = not in_code
+            out.append(line)
+            continue
+        line = _ZERO_DECIMALS.sub("", line)
+        if not in_code and line.lstrip().startswith("|") and not _TABLE_RULE.match(line):
+            cells = line.split("|")
+            for index, cell in enumerate(cells):
+                if _ZERO_CELL.match(cell.strip()):
+                    body = " - " if cell.startswith(" ") or cell.endswith(" ") else "-"
+                    cells[index] = body
+            line = "|".join(cells)
+        out.append(line)
+    return "\n".join(out)

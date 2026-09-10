@@ -1,34 +1,4 @@
-"""Detail-ledger spreadsheets (sổ chi tiết) into one JSON keyed by account.
-
-Customers submit these as one workbook of many sheets, or as many files of one
-sheet each — the same six accounts either way. The output is the same shape in
-both cases: one record for the whole folder, keyed by account, so a report
-asking for "phải thu khách hàng" looks in one place regardless of how the files
-arrived.
-
-The whole pass is one LLM call:
-
-1. the classifier has already flagged the files (``bang_ke_xuat_nhap_ton_cong_no``
-   and ``so_chi_tiet_khoan_muc_khac``);
-2. ``extract_document_text`` has already turned each one into text, split by
-   sheet, keeping ``.xlsx`` number formats — ``.csv`` and ``.xls`` come through
-   the same door, which is why they work here now and did not before;
-3. that text, fenced per file, goes to the model, which returns the finished
-   record.
-
-The model is therefore the source of the figures as well as the labels. That is
-a deliberate change: the previous design had openpyxl read every cell and asked
-the model only to name things, which read the sample workbook exactly but could
-not open .xls or .csv at all, and its header/total heuristics were tuned to one
-accounting package. Nothing in this module checks the numbers that come back —
-the trade was made knowingly, and pretending otherwise in a docstring would be
-worse than saying it plainly.
-
-One consequence worth knowing: a ledger past roughly 150 detail rows will run
-past the model's output limit and come back as unparseable JSON. The pass then
-fails, and because it is not a ``required`` pass the run continues on the raw
-text instead of stopping.
-"""
+"""Detail-ledger spreadsheets (sổ chi tiết) into one JSON keyed by account."""
 
 import json
 import re
@@ -41,71 +11,33 @@ from src.agents.extraction.structured_extraction import (
 from src.utils.common import normalize_text
 from src.utils.reading.extractors import read_sheets
 
+
 REQUIRED_TOP_LEVEL_KEYS = {"accounts"}
 
-# Characters the rendered block may occupy, across every ledger file together.
-# Rows are never dropped from the stored record — this only bounds what reaches
-# the prompt, against the agent's 120k total. Measured: the sample workbook's 48
-# rows render to ~14k, so a real ledger fits whole and nothing is aggregated.
 LEDGER_BLOCK_CHAR_BUDGET = 40_000
-# Label of the row standing in for everything the budget left out. It carries
-# the summed figures of those rows, so visible rows still add up to the total.
 RESIDUAL_LABEL = "Các đối tác còn lại"
-# The columns a detail row carries text in. A row is a positional array now, so
-# these are looked up through "item_columns" rather than read off the row —
-# naming, aggregating and total-row detection all need to know which cells hold
-# words and which hold money.
 LABEL_KEYS = ("counterparty_name", "counterparty_code", "item_name")
-
 
 def _label_positions(columns: list[str]) -> list[int]:
     """Indexes of the text columns, in the order they appear."""
 
     return [i for i, c in enumerate(columns) if c in LABEL_KEYS]
-# Names a printed total row carries. Kept as a set because the prompt already
-# tells the model to leave these out of "items" and it does it anyway — on the
-# sample workbook the inventory sheet came back with an eleventh row called
-# "Tổng" holding the column sums, which would have every figure of that account
-# counted twice by anything adding the rows up.
+
 TOTAL_ROW_NAMES = {"tong", "tong cong", "cong", "total", "sum"}
-# How many rows each report section asks for. The guidance says "top 5" and
-# "NHIỀU NHẤT 5" throughout, so this is the number, not a budget to tune.
 TOP_ROWS = 5
-# Which column each report section ranks by, per account category. ONE RANKING PER
-# COLUMN — the account comes back holding a separate ordered list for each entry
-# here, each labelled with the column it was sorted by.
-#
-# The earlier design asked for the UNION of those top fives as a single list. A
-# live run showed why that fails: computing a union of three rankings is several
-# steps of arithmetic done in the head, and nothing in the answer lets a checker
-# see whether it came out right. On 2026-09-08 every account with more than five
-# rows came back with exactly five, and TK 341 dropped the lender ranked 2nd by
-# movement and 4th by balance while keeping one that led no ranking at all. Split
-# into one list per column, the task is "sort by this column, take five" — one
-# step, and both the order and the count are checkable from the answer itself.
-#
-# Traced from src/templates: financial-analysis-guidance 1.1 / 2.2.1a-c / 2.2.2a-b
-# and business-activity-guidance mục 1 (sơ đồ) / mục 2 / mục 3 / mục 4.
 TOP_ROW_CRITERIA: dict[str, tuple[str, ...]] = {
     "receivable": ("debit_movement", "closing_debit", "closing_credit"),
     "payable": ("credit_movement", "closing_debit", "closing_credit"),
     "inventory": ("outflow_value", "closing_value"),
-    # No section enumerates rows of these. FA 2.2.2c (vay nợ) is prose with no
-    # table, and 2.2.1e/2.2.2e take their figures from the balance sheet, not the
-    # ledger. One ranking by the closing balance of the side the account sits on
-    # is enough to let the prose name its largest counterparties; asking for the
-    # movement columns too was work nobody reads.
     "borrowing": ("closing_credit",),
     "other_payable": ("closing_credit",),
     "other_receivable": ("closing_debit",),
     "cash": ("closing_debit",),
     "fixed_asset": ("closing_debit",),
     "equity": ("closing_credit",),
-    # Which side this sheet sits on is exactly what is unknown, so keep both.
     "unknown": ("closing_debit", "closing_credit"),
     "": ("closing_debit", "closing_credit"),
 }
-
 
 LEDGER_EXTRACTION_SYSTEM_PROMPT = """
 You read Vietnamese accounting detail ledgers (sổ chi tiết tài khoản, bảng tổng
@@ -147,10 +79,7 @@ Example: "131@20250101-20251231". ALWAYS carries the period, even when the whole
 dossier holds only one.
 
     Full year 2025        -> 131@20250101-20251231
-    Q1 2025               -> 131@20250101-20250331
-    First 6 months 2025   -> 131@20250101-20250630
-    First 9 months 2025   -> 131@20250101-20250930
-    Year 07/24-06/25      -> 131@20240701-20250630
+    Year 07/24-06/25      -> 131@20240701-20250630   (any period, not just years)
 
 WHERE THE ACCOUNT NUMBER COMES FROM
 
@@ -203,7 +132,7 @@ is for.
    A sheet whose item column reads "Mooc, Đầu kéo, Satxi, Tải thùng kín" is
    vehicles held for resale, so 156. One reading "Thép tấm, Sơn, Vòng bi" is raw
    material, so 152. When a sheet mixes kinds, take the one holding most of the
-   value and say so in "code_evidence".
+   value and take that one.
 
    Getting this wrong is severe: a borrowings ledger filed as 311 instead of 341,
    or other payables as 331 instead of 338, puts one account's figures under
@@ -218,21 +147,18 @@ balances together. Several sheets with the SAME account AND the SAME period merg
 into one entry: Vietnamese ledgers often split one account across sheets by month
 or by product group.
 
-════ EACH ENTRY IN "accounts" — EXACTLY 10 KEYS ════
+════ EACH ENTRY IN "accounts" — EXACTLY 8 KEYS ════
 "category"       one of: cash receivable other_receivable inventory
                  fixed_asset payable other_payable borrowing equity unknown
                  Prefer "unknown" over a guess: an analyst can read an unlabelled
                  sheet, but will TRUST a wrong label.
 "code_source"    "printed" or "convention", per the rule above.
-"code_evidence"  one sentence naming where you read the number (file name, sheet
-                 name, report title).
-"source_files"   the file names that fed this entry, EXACTLY as given.
 "source_sheet_name"
                  the sheet names that fed this entry, EXACTLY as printed on the
                  tab — "P.TRA KHAC", "TK VAY", "NXT". A list, because several
                  sheets of one account and one period merge into a single entry.
                  Write [] for a .csv, which has no sheet.
-"period"         {{"from","to","as_printed"}} — see below.
+"period"         {{"from","to"}} — see below.
 "totals"         {{field: number}} — the total for the WHOLE account, across
                  every detail row, not only the ones you return. Read it off the
                  printed "Tổng cộng" row when the sheet has one; otherwise add up
@@ -248,7 +174,6 @@ or by product group.
 
 ════ "period" ════
 "from"/"to"    ISO "YYYY-MM-DD", read from the banner line above the table.
-"as_printed"   that banner line VERBATIM.
 
 Common phrasings and how they expand:
     "Từ ngày 01/01/2025 đến ngày 31/12/2025" -> 2025-01-01 / 2025-12-31
@@ -256,8 +181,8 @@ Common phrasings and how they expand:
     "Năm 2024"                               -> 2024-01-01 / 2024-12-31
     "Quý 4/2024"                             -> 2024-10-01 / 2024-12-31
     "Tháng 12 năm 2024"                      -> 2024-12-01 / 2024-12-31
-If no line states a period, leave all three "" — do NOT infer one from a file
-name that merely contains a year.
+If no line states a period, leave both "" — do NOT infer one from a file name
+that merely contains a year.
 
 ════ WHICH ROWS TO RETURN — "rankings" ════
 Return the LARGEST rows, not all of them. The report lists at most five
@@ -373,13 +298,10 @@ are a normal layout, not a reason to give up on the sheet.
     "131@20250101-20251231": {{
       "category": "receivable",
       "code_source": "convention",
-      "code_evidence": "Sheet TK_131, tieu de Bao cao chi tiet cong no phai thu; file khong in so hieu.",
-      "source_files": ["VIMID_so_chi_tiet.xlsx"],
       "source_sheet_name": ["TK_131"],
       "period": {{
         "from": "2025-01-01",
-        "to": "2025-12-31",
-        "as_printed": "Từ ngày 01/01/2025 đến ngày 31/12/2025"
+        "to": "2025-12-31"
       }},
       "totals": {{
         "opening_debit": 225510140846,
@@ -409,13 +331,10 @@ are a normal layout, not a reason to give up on the sheet.
     "156@20250101-20251231": {{
       "category": "inventory",
       "code_source": "convention",
-      "code_evidence": "Sheet NXT, tieu de Bao cao tong hop nhap xuat ton; file khong in so hieu.",
-      "source_files": ["VIMID_so_chi_tiet.xlsx"],
       "source_sheet_name": ["NXT"],
       "period": {{
         "from": "2025-01-01",
-        "to": "2025-12-31",
-        "as_printed": "Từ ngày 01/01/2025 đến ngày 31/12/2025"
+        "to": "2025-12-31"
       }},
       "totals": {{
         "opening_quantity": 705,
@@ -452,21 +371,7 @@ Return EXACTLY this schema and nothing else.
 # ── Fitting the record to the prompt's character budget ───────────────────
 
 def render_record(record: dict[str, Any], indent: int = 2) -> str:
-    """The record as the agent sees it: framed by indent, one detail row per line.
-
-    ``json.dumps(indent=2)`` breaks EVERY array element onto its own line, which
-    turns a seven-value row into seven lines and undoes most of what the
-    columnar shape saves — 37% off instead of 56%, measured. So rows are dumped
-    compactly and the frame around them keeps its indentation.
-
-    Assembled from ``json.dumps`` piece by piece rather than by rewriting a
-    dumped string: a regex over JSON breaks the moment a value contains a
-    bracket, and Vietnamese counterparty names do.
-
-    ``fit_to_budget`` measures with this same function. Two renderers would
-    budget against one shape and print another — trimming rows that would have
-    fit, or overflowing without noticing.
-    """
+    """The record as the agent sees it: framed by indent, one detail row per line."""
 
     def encode(value: Any, depth: int) -> str:
         pad = " " * (indent * depth)
@@ -477,10 +382,7 @@ def render_record(record: dict[str, Any], indent: int = 2) -> str:
                 for row in value
             )
             return f"[\n{rows}\n{pad}]"
-        # "rankings" is a list of dicts. Without this branch it falls through to
-        # the compact dump at the bottom and the whole thing — every ranking,
-        # every row — lands on one line, undoing the row-per-line shape the
-        # budget was measured against.
+
         if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
             body = ",\n".join(inner + encode(item, depth + 1) for item in value)
             return f"[\n{body}\n{pad}]"
@@ -518,12 +420,7 @@ def _magnitude(row: list[Any], label_at: set[int]) -> float:
 
 
 def _aggregate(rows: list[list[Any]], columns: list[str]) -> list[Any]:
-    """One row summing every column of the rows it stands in for.
-
-    Positional, so it must be exactly as wide as ``item_columns``: a short row
-    silently shifts every value after the gap into the wrong column, and the
-    JSON stays valid while the figures stop meaning anything.
-    """
+    """One row summing every column of the rows it stands in for."""
 
     label_at = _label_positions(columns)
     out: list[Any] = []
@@ -545,36 +442,21 @@ def fit_to_budget(
     record: dict[str, Any],
     budget: int = LEDGER_BLOCK_CHAR_BUDGET,
 ) -> dict[str, Any]:
-    """The record trimmed to ``budget`` characters, losing no figures.
-
-    Rows that do not fit are replaced by one aggregate row carrying their summed
-    columns, so visible rows still reconcile to ``totals`` — the same principle
-    as naming skipped files in ``discover_documents`` rather than dropping them.
-
-    Budgets the whole record at once. Doing it per file gave every ledger file
-    the full allowance, so six files could claim 240k against a 120k prompt and
-    push the document content off the end.
-    """
+    """The record trimmed to ``budget`` characters, losing no figures."""
 
     def shrink(keep: int) -> dict[str, Any]:
         accounts = {}
         for key, account in (record.get("accounts") or {}).items():
             columns = account.get("item_columns") or []
             label_at = set(_label_positions(columns))
-            # Trim each ranking on its own. Merging them first and cutting once
-            # would let a heavy list eat a light one's allowance, and the whole
-            # point of the split is that a section reads its own list.
+
             rankings = []
             for ranking in account.get("rankings") or []:
                 rows = ranking.get("items") or []
                 if len(rows) <= keep:
                     rankings.append(ranking)
                     continue
-                # Sort again here rather than trusting the order that arrived.
-                # _note_slice_problems reports a badly ordered list, but reporting
-                # happens after this trim, and taking rows[:keep] off a list the
-                # model shuffled would throw away the largest row for good. The
-                # aggregate row stands for the tail of THIS list, so it stays in it.
+
                 at = columns.index(ranking["sorted_by"]) \
                     if ranking.get("sorted_by") in columns else None
                 ordered = sorted(
@@ -644,10 +526,6 @@ def build_ledger_extraction_chain(llm: Any):
     return build_extraction_chain(LEDGER_EXTRACTION_SYSTEM_PROMPT, llm)
 
 
-# Characters the JSON payload may occupy, matching the per-document budget the
-# rest of the pipeline applies to OCR text. Reading straight from the file skips
-# that cap, so it is re-applied here — otherwise a ledger pass would send more
-# than any other pass is allowed to.
 PAYLOAD_CHAR_BUDGET = 120_000
 
 
@@ -768,10 +646,6 @@ def _drop_total_rows(record: dict[str, Any]) -> None:
         if not isinstance(account, dict):
             continue
         label_at = _label_positions(account.get("item_columns") or [])
-        # The same printed total row can land in several rankings, so count the
-        # distinct labels dropped rather than the drops: subtracting once per
-        # ranking would take one real detail row off item_count for every extra
-        # list the account happens to carry.
         dropped_labels: set[str] = set()
         for ranking in account.get("rankings") or []:
             if not isinstance(ranking, dict):
@@ -916,18 +790,63 @@ def _note_slice_problems(record: dict[str, Any]) -> None:
         )
 
 
+def fill_source_files(record: dict[str, Any], documents) -> None:
+    """Put back the per-account ``source_files`` the model no longer writes.
+
+    The model used to name the file on every account, and on a one-file dossier
+    that was the same string seven times. It is derivable instead: the reader
+    already knows which file each sheet came from, and the account names its
+    sheet. So the model writes the part only it knows, and the program fills in
+    the part it can look up.
+
+    A sheet name that matches nothing leaves the list EMPTY and says so. The
+    model does get sheet names wrong — one live run filed a "P.THU KHAC" account
+    under sheet "P.TRA KHAC" — and guessing a filename from a name that matched
+    nothing would dress that mistake up as provenance.
+    """
+
+    by_sheet: dict[str, list[str]] = {}
+    for entry in sheet_inventory(documents):
+        filename, _, sheet = entry.partition(" › ")
+        by_sheet.setdefault(normalize_text(sheet or filename), []).append(filename)
+
+    unmatched = []
+    for key, account in (record.get("accounts") or {}).items():
+        if not isinstance(account, dict):
+            continue
+        sheets = account.get("source_sheet_name") or []
+        if isinstance(sheets, str):
+            sheets = [sheets]
+        files: list[str] = []
+        for sheet in sheets:
+            for name in by_sheet.get(normalize_text(str(sheet)), []):
+                if name not in files:
+                    files.append(name)
+            if normalize_text(str(sheet)) not in by_sheet:
+                unmatched.append(f"{key} → {sheet!r}")
+        # A .csv names no sheet at all; on a one-file dossier that is unambiguous.
+        # Only when the account named NO sheet, never when it named one that
+        # matched nothing — falling back there would hand a filename to exactly
+        # the case the warning exists to flag.
+        all_files = {n for names in by_sheet.values() for n in names}
+        if not sheets and len(all_files) == 1:
+            files = sorted(all_files)
+        account["source_files"] = files
+    if unmatched:
+        record.setdefault("extraction_notes", []).append(
+            "WARNING: source_sheet_name did not match any sheet that was read, so "
+            "the source file could not be filled in for: "
+            + "; ".join(unmatched[:6])
+            + ". The sheet name is the model's, and a wrong one here means the "
+            "account may have been read off a different sheet than it claims."
+        )
+
+
 def extract_ledger_batch(
     chain: Any,
     documents: list[tuple[str, str, str]],
 ) -> list[tuple[dict[str, Any] | None, str]]:
-    """Read every ledger file in one call, then share one record between them.
-
-    Batch rather than per-document because the record spans files: the same
-    account can arrive split across two of them, and one call over the whole set
-    also keeps the naming consistent. Each document receives THE SAME object —
-    ``_build_ledger_structured_block`` de-duplicates by identity, so handing out
-    copies would render the block once per file.
-    """
+    """Read every ledger file in one call, then share one record between them."""
 
     sheets, read_notes = read_ledger_sheets(documents)
     if not sheets:
@@ -944,10 +863,7 @@ def extract_ledger_batch(
     )
     if record is None:
         return [(None, error) for _ in documents]
-    # The model has put these two inside "accounts" instead of beside it, where
-    # they then read as two more accounts. Lifted rather than dropped: the
-    # content is right, only the nesting is wrong, and a note about an
-    # unreadable sheet is worth more than a tidy shape.
+
     for key in ("unmapped_columns", "extraction_notes"):
         misplaced = (record.get("accounts") or {}).pop(key, None)
         if isinstance(misplaced, list) and not record.get(key):
@@ -961,18 +877,10 @@ def extract_ledger_batch(
             f"sheet(s) were not sent: {', '.join(dropped[:10])}."
         )
 
-    # Before _drop_total_rows, which rewrites item_count and would erase the
-    # evidence — item_count now means the sheet's own row count, so dropping a
-    # printed total row must not touch it.
     _note_slice_problems(record)
     _drop_total_rows(record)
+    fill_source_files(record, documents)
 
-    # The model has dropped whole sheets in silence — on the sample workbook it
-    # returned three accounts out of six and left extraction_notes empty, so the
-    # record read as complete while half the ledger was gone. Nothing here can
-    # tell WHICH sheet went missing, but it can refuse to let the count pass
-    # unremarked: a short record that says so is recoverable, one that does not
-    # is a credit opinion written on half a ledger.
     expected = len(sheet_inventory(documents))
     returned = len(record.get("accounts") or {})
     if returned < expected:

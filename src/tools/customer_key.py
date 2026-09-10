@@ -1,30 +1,10 @@
-"""Which customer a run is about, read off the documents it was given.
-
-A reference-data query needs a key, and the pipeline has no field for one — the
-screen supplies the flow and the loan programme, not the customer. So the key is
-read from the extraction results, in a fixed order of preference.
-
-Everything here is deliberately unforgiving. The key selects whose credit history
-gets pulled into a report: a tax code misread by one digit does not fail, it
-quietly returns another company's debts. So a code that is not exactly the right
-shape is refused rather than sent, and every accepted key carries the file and
-field it came from.
-"""
+"""Which customer a run is about, read off the documents it was given."""
 
 import re
 from typing import Any, NamedTuple
 
-# Vietnamese tax codes are 10 digits, or 13 when a 3-digit branch suffix is
-# appended. Anything else is not a tax code, whatever the model wrote.
 _TAX_CODE = re.compile(r"^\d{10}(?:\d{3})?$")
 
-# The order is a business decision, not a technical one: the financial statements
-# first, then the site-visit report, then the credit application.
-#
-# The CIC reports are deliberately NOT here even though they also print the code.
-# They are the document the query exists to replace, so a folder that has one
-# does not need the query; and reading the key from the very report being
-# superseded would make the two paths depend on each other.
 KEY_SOURCES: tuple[tuple[str, str], ...] = (
     ("financial_statement_extraction", "customer"),
     ("sitevisit_extraction", "customer"),
@@ -83,9 +63,6 @@ def resolve_customer_key(documents: list[Any]) -> CustomerKey:
     rank, code, name, filename, field = candidates[0]
     warnings = []
 
-    # Say it before choosing, not after: two different codes in one folder is a
-    # sign of a file from the wrong customer, and picking the higher-ranked one
-    # silently would bury exactly the case worth stopping for.
     distinct = {row[1] for row in candidates}
     if len(distinct) > 1:
         listed = ", ".join(

@@ -4,21 +4,16 @@ import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
-from src.utils.report.formatting import format_vn_number, render_money
-
-# Declared here rather than imported from prompt_blocks: that module imports
-# this one, so the constant has to live on the side that has no dependency.
-METRICS_BLOCK_HEADING = "[PRE-COMPUTED FINANCIAL METRICS]"
+from src.utils.report.formatting import render_money
 from src.agents.extraction.financial_statement_extraction import (
     normalize_period_label,
     resolve_report_years,
 )
-
-
 from src.agents.extraction.financial_statement_extraction import (
     iter_line_items,
 )
 
+METRICS_BLOCK_HEADING = "[PRE-COMPUTED FINANCIAL METRICS]"
 BALANCE_SHEET = "balance_sheet"
 INCOME_STATEMENT = "income_statement"
 CASH_FLOW = "cash_flow_statement"
@@ -150,11 +145,6 @@ class FinancialRatioCalculator:
             ("tổng cộng tài sản", "tổng tài sản"),
             codes=("270",),
         ),
-        # The other side of the same identity. Without it the block offered no
-        # figure for "Tổng nguồn vốn" at all, and the agent filled that row with
-        # "Nợ phải trả" — the only number it had that looked like a total on the
-        # capital side. Equal to total_assets by construction, so a report where
-        # the two rows differ is reporting a misread, not a business fact.
         MetricDefinition(
             "total_capital",
             "Tổng cộng nguồn vốn",
@@ -383,16 +373,7 @@ class FinancialRatioCalculator:
 
     @classmethod
     def metrics_from_documents(cls, documents: list[Any]) -> dict[str, dict[str, float]]:
-        """Yearly metrics for a list of ClassifiedDocument or their dicts.
-
-        The three lines this replaces — build a calculator, asdict the
-        documents, extract — were written out at four call sites across two
-        modules. The arithmetic is cheap, so the duplication cost nothing at
-        runtime; what it cost was a single place to change. Any filter or
-        correction applied to the metrics had to be applied four times, and the
-        first time three of the four were updated, the metrics block and the
-        credit-need block would disagree inside one report with nothing raising.
-        """
+        """Yearly metrics for a list of ClassifiedDocument or their dicts."""
 
         payload = [
             doc if isinstance(doc, dict) else asdict(doc) for doc in documents
@@ -532,18 +513,7 @@ class FinancialRatioCalculator:
         self,
         documents: list[dict[str, Any]],
     ) -> dict[str, list[str]]:
-        """Which uploaded file supplied each year's figures.
-
-        The block is the only place a reader meets these numbers, and every
-        figure in a credit memo has to be attributable to a document. Without
-        this the agent is required to cite a source it was never told, and the
-        only identifier in front of it is the block's own heading — which is how
-        an internal heading ends up printed in a customer-facing report.
-
-        Kept per year rather than one flat list because two statements usually
-        overlap by a year, and a merged list would attribute a column to a file
-        that never carried it.
-        """
+        """Which uploaded file supplied each year's figures."""
 
         by_year: dict[str, set[str]] = {}
         for document in documents:
@@ -582,13 +552,7 @@ class FinancialRatioCalculator:
         self,
         documents: list[dict[str, Any]],
     ) -> dict[str, dict[str, float]]:
-        """Extract financial statement line items by year from financial_statement_extraction JSON.
-
-        Reads each document's ``financial_statement_extraction`` (the structured JSON produced
-        by the BCTC extraction pass — see financial_statement_extraction.py), not raw OCR
-        text. A document without a successful extraction (not a BCTC, LLM
-        failed, or no extraction LLM configured) contributes nothing.
-        """
+        """Extract financial statement line items by year from financial_statement_extraction JSON."""
         yearly_metrics: dict[str, dict[str, float]] = {}
         best_score: dict[tuple[str, str], tuple[int, int, int]] = {}
 
@@ -666,7 +630,6 @@ class FinancialRatioCalculator:
             if not hits:
                 continue
             longest = max(hits, key=len)
-            # A longer alias is a more specific match than a shorter one.
             score = (
                 cls.EXACT_LABEL_SCORE
                 if longest == normalized_label
@@ -674,9 +637,6 @@ class FinancialRatioCalculator:
             )
             code_rank = _code_rank(code_text, metric.codes)
             if code_rank is not None:
-                # Codes are listed aggregate-first ("140" before "141", "400"
-                # before "410"), so the earlier code wins a tie deterministically
-                # and the roll-up line beats its own sub-line.
                 score += cls.CODE_AGREEMENT_BONUS + (len(metric.codes) - code_rank)
             if statement_key == metric.statements[0]:
                 score += 1
@@ -686,8 +646,6 @@ class FinancialRatioCalculator:
             metric, score = max(candidates, key=lambda item: item[1])
             return metric, cls.LABEL_TIER, score
 
-        # No label matched — OCR may have mangled it beyond recognition. Fall
-        # back to the code alone, which is the only remaining signal.
         for metric in cls.METRICS:
             if statement_key not in metric.statements:
                 continue
@@ -735,8 +693,6 @@ class FinancialRatioCalculator:
             "value is missing, say so rather than estimating it.",
             "",
         ]
-        # Above the numbers, not below them: a reader who has already worked
-        # through the table has drawn the conclusion the warning exists to stop.
         warnings = (
             self.detect_unit_anomalies(yearly_metrics)
             + self.data_quality_warnings(yearly_metrics)
@@ -761,10 +717,6 @@ class FinancialRatioCalculator:
                 for year, names in source_files.items()
             )
             lines.append("")
-        # Công thức KHÔNG in ra ở đây. Bảng "Computed financial ratios" bên
-        # dưới đã có cột "Công thức", và đối chiếu cho thấy cả 21 công thức của
-        # danh sách này lặp nguyên văn xuống đó — 504 token nói lại điều bảng
-        # đang nói.
         lines.extend(
             [
                 "",
@@ -815,7 +767,6 @@ class FinancialRatioCalculator:
                 _format_number(yearly_metrics.get(year, {}).get(definition.key), "value")
                 for year in years
             ]
-            # A row nobody could read a figure from is noise in the prompt.
             if any(cell != "N/A" for cell in cells):
                 rows.append((definition.label, *cells))
         return rows
@@ -933,7 +884,4 @@ def _format_number(value: float | None, unit: str) -> str:
         return f"{value:.1f} ngày"
     if unit == "x":
         return f"{value:.2f}x"
-    # Money stays in đồng, formatted the one way every block formats it. The
-    # division that used to be here made this the second of three places that
-    # knew about tỷ VNĐ; now only _finalize does.
     return render_money(value)

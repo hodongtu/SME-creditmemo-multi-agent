@@ -76,7 +76,7 @@ corrects and signs.
 | **D3** | Only the extraction passes this route reads are run | Run all six every time | Each pass costs one LLM call per matching document. A business-activity run costs a fraction of a proposal run | `EXTRACTION_PASSES` table — one row carries both the gate and the consumers, so they cannot drift apart |
 | **D4** | Evidence gap check before any extraction | Extract first, discover the gap later | A run that cannot answer should cost nothing | `evidence_gap_check` node, placed before `extract_documents` |
 | **D5** | The routing matrix is data | Hard-code type → agent in Python | Changing which agents see a document type is an analyst's decision, not an engineer's | `document_matrix.yaml`, validated on load — unknown agent, bad `R`/`O`, or a missing loan program raises |
-| **D6** | Every prompt rule has a code-level counterpart | Trust the prompt | An instruction in a prompt is a request. Measured repeatedly: the model ignores rules that only live there | `tidy_numbers`, `check_template_leakage`, `consolidate_footnotes`, import-time guards in `specialist.py` |
+| **D6** | Every prompt rule worth enforcing has a code-level counterpart | Trust the prompt | An instruction in a prompt is a request. Measured repeatedly: the model ignores rules that only live there — `tidy_numbers` alone rewrote 442 lines across fourteen runs | `tidy_numbers`, `consolidate_footnotes`, import-time guards in `specialist.py` |
 
 **D6 in practice.** Three kinds of counterpart, by what the rule can be:
 
@@ -324,8 +324,7 @@ src/
 │   └── customer_key.py          # Resolves the tax code the tools query with
 ├── utils/
 │   ├── reading/                 # ocr.py, extractors.py, tax_xml.py
-│   └── report/                  # citations, formatting, markdown_fixups, template_leak,
-│       ├── injection.py         # Flags instruction-shaped text in source documents
+│   └── report/                  # citations, formatting, source_list
 │       └── visualization/       # charts, diagrams, graph_svg, report_html, report_style
 └── templates/                   # Per-agent structure + guidance Markdown
 ```
@@ -588,6 +587,20 @@ values on 65 (year, metric) pairs, 61 (year, ratio) pairs, the per-year source f
 all 26 rows of the credit-need table. `iter_line_items` keeps reading the old object shape,
 because every record already in `logs/` is written that way.
 
+**Every block renders through `render_record`.** `json.dumps(indent=2)` breaks each element
+of a positional row onto its own line, so the columnar shape paid for itself in the model's
+output and gave it all back in the prompt. The BCTC block fell 8,849 → 6,413 tokens on the
+switch. `render_record` is verified content-preserving: each block's output parses back equal
+to the record it came from.
+
+Three ledger keys were removed for the same reason `source_columns` and `units` were —
+nothing read them. The one with a subtlety is `source_files`: it was identical on every
+account, so `fill_source_files` derives it from `source_sheet_name` through
+`sheet_inventory`. That inverts the division of labour correctly — the model supplies what
+only it can know, the program looks up what it already knows — but it makes provenance depend
+on a sheet name the model sometimes gets wrong, so an unmatched name yields an empty list and
+a warning rather than a guess.
+
 **An account carries one ranked list per criterion, not one list of rows.** The report lists
 at most five counterparties or stock items per section, so the pass asks for five — but the
 sections disagree on what "largest" means, and one account is read under several at once
@@ -819,10 +832,14 @@ cấu trúc bảng". Both were true of different things, so they became one line
 rows without data may go, columns may not.
 
 `SOURCE DATA RULE` is placed before `EVIDENCE RULE` deliberately: it decides what counts
-as evidence in the first place. It is also the one rule with a code-level counterpart that
-does not trust the model at all — `check_injection_markers` scans the documents directly in
-`_finalize`, because the model least likely to report an injected instruction is the one
-that followed it.
+as evidence in the first place. It used to carry a third clause telling the model to report
+an injected instruction under "Dấu hiệu cảnh báo", backed by `check_injection_markers`
+scanning the documents in `_finalize`. Both are gone: the deployment sits behind a shared
+input/output guardrail that blocks such text before it reaches an agent, and the check had
+fired on none of fifteen runs. What stays is the half the guardrail cannot supply — telling
+the model that fenced text is evidence rather than instruction, because `DOC_FENCE_OPEN`
+still wraps every document in `<<<SOURCE_DOCUMENT n>>>` and something has to say what that
+means.
 
 #### Stage 6 — Finalization
 
@@ -831,12 +848,11 @@ Order matters, and each position has a reason.
 | # | Step | Why here |
 |---|---|---|
 | 1 | Consolidate footnotes into one list, return the audit | Collapsing repeated labels first would hide two agents having claimed the same source |
-| 2 | Blank line before bullet lists | A list glued to the line above renders as a bare `-` |
-| 3 | `tidy_numbers` | `8,00%` → `8%`; a zero table cell → `-` |
-| 4 | Strip the VAT revenue block | An internal channel between the CR agent and the chart builder, never meant for the reader |
-| 5 | **đồng → tỷ VNĐ** | The only place in the system that divides by 10⁹ |
-| 6 | Append findings — citations, template leakage, **injected instructions** | All three are *reported*, not silently accepted. The injection check reads the source documents rather than the report, because a model that obeyed an injected instruction will not mention it |
-| 7 | Insert the debt/revenue chart | Last, because it is written by the pipeline from extracted JSON and is not the text rewriters' business |
+| 2 | `tidy_numbers` | `8,00%` → `8%`; a zero table cell → `-`. 442 lines rewritten across fourteen runs — the busiest step here |
+| 3 | Strip the VAT revenue block | An internal channel between the CR agent and the chart builder, never meant for the reader |
+| 4 | **đồng → tỷ VNĐ** | The only place in the system that divides by 10⁹ |
+| 5 | Append citation findings | Reported, not silently repaired. The template-leak and injection checks that used to run here were removed — the first had fired three times, all in August and all on the same failure, the second never |
+| 6 | Insert the debt/revenue chart | Last, because it is written by the pipeline from extracted JSON and is not the text rewriters' business |
 
 Step 5 drops the unit suffix inside table cells and keeps it in prose: a table already
 carries its unit on the line below it, a figure in a sentence does not.
@@ -1010,7 +1026,6 @@ empty block means "no data", not "infer it from the bureau numbers".
 | Notebook outputs stripped | `nbstripout` git filter, one-time install per clone | Source control — a real run leaves document names and figures in output cells, and the repository is public |
 | Secrets never committed | `.gitignore` excludes `.env`, keeps `.env.example` | Source control |
 | Source documents fenced | `<<<SOURCE_DOCUMENT n>>>`; the token is stripped from content first | The prompt |
-| Injected instructions reported | `check_injection_markers`, appended by `_finalize` | The report |
 | OCR cache off by default | `OCR_CACHE_DIR` empty ⇒ nothing is written | Local disk |
 
 The first five protect the **repository** — they stop customer data reaching GitHub, and

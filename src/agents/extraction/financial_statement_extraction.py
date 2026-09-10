@@ -13,11 +13,6 @@ from src.agents.extraction.structured_extraction import (
 from src.utils.common import normalize_text
 
 
-# Keys the block prints, in the order the schema declares them. A record read
-# back from logs/ or a cache can still carry keys the schema has since dropped —
-# "notes_summary" was 2,182 tokens per file — and the block would print them
-# without anything noticing. Filtering against this list means removing a key
-# from the schema is enough; nothing has to be cleaned up downstream.
 BLOCK_KEYS = (
     "customer",
     "document_type",
@@ -173,14 +168,7 @@ _CURRENT_PERIOD_MARKERS = (
 
 
 def _year_from_digit_run(run: str) -> str | None:
-    """Read a year out of a date written without separators.
-
-    "122024" is December 2024 and "31122024" is 31 December 2024.
-    "0104498100" is a tax code and "1234567" is an amount.
-
-    Only 6- and 8-digit runs are considered, and only when the leftover 
-    digits form a plausible day/month — otherwise the run is left alone.
-    """
+    """Read a year out of a date written without separators."""
 
     if len(run) == 6:
         # MMYYYY, then YYYYMM.
@@ -211,22 +199,7 @@ def normalize_period_label(
     current_year: str | None = None,
     previous_year: str | None = None,
 ) -> str:
-    """Render any period label the model produced as a single "Năm YYYY" form.
-
-    Statements label the same year in whatever style the source document used:
-    "2024", "31/12/2024", "122024", "01/01/2024 - 31/12/2024", or by position
-    ("Số cuối kỳ"). Those strings are dict keys for the per-year figures, so
-    mixed styles across two uploaded statements split one real year into several
-    columns — and the growth ratio, which walks the columns in sorted order,
-    then compares a year against itself.
-
-    A date range resolves to its LAST year, because a column labelled with a
-    range reports the period ending on that date. Positional labels resolve
-    against ``current_year``/``previous_year`` taken from the report's own
-    reporting period; without that context they are left alone rather than
-    guessed at. A label that yields no year is returned unchanged: a slightly
-    odd column beats a silently missing one. Idempotent.
-    """
+    """Render any period label the model produced as a single "Năm YYYY" form."""
 
     text = str(raw or "").strip()
     if not text:
@@ -258,21 +231,11 @@ def normalize_period_label(
     return text
 
 
-# Columns of a line-item row that are not a reporting period. Everything else in
-# "item_columns" names a year, which is what lets one declaration at the top of a
-# statement replace a "values" dict repeated on all 108 rows.
 ROW_META_COLUMNS = ("label", "code", "page")
 
 
 def iter_line_items(statement: Any):
-    """Yield (label, code, values, page) for each row, in either shape.
-
-    Two shapes exist on purpose. Rows are positional arrays under
-    "item_columns" now; before that each row was an object repeating
-    label/code/values/page, and every record already written to logs/ is in that
-    older shape. Readers go through here so neither the ratio calculator nor the
-    period normaliser has to know which one it is holding.
-    """
+    """Yield (label, code, values, page) for each row, in either shape."""
 
     if not isinstance(statement, dict):
         return
@@ -335,11 +298,7 @@ def map_line_item_values(statement: Any, convert) -> None:
 
 
 def rename_line_item_periods(statement: Any, rename) -> None:
-    """Rewrite period labels with ``rename(label)``, in either shape.
-
-    Columnar records carry the period once in "item_columns", so the rename
-    happens there; object rows carry it on every row's "values" key.
-    """
+    """Rewrite period labels with ``rename(label)``, in either shape."""
 
     if not isinstance(statement, dict):
         return
@@ -383,24 +342,6 @@ def resolve_report_years(result: Any) -> tuple[str | None, str | None]:
     if not previous and current:
         previous = str(int(current) - 1)
     return current, previous
-
-
-def _normalize_values_by_period(
-    values: Any,
-    current_year: str | None,
-    previous_year: str | None,
-) -> Any:
-    """Re-key a line item's {period: number} map onto normalized labels."""
-
-    if not isinstance(values, dict):
-        return values
-    normalized: dict[str, Any] = {}
-    for period, value in values.items():
-        key = normalize_period_label(period, current_year, previous_year)
-        if key in normalized and normalized[key] is not None:
-            continue
-        normalized[key] = value
-    return normalized
 
 
 def normalize_extraction_periods(result: dict[str, Any]) -> dict[str, Any]:
@@ -459,16 +400,7 @@ def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def drop_heading_rows(result: dict[str, Any]) -> dict[str, Any]:
-    """Remove line items that carry no figure in any period, in place.
-
-    A cash-flow statement prints block headings as ordinary rows — "I. LƯU CHUYỂN
-    TIỀN TỪ HOẠT ĐỘNG KINH DOANH" with every period empty. They name what follows
-    and carry nothing to underwrite on, and there were 11 of them in one real
-    statement. The prompt asks the model to leave them out; this is the guard,
-    because a prompt rule is a request.
-
-    A row with a figure in one period and none in another is real data and stays.
-    """
+    """Remove line items that carry no figure in any period, in place."""
 
     for key in _STATEMENT_KEYS:
         statement = result.get(key)

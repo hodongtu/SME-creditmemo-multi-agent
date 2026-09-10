@@ -20,150 +20,51 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 
-# Geometry, in SVG user units (the whole drawing is scaled to the page later).
-# The floor is low on purpose. At 96 it bound on every short label — "Đầu ra"
-# was stretched from the 70 its text needs to 96 — and since the box grew while
-# the text did not, the visible margin round the words went from 14 to 27. Boxes
-# then looked like they had been padded by different amounts, because they had.
-# 56 only catches labels of three characters or fewer, where a box would
-# otherwise be a sliver.
+
 NODE_MIN_WIDTH = 56
 NODE_MAX_WIDTH = 190
-# Roomier than before, following the pen's 20px. Boxes that hug their text read
-# as cramped next to 9.5pt body copy; the extra air is most of why the original
-# looks calmer than what this drew before.
 NODE_PADDING_X = 14
 NODE_PADDING_Y = 11
-# How far a hexagon's points stick out past its flat middle. The label sits in
-# that middle, so this is added to the node's width on top of the usual padding
-# — without it the text runs into the slanted ends.
 HEX_INSET = NODE_PADDING_X
 LINE_HEIGHT = 17
-# SVG user units are CSS px, and WeasyPrint prints them at 72/96 — so a size
-# here is 0.75 of what lands on the page. Measured, not assumed: a 20px label
-# came out of the PDF at exactly 15.00pt.
 PX_TO_PT = 0.75
-# 13.5px = 10.1pt against 9.5pt body text: the boxes read a touch larger than
-# the prose, which is what a diagram wants. Reliable only because a wrapped
-# chain now lays out into the page width instead of being scaled down to reach
-# it — before that, this constant was multiplied by an 0.45 fit factor and the
-# nine-box supply chain printed at 3.5pt.
 FONT_SIZE = 13.5
 EDGE_FONT_SIZE = 11.34
 RANK_GAP = 92
-# Top-down charts need less room between levels: a horizontal gap has to fit an
-# edge label *beside* the connector, a vertical one only above and below it.
 VERTICAL_RANK_GAP = 46
-# What a level needs when nothing is written between it and the next one: room
-# for the connector and its arrowhead, no more. RANK_GAP is sized for an edge
-# label sitting beside the connector, and on a chain with no labels at all those
-# 74s were 36% of the drawing's width — spent on space for text that does not
-# exist, and paid for by shrinking the text that does.
 BARE_RANK_GAP = 44
 BARE_VERTICAL_RANK_GAP = 26
-# Clear space either side of an edge label — per side, not shared between them.
-# The earlier constant was the total, which left 7px a side once the label was
-# centred, and the arrowhead is 8px long: the label finished exactly where the
-# arrow began. A gap is sized from what has to fit inside it, and that is the
-# label plus room to breathe plus the arrowhead.
 EDGE_LABEL_CLEARANCE = 13
-# Clear space between the bottom of an edge label and the wire it annotates.
-# The old code lifted the baseline by a flat 4px, chosen when the edge font was
-# 8.5. At 10.5 the descenders reached to within 1.7px of the wire, and
-# Vietnamese puts marks below the baseline — ạ, ộ, ệ — so the label sat on the
-# line. Derived from the font rather than picked, so it stays right if the size
-# changes again.
 EDGE_LABEL_MARGIN = 4.0
-# How far glyphs reach below the baseline, as a fraction of the font size.
 DESCENDER_RATIO = 0.22
 ARROW_LENGTH = 8
 EDGE_STROKE_WIDTH = 1.4
-# Vertical room between wrapped rows: enough for the connector to drop out of
-# one row, run back to the left and arrive on top of the next.
 WRAP_ROW_GAP = 42
 NODE_GAP = 14
 MARGIN = 8
 
-# Fallback only. Counting characters cannot work: measured against a rendered
-# PDF, the real advance per character ranged from 0.514 to 0.665 of the font
-# size depending on the word, so any single ratio is wrong for most labels. At
-# 0.52 the long ones came out 24% too narrow, which showed up as boxes whose
-# text nearly touched the edge while short boxes had room to spare — the same
-# padding in the code, four times the padding on the page.
 CHAR_WIDTH = FONT_SIZE * 0.57
 EDGE_CHAR_WIDTH = EDGE_FONT_SIZE * 0.57
 
-# WeasyPrint lays the text out with the report's own font stack, so that is what
-# gets measured. The correction is empirical: PIL's advance widths came out a
-# consistent 11% under what the PDF actually drew — consistent enough to correct
-# for, where the character count was not. With it, padding lands between 9.8 and
-# 11.3pt against a 10.5pt target; the character count gave 4.8 to 10.6.
-# The families REPORT_CSS prints with, in the same order. Used for two things
-# that must agree: measuring text to size the boxes, and the font written
-# into an SVG that gets embedded as an image. Measured against the report
-# font, Times is about 12% narrower than Helvetica for mixed-case text —
-# so a stack that disagreed with the stylesheet padded every box by that
-# much.
 FONT_STACK = ("Times New Roman", "Times", "Liberation Serif", "DejaVu Serif")
-# PIL's advance widths against WeasyPrint's, measured on eight Vietnamese
-# strings rendered at FONT_SIZE and read back out of the PDF: the ratio came
-# out 0.90 for every one of them, so with Times the two agree exactly and no
-# correction is needed. It was 1.115 for Helvetica Neue, which ships as a
-# .ttc collection PIL and the renderer resolved differently. Recalibrate
-# this whenever the font changes — leaving the old number padded every
-# diagram box by 11%.
 FONT_MEASURE_CORRECTION = 1.0
 _MEASURE_SIZE = 64
-# Kept for the fallback path only. Wrapping by character count stopped being
-# right when box width started being measured: twenty-one wide characters
-# measured 291px against a 162px limit and ran out of the box, while twenty-one
-# narrow ones used 69px and wasted most of it. Lines are broken on measured
-# width now, so a Vietnamese label — mostly narrow glyphs — fits more per line
-# and needs fewer of them.
 MAX_CHARS_PER_LINE = int((NODE_MAX_WIDTH - 2 * NODE_PADDING_X) / CHAR_WIDTH)
 
-# Usable width of the report page: A4 (210mm) less the 11/9mm margins in
-# REPORT_CSS, at 96dpi. The drawing is scaled to this at generation time rather
-# than left to CSS max-width — WeasyPrint scales such an SVG's box but not its
-# contents, which paints the diagram twice on one page.
 PAGE_CONTENT_WIDTH = 726.0
-# Below this the labels stop being readable, so the caller is told the diagram
-# needs splitting rather than being handed an unreadable picture. In px, like
-# every size here: 8px is 6pt on the page.
 MIN_READABLE_FONT = 8.0
 
-# The report's own palette (report_style.py) rather than mermaid's purple
-# defaults, which made every diagram look pasted in from another document. The
-# blue is the same accent the blockquote rule and footnote links already use.
 DEFAULT_FILL = "#f2f7fb"
 DEFAULT_STROKE = "#2f6f9f"
 DEFAULT_TEXT = "#1f2a33"
-# Darker and thinner than before, following the CodePen org chart this styling
-# came from: it draws 2px near-black connectors, which read far better on paper
-# than the soft grey that was here.
 EDGE_COLOUR = "#3d4a55"
 EDGE_LABEL_COLOUR = "#445566"
-# "bold", not a numeric weight: 600 asks for a semibold that the report's
-# font stack does not ship, and the fallback is the regular face — the
-# emphasis would silently not happen.
 HIGHLIGHT_WEIGHT = "bold"
 GROUP_STROKE = "#b9c6d1"
-# Hand-drawn depth, because neither CSS box-shadow nor an SVG filter survives
-# WeasyPrint. Small numbers on purpose: a 1.5px offset reads as a lifted card,
-# more reads as a printing misregistration.
 SHADOW_COLOUR = "#1f2a33"
 SHADOW_OPACITY = 0.13
 SHADOW_OFFSET = 1.5
 
-# One colour per level, the idea worth taking from that pen. It is not only
-# decoration here: Business Activity's section 1 is a chain whose levels are
-# real stages — đầu vào, sản xuất, tồn kho, đầu ra, thu tiền — so colouring by
-# level captions the diagram as well as brightening it.
-#
-# The pen's own colours (#8dccad, #f5cc7f, #7b9fe0, #f27c8d) are pitched for a
-# screen and would shout next to the report's tables. These keep the flat pastel
-# feel at lower saturation, with the fill tinted and the stroke carrying the
-# colour, and stay inside the blue-grey family the rest of the document uses.
 LEVEL_COLOURS = (
     ("#dfeee7", "#4e9b7c"),   # inputs — green, the start of the chain
     ("#dce7f3", "#2f6f9f"),   # the report's own accent
@@ -171,11 +72,6 @@ LEVEL_COLOURS = (
     ("#f7eeda", "#b5852f"),   # amber, warming toward the output end
     ("#ece4f3", "#7d5ba6"),   # violet — cash in
 )
-# Rose is deliberately absent from the levels above: it belongs to the
-# concentration flag in diagrams.py and nothing else. A flag that shares a hue
-# with an ordinary level is not a flag, and this one has to stand out wherever
-# in the chain it lands.
-
 
 @dataclass
 class _Node:
@@ -184,11 +80,9 @@ class _Node:
     fill: str
     stroke: str
     colour: str
-    # "hexagon" for a {{...}} node, "rect" for the rest.
     shape: str = "rect"
     rank: int = 0
     order: float = 0.0
-    # Which wrapped row this node sits in; 0 for every diagram that fits on one.
     row: int = 0
     x: float = 0.0
     y: float = 0.0
@@ -214,11 +108,7 @@ class _Edge:
 
 @lru_cache(maxsize=1)
 def _measure_font():
-    """The report's font at a large size, or None when none can be loaded.
-
-    Measured big and scaled down: advance widths are more accurate away from
-    hinting at small sizes.
-    """
+    """The report's font at a large size, or None when none can be loaded."""
 
     try:
         from matplotlib import font_manager
@@ -238,12 +128,7 @@ def _measure_font():
 
 
 def text_width(text: str, font_size: float) -> float:
-    """How wide this text will draw, in SVG user units.
-
-    Falls back to the character count when no font can be loaded, so a machine
-    without the measuring libraries still gets a diagram — a slightly ragged one
-    rather than none.
-    """
+    """How wide this text will draw, in SVG user units."""
 
     font = _measure_font()
     if font is None:
@@ -252,18 +137,7 @@ def text_width(text: str, font_size: float) -> float:
 
 
 def _text_lines(label_html: str, max_width: float = NODE_MAX_WIDTH) -> list[str]:
-    """Turn a label back into plain text lines, wrapping long ones.
-
-    Labels arrive HTML-escaped with <br> separators because the CSS renderer
-    consumes them that way; SVG needs the raw characters instead.
-
-    Nothing is ever cut. An edge label briefly ended in an ellipsis when it ran
-    long, and an ellipsis in a credit memo is worse than a wide diagram: the
-    reader cannot tell whether the missing words were "kể từ ngày nghiệm thu" or
-    a condition that changes the meaning. The length is controlled where it
-    should be — the guidance asks the agents for ten words — and whatever
-    arrives here is drawn in full.
-    """
+    """Turn a label back into plain text lines, wrapping long ones."""
 
     raw = [html.unescape(part) for part in re.split(r"<br\s*/?>", label_html)]
     limit = max_width - 2 * NODE_PADDING_X
@@ -274,9 +148,6 @@ def _text_lines(label_html: str, max_width: float = NODE_MAX_WIDTH) -> list[str]
             continue
         current = ""
         for word in part.split():
-            # A single token with nothing to break on — a code, a run of capitals
-            # — would otherwise sit wider than its own box. Split it mid-word;
-            # ugly, but visible, where an overflowing line is neither.
             while text_width(word, FONT_SIZE) > limit:
                 cut = len(word)
                 while cut > 1 and text_width(word[:cut], FONT_SIZE) > limit:
@@ -302,11 +173,7 @@ def _assign_ranks(
     node_ids: list[str],
     edges: list[_Edge],
 ) -> dict[str, int]:
-    """Longest-path layering, ignoring edges that would close a cycle.
-
-    A cycle in the input must not hang the PDF export, and an LLM can certainly
-    write one, so back edges are dropped rather than trusted.
-    """
+    """Longest-path layering, ignoring edges that would close a cycle. """
 
     outgoing: dict[str, list[str]] = {node: [] for node in node_ids}
     for edge in edges:
@@ -314,8 +181,6 @@ def _assign_ranks(
             outgoing[edge.src].append(edge.dst)
 
     rank = {node: 0 for node in node_ids}
-    # Depth-first longest path with an explicit on-stack set: revisiting a node
-    # already on the current path means a cycle, and that edge is skipped.
     state: dict[str, int] = {}  # 0 = unvisited, 1 = on stack, 2 = done
 
     def visit(node: str) -> int:
@@ -334,8 +199,6 @@ def _assign_ranks(
     for node in node_ids:
         visit(node)
 
-    # visit() measured distance to a sink; flip it so rank 0 is a source, which
-    # is what "left to right" means to a reader.
     deepest = max(rank.values(), default=0)
     return {node: deepest - value for node, value in rank.items()}
 
@@ -344,12 +207,7 @@ def _adjacency(
     nodes: dict[str, _Node],
     edges: list[_Edge],
 ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
-    """Who feeds each node and who it feeds, keyed by node id.
-
-    Read by the two sweeps below — one orders nodes within a rank, the other
-    aligns their coordinates across ranks. They are written as a mirrored pair
-    on purpose, and they were building this map from identical copies.
-    """
+    """Who feeds each node and who it feeds, keyed by node id."""
 
     predecessors: dict[str, list[str]] = {node: [] for node in nodes}
     successors: dict[str, list[str]] = {node: [] for node in nodes}
@@ -400,13 +258,7 @@ def _label_gaps(
     edges: list["_Edge"],
     nodes: dict[str, _Node],
 ) -> dict[int, float]:
-    """How much room each level needs after it for its own edge labels.
-
-    Sized from the widest label rather than a fixed constant. RANK_GAP was that
-    constant, and a label longer than it simply ran over the box on the far side
-    — "thanh toán 30 ngày" needs 98px and got 74. A gap exists to hold something;
-    how much it needs depends on what it is holding.
-    """
+    """How much room each level needs after it for its own edge labels."""
 
     out_degree: dict[str, int] = {}
     in_degree: dict[str, int] = {}
@@ -420,14 +272,7 @@ def _label_gaps(
             continue
         widest = max(text_width(line, EDGE_FONT_SIZE) for line in edge.lines)
         room = widest + 2 * EDGE_LABEL_CLEARANCE + ARROW_LENGTH
-        # A fan's label does not get the whole gap. Its connector doglegs across
-        # a shared trunk halfway along, and the label sits on the horizontal run
-        # to one side of that trunk — so it has half the gap to fit in, and the
-        # gap has to be twice as wide for the same label. Sizing it as though the
-        # label were centred in the whole gap is what put "6,03% / 3,65 tỷ"
-        # underneath a supplier box in a real report: from about 50px of label
-        # the text runs back over the box, and boxes are painted after edges, so
-        # it does not overlap — it disappears.
+
         if out_degree.get(edge.src, 0) > 1 or in_degree.get(edge.dst, 0) > 1:
             room = 2 * (widest + EDGE_LABEL_CLEARANCE) + ARROW_LENGTH
         rank = nodes[edge.src].rank
@@ -436,22 +281,13 @@ def _label_gaps(
 
 
 def _colour_by_level(chart, nodes: dict[str, _Node]) -> None:
-    """Tint each node by the level it sits on, in place.
-
-    Only where the source said nothing. A mermaid ``style`` or ``classDef`` is
-    the author being deliberate — and one of those carries meaning rather than
-    taste: diagrams.py paints a concentration warning amber, and a level palette
-    overwriting that would turn a risk flag into decoration.
-    """
+    """Tint each node by the level it sits on, in place."""
 
     last = max((node.rank for node in nodes.values()), default=0)
     for node_id, node in nodes.items():
         if chart.node_style.get(node_id):
             continue
-        # Spread across the palette rather than cycling through it. A nine-box
-        # chain against five colours would otherwise reuse the first colour
-        # halfway along, which reads as "back to the start" on a diagram whose
-        # whole point is direction.
+
         index = round(node.rank * (len(LEVEL_COLOURS) - 1) / last) if last else 0
         node.fill, node.stroke = LEVEL_COLOURS[index]
 
@@ -462,22 +298,7 @@ def _align_across_ranks(
     nodes: dict[str, _Node],
     vertical: bool,
 ) -> None:
-    """Pull each box level with the boxes it connects to, in place.
-
-    The companion to _order_within_ranks above, and deliberately the same shape:
-    same predecessor/successor maps, same four alternating sweeps. That one
-    decides the ORDER within a level; this one decides the COORDINATE.
-
-    Without it every level is centred as a block against the widest one, which
-    only lines up whichever pair happens to fall in the middle. Measured on
-    section 1 of a real report — five suppliers, each with its own product box —
-    the outermost pair sat 136px apart, and a reader had to trace a wire that far
-    to see which product belonged to which supplier.
-
-    A box with exactly one neighbour ends up exactly level with it. A box pulled
-    two ways lands between them, and where alignment and spacing conflict the
-    spacing wins: boxes may not overlap, whatever it costs the alignment.
-    """
+    """Pull each box level with the boxes it connects to, in place."""
 
     predecessors, successors = _adjacency(nodes, edges)
 
@@ -507,9 +328,7 @@ def _align_across_ranks(
                     if linked
                     else centre(nodes[node_id])
                 )
-            # Pack in the order _order_within_ranks settled on. Re-sorting by the
-            # wanted position would let two boxes swap places and cross their own
-            # wires, which is the problem that function exists to prevent.
+
             placed: list[float] = []
             edge_of_previous = None
             for node_id, target in zip(rank_nodes, wanted):
@@ -519,21 +338,14 @@ def _align_across_ranks(
                     position = max(position, edge_of_previous + NODE_GAP + half)
                 placed.append(position)
                 edge_of_previous = position + half
-            # Packing only ever pushes forward, so the level drifts a little on
-            # every sweep unless it is pulled back to where it wanted to be.
+
             drift = sum(placed) / len(placed) - sum(wanted) / len(wanted)
             for node_id, position in zip(rank_nodes, placed):
                 move_to(nodes[node_id], position - drift)
 
 
 def _size_nodes(nodes: dict[str, _Node], max_width: float = NODE_MAX_WIDTH) -> None:
-    """Size every box to its own text, with the same padding all round.
-
-    Height follows the number of lines, so a two-line label gets a taller box
-    rather than being squeezed into a one-line one. Boxes of different heights
-    are centred against each other by _place, which is what keeps a level
-    looking level without forcing every box to the same size.
-    """
+    """Size every box to its own text, with the same padding all round."""
 
     for node in nodes.values():
         width = max(text_width(line, FONT_SIZE) for line in node.lines) + 2 * NODE_PADDING_X
@@ -551,19 +363,10 @@ def _place(  # noqa: PLR0913
     max_width: float = NODE_MAX_WIDTH,
     edges: list["_Edge"] | None = None,
 ) -> tuple[float, float]:
-    """Assign coordinates and return the drawing size.
-
-    The two directions are the same layout with the axes swapped: levels advance
-    along one axis, the nodes of a level spread along the other, and each level
-    is centred against the largest one so the diagram reads balanced instead of
-    hanging off one edge.
-
-    The gap after a level is wide only when an edge leaving it carries a label.
-    """
+    """Assign coordinates and return the drawing size."""
 
     _size_nodes(nodes, max_width)
 
-    # Extent of each level along the cross axis.
     spans: dict[int, float] = {}
     for key, rank_nodes in ranks.items():
         sizes = [nodes[n].width if vertical else nodes[n].height for n in rank_nodes]
@@ -586,11 +389,6 @@ def _place(  # noqa: PLR0913
         thickness = max(
             nodes[n].height if vertical else nodes[n].width for n in rank_nodes
         )
-        # Every box on a level takes that level's width. Connectors leave from a
-        # right edge and arrive at a left one, so both have to be straight, and
-        # they cannot both be unless the boxes match: two suppliers whose names
-        # differ in length left their level 62px apart and drew two wires of
-        # different lengths into the same factory.
         for node_id in rank_nodes:
             if vertical:
                 nodes[node_id].height = thickness
@@ -610,23 +408,17 @@ def _place(  # noqa: PLR0913
         last_gap = gap_after(key)
         along += thickness + last_gap
 
-    # Levels are evenly stacked and centred above; now pull each box level with
-    # what it connects to. Skipped when there are no edges to align along.
     if edges:
         _align_across_ranks(ranks, edges, nodes, vertical)
 
     extent = along - last_gap + MARGIN
-    # Measured from where the boxes ended up, not from the widest level: after
-    # alignment the cross axis is no longer that level's span, and reporting the
-    # old number would clip the drawing at the viewBox.
     starts = [(node.x if vertical else node.y) for node in nodes.values()]
     ends = [
         (node.x + node.width) if vertical else (node.y + node.height)
         for node in nodes.values()
     ]
     low, high = min(starts, default=MARGIN), max(ends, default=MARGIN)
-    # Alignment can push a box above the top margin; slide everything back so the
-    # drawing starts where it always did.
+
     shift = MARGIN - low
     if abs(shift) > 0.01:
         for node in nodes.values():
@@ -642,14 +434,7 @@ def _place(  # noqa: PLR0913
 
 
 def _is_linear_chain(nodes: dict[str, _Node], edges: list["_Edge"]) -> bool:
-    """True when the diagram is one unbranched run of boxes.
-
-    Only this shape can be wrapped onto a second row without the picture losing
-    its meaning: there is exactly one path through it, so a reader who reaches
-    the end of a row has only one place to continue. A branching diagram wrapped
-    the same way would put siblings on different rows and imply an order between
-    them that the data does not have.
-    """
+    """True when the diagram is one unbranched run of boxes."""
 
     if not edges:
         return False
@@ -670,17 +455,7 @@ def _place_wrapped(
     nodes: dict[str, _Node],
     budget: float,
 ) -> tuple[float, float]:
-    """Lay a chain out over as many rows as the page width needs.
-
-    This is the chart module's contract applied to flowcharts: the page width is
-    fixed and the content arranges itself into it, rather than the drawing being
-    scaled down until it fits. charts.py packs more months into the same width by
-    moving points closer together; a chain does it by starting a new row.
-
-    Before this, the nine-box supply chain in Business Activity's section 1 came
-    out 1,649px wide, was scaled to 45% to reach the page, and printed at 4.7pt
-    against 9.5pt body text.
-    """
+    """Lay a chain out over as many rows as the page width needs."""
 
     rows: list[list[str]] = []
     current: list[str] = []
@@ -727,14 +502,7 @@ def _edge_ends(
 
 
 def _wrap_edge_path(src: _Node, dst: _Node) -> str:
-    """Connector from the end of one wrapped row to the start of the next.
-
-    Leaves the source downwards and arrives on top of the target, so the arrow
-    reads as "continue below" rather than as a link back up the chain. Direction
-    matters more here than anywhere else in these diagrams: section 1 is a supply
-    chain, and its guidance is explicit that inputs must not appear to flow from
-    the output end.
-    """
+    """Connector from the end of one wrapped row to the start of the next."""
 
     mid_y = src.y + src.height + (dst.y - (src.y + src.height)) / 2
     return (
@@ -780,10 +548,6 @@ def render_svg(chart) -> str | None:
         for node_id in chart.order:
             style = chart.node_style.get(node_id, {})
             shape = chart.node_shape.get(node_id, "rect")
-            # A hexagon's label has to fit the flat middle, not the whole box,
-            # so it wraps against a narrower width. Widening the node is enough
-            # only until the label reaches max_width — past that the cap wins
-            # and the text would run out over the slanted ends.
             wrap_width = max_width - 2 * HEX_INSET if shape == "hexagon" else max_width
             built[node_id] = _Node(
                 node_id=node_id,
@@ -811,14 +575,11 @@ def render_svg(chart) -> str | None:
             by_rank.setdefault(built[node_id].rank, []).append(node_id)
         _order_within_ranks(by_rank, built_edges, built)
         _colour_by_level(chart, built)
-        # "flowchart TD" must come out top-down here too. Drawn left-to-right it
-        # would contradict the markdown view of the same report, which is the
-        # exact mismatch this renderer exists to prevent.
+
         is_vertical = bool(getattr(chart, "vertical", False))
         gaps = _label_gaps(built_edges, built)
         w, h = _place(by_rank, built, is_vertical, gaps, max_width, built_edges)
-        # Too wide for the page, and shaped so that wrapping keeps its meaning:
-        # lay it out into the page width instead of shrinking it to reach it.
+
         if (
             not is_vertical
             and w > PAGE_CONTENT_WIDTH
@@ -834,13 +595,7 @@ def render_svg(chart) -> str | None:
     if first is None:
         return None
     nodes, edges, ranks, vertical, width, height = first
-    # Narrow the boxes before shrinking the text. A diagram wider than the page
-    # is scaled to fit, and the scale applies to the type as well — a five-rank
-    # chart of Vietnamese company names came out at 6.5pt on paper, below the
-    # 8pt this file treats as the floor for readable print. Re-wrapping the
-    # labels into narrower boxes trades width for height, and height is free:
-    # the page scrolls, the width does not. Same trade _place_wrapped makes for
-    # a linear chain, applied to shapes it cannot help.
+
     if not vertical and width > PAGE_CONTENT_WIDTH:
         for candidate in (160, 140, 120, 100):
             if FONT_SIZE * (PAGE_CONTENT_WIDTH / width) * PX_TO_PT >= MIN_READABLE_FONT:
@@ -851,9 +606,7 @@ def render_svg(chart) -> str | None:
             nodes, edges, ranks, vertical, width, height = retry
 
     tallest_label = max((len(edge.lines) for edge in edges), default=0)
-    # How far a label block reaches either side of its connector. The drawing is
-    # sized from the boxes, and a tall label sits outside them — a three-line one
-    # ran off the top of the viewBox and was clipped in the PDF.
+
     label_overhang = (
         (tallest_label - 1) * (EDGE_FONT_SIZE + 1) / 2 + EDGE_FONT_SIZE
         if tallest_label > 1
@@ -866,9 +619,6 @@ def render_svg(chart) -> str | None:
         out_degree[edge.src] += 1
         in_degree[edge.dst] += 1
 
-    # Scale here, not in CSS. Explicit width AND height attributes too, since
-    # width="100%" with height:auto makes WeasyPrint compute zero height and
-    # draw nothing at all.
     if label_overhang:
         for node in nodes.values():
             node.y += label_overhang
@@ -896,23 +646,10 @@ def render_svg(chart) -> str | None:
         if edge.lines:
             x1, y1, x2, y2 = _edge_ends(src, dst, vertical)
             if vertical:
-                # Beside the connector, not on it: a top-down connector is
-                # vertical, so anything centred on it lands on the line.
                 label_x = (x1 + x2) / 2 + 4
                 label_y = (y1 + y2) / 2
                 anchor = "start"
             elif in_degree[edge.dst] > 1 and out_degree[edge.src] <= 1:
-                # A fan. Its connectors dogleg across a shared vertical trunk, so
-                # the true middle of one is *on* that trunk, and its middle height
-                # is between two rows — a label centred there covers the trunk and
-                # floats between the two connectors it might belong to. Centre it
-                # on the horizontal run at the end where the edges fan apart,
-                # which is the stretch this edge has a y to itself.
-                #
-                # Keyed on the fan and not on the dogleg, because the middle spoke
-                # of an odd fan runs straight into the hub: measured from its own
-                # ends it landed 23px left of its neighbours, the ragged look
-                # again. Every label in one fan shares an x.
                 trunk = x1 + (x2 - x1) / 2
                 half = max(text_width(line, EDGE_FONT_SIZE) for line in edge.lines) / 2
                 label_x = min((x1 + trunk) / 2, trunk - EDGE_LABEL_MARGIN - half)
@@ -926,21 +663,10 @@ def render_svg(chart) -> str | None:
                 label_y = y2
                 anchor = "middle"
             else:
-                # Centred between the source box and where the arrowhead starts,
-                # not in the whole gap: the arrow eats the last 8px of it.
                 label_x = x1 + (x2 - ARROW_LENGTH - x1) / 2
                 label_y = y1
                 anchor = "middle"
-            # Centre the block on the connector. Shifting it up by a full
-            # line per extra line put a three-line label entirely above the
-            # wire, and on a one-rank diagram that is above the drawing.
-            # Every label sits the same distance above its own wire, sloping or
-            # flat. They used to be handled differently — centred on a sloping
-            # connector, lifted above a flat one — and in a fan, where the middle
-            # branch is flat and the rest slope, that put one label in a
-            # different relationship to its wire than its neighbours. Measured on
-            # a five-way fan the gaps between labels came out 53, 45.5, 60.5, 53:
-            # even spacing was never possible while two rules were in play.
+            
             block = (len(edge.lines) - 1) * (EDGE_FONT_SIZE + 1)
             label_y -= (
                 block
@@ -948,12 +674,7 @@ def render_svg(chart) -> str | None:
                 + EDGE_FONT_SIZE * DESCENDER_RATIO
                 + EDGE_STROKE_WIDTH / 2
             )
-            # A concentration warning is a property of the *pair*, not of the
-            # box: "52%" is the finding and the box is who it is about. Drawn in
-            # the default grey it read as ordinary annotation on a red box. Take
-            # the colour from whichever endpoint diagrams.py styled — the hub is
-            # never the styled one, so checking the target then the source picks
-            # out the flagged partner whether it supplies or buys.
+
             warned = chart.node_style.get(edge.dst) or chart.node_style.get(edge.src)
             label_fill = (warned or {}).get("color") or EDGE_LABEL_COLOUR
             weight = f' font-weight="{HIGHLIGHT_WEIGHT}"' if warned else ""
@@ -976,15 +697,6 @@ def render_svg(chart) -> str | None:
         ))
 
     for node in nodes.values():
-        # The depth in the pen this styling came from is a box-shadow, and two
-        # measurements decided how to get it here. WeasyPrint drops box-shadow
-        # with a warning; it drops feDropShadow with no warning at all — a
-        # filtered rect and an unfiltered one produced byte-identical output.
-        # An offset rectangle behind the box is plain geometry, so it cannot be
-        # dropped, and opacity does render: sampled from the PDF, an 0.13 fill
-        # comes out at tone 228 against 41 for the same colour at full strength.
-        # The shadow follows the same outline as the body — a rectangular
-        # shadow behind a hexagon shows at the corners.
         if node.shape == "hexagon":
             parts.append(
                 f'<polygon points="'
@@ -1006,8 +718,7 @@ def render_svg(chart) -> str | None:
                 f'height="{node.height:.1f}" rx="3" fill="{node.fill}" '
                 f'stroke="{node.stroke}" stroke-width="1.2"/>'
             )
-        # Centred in the box rather than pinned to its top, now that every box
-        # is as tall as the tallest label needs.
+
         block = len(node.lines) * LINE_HEIGHT
         first = node.y + (node.height - block) / 2 + LINE_HEIGHT * 0.78
         weight = (f' font-weight="{HIGHLIGHT_WEIGHT}"'

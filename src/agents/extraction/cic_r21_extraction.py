@@ -131,10 +131,6 @@ def extract_cic_r21_structured_data(
     chain: Any,
     filename: str,
     content: str,
-    # Không dùng ở đây: runner truyền cho mọi pass vì pass BCTC cần biết đang
-    # cầm file XML khai thuế hay không. Nhận ở đây để cả năm pass giữ chung một
-    # chữ ký. Bỏ tham số này đi là TypeError giữa lượt chạy thật, không phải
-    # cảnh báo lúc lint — guard ngay dưới EXTRACTION_PASSES chặn việc đó.
     path: str = "",
 ) -> tuple[dict[str, Any] | None, str]:
     """Run the extraction chain and validate its shape. Never raises."""

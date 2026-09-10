@@ -5,6 +5,7 @@ from typing import Any
 
 from src.utils.common import normalize_text
 
+
 DAYS_PER_YEAR = 365
 
 SRC_STATEMENTS = "BCTC"

@@ -82,10 +82,6 @@ class UnderwritingGraphState(TypedDict, total=False):
 
     input_paths: list[str]
     files: list[str]
-    # Filenames dropped for sitting under none of the six upload boxes. Carried
-    # so the evidence gap check can name the real cause: a dossier emptied this
-    # way is missing nothing the customer failed to send, only files the screen
-    # failed to file.
     skipped_outside_box: list[str]
     loan_program: str
     documents: list[ClassifiedDocument]
@@ -94,8 +90,6 @@ class UnderwritingGraphState(TypedDict, total=False):
     decision: dict[str, Any]
     workflow_mode: WorkflowMode
     gap_analysis: dict[str, Any]
-    # Reference data fetched from the bank's systems, keyed by the name of the
-    # tool that fetched it, plus the customer key it was fetched with.
     reference_data: dict[str, Any]
     customer_key: dict[str, Any]
     execution_plan: dict[str, Any]

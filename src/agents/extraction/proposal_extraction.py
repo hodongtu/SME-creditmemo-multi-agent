@@ -9,6 +9,7 @@ from src.agents.extraction.structured_extraction import (
     scale_declared_blocks,
 )
 
+
 REQUIRED_TOP_LEVEL_KEYS = {
     "capital_plan",
     "business_plan",
@@ -141,9 +142,6 @@ Vietnamese report:
 def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
     """Convert every amount to đồng using each block's own source_unit, in place."""
 
-    # The flat fields of every block, plus the multiplier each one used — this
-    # form nests rows under three of those blocks, and they are in the same unit
-    # as the block heading they sit under.
     multipliers = scale_declared_blocks(result, _AMOUNT_FIELDS)
 
     for section in (result.get("business_plan") or {}).get("sections") or []:
@@ -179,10 +177,6 @@ def extract_proposal_structured_data(
     chain: Any,
     filename: str,
     content: str,
-    # Không dùng ở đây: runner truyền cho mọi pass vì pass BCTC cần biết đang
-    # cầm file XML khai thuế hay không. Nhận ở đây để cả năm pass giữ chung một
-    # chữ ký. Bỏ tham số này đi là TypeError giữa lượt chạy thật, không phải
-    # cảnh báo lúc lint — guard ngay dưới EXTRACTION_PASSES chặn việc đó.
     path: str = "",
 ) -> tuple[dict[str, Any] | None, str]:
     """Run the extraction chain and validate its shape. Never raises."""

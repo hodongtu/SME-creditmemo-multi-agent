@@ -1,16 +1,10 @@
-"""Print stylesheet + table fitting for the Markdown → PDF export.
-
-Credit memos contain wide financial tables (the asset/capital-structure table is
-10 columns), which overflow at a reading-size font. Rather than shrinking the
-whole document, ``tag_wide_tables`` marks each table with its column count so
-the stylesheet can step the font down only where it is needed.
-"""
+"""Print stylesheet + table fitting for the Markdown → PDF export."""
 
 import re
 
 from src.utils.report.visualization.diagrams import DIAGRAM_CSS
 
-# Column thresholds at which a table gets a smaller font.
+
 WIDE_TABLE_COLUMNS = 7
 EXTRA_WIDE_TABLE_COLUMNS = 9
 

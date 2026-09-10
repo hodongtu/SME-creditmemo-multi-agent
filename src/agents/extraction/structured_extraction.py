@@ -8,9 +8,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from src.utils.common import normalize_text
 
 
-# The two CIC forms print their unit in the column heading ("Triệu VNĐ") rather
-# than in a field, so their multiplier is a constant here instead of something
-# resolve_money_multiplier reads off the page.
 TRIEU_VND = 10 ** 6
 
 
@@ -76,14 +73,7 @@ def build_extraction_chain(system_prompt: str, llm: Any):
 
 
 def _explain(exc: Exception) -> str:
-    """The failure as a sentence somebody can act on.
-
-    One case earns its own branch: a max_tokens above the model's ceiling is a
-    400 that stops the whole run, and the API's own wording names neither the
-    environment variable that set it nor the fact that it is settable at all.
-    Everything else passes through unchanged: a message nobody can act on still
-    beats a wrong guess about which knob to turn.
-    """
+    """The failure as a sentence somebody can act on."""
 
     text = str(exc)
     if "max_tokens" in text and "at most" in text:

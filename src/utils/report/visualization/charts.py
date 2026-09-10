@@ -1,19 +1,4 @@
-"""Render ```linechart blocks as inline SVG so they survive PDF export.
-
-The sibling of ``diagrams.mermaid_to_html``, and it exists for the same reason:
-WeasyPrint has no JavaScript, but it renders inline SVG exactly.
-
-The split of labour is deliberate. The pipeline writes the fenced block from
-extracted JSON — the model never retypes the figures — and the block itself is
-plain text, so ``final_response.md`` stays readable even though only the PDF
-gets the drawing. Anything this parser cannot read is left as the original block
-rather than dropped, so content is never lost.
-
-Two things this renderer does that the Excel chart it was modelled on does not:
-it picks a display unit from the data, and it moves data labels apart where the
-two lines cross. Overlapping labels at a crossing are exactly the point where a
-reader most needs to tell the series apart.
-"""
+"""Render ```linechart blocks as inline SVG so they survive PDF export."""
 
 import html
 import math
@@ -22,13 +7,12 @@ import re
 from src.utils.report.formatting import format_vn_number
 from src.utils.report.visualization.graph_svg import MIN_READABLE_FONT, PAGE_CONTENT_WIDTH
 
+
 CHART_BLOCK = re.compile(
     r"^```linechart[ \t]*\n(.*?)^```[ \t]*$",
     re.DOTALL | re.MULTILINE,
 )
 
-# Matches the sample workbook: Office blue and orange, then extras for a third
-# and fourth series should one ever be added.
 SERIES_COLOURS = ("#4472C4", "#ED7D31", "#548235", "#7030A0")
 
 PLOT_HEIGHT = 196.0
@@ -44,12 +28,7 @@ AXIS_FONT = 6.8
 VALUE_FONT = 6.0
 LEGEND_FONT = 7.5
 NOTE_FONT = 7.0
-# Rough advance width per character; the same 0.52 factor graph_svg uses.
 CHAR_WIDTH_RATIO = 0.52
-# Beyond this many labelled points the chart stops being readable even though the
-# labels still clear each other horizontally: a steeply zig-zagging series runs
-# its own line straight through the label of the point below it. Measured at 28
-# points, where roughly a third of the labels had a stroke through them.
 MAX_VALUE_LABELS = 16
 
 GRID_COLOUR = "#D9D9D9"
@@ -57,10 +36,7 @@ AXIS_TEXT = "#666666"
 VALUE_TEXT = "#444444"
 NOTE_TEXT = "#8A6D3B"
 
-# Steps that produce round gridline labels, cycled across powers of ten.
 _NICE_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
-# Aiming at 5 rounds a 58-wide span up to a step of 20, which leaves four
-# gridlines and a third of the plot empty below the data. Six lands on 10.
 _TARGET_GRIDLINES = 6
 
 _UNIT_SCALES = (
@@ -71,12 +47,7 @@ _UNIT_SCALES = (
 
 
 def pick_unit(values: list[float]) -> tuple[float, str]:
-    """Choose a display scale from the data's magnitude.
-
-    The report body is converted to tỷ VNĐ wholesale, but a chart of monthly SME
-    balances in tỷ would read 0,04 — so the chart picks its own unit and prints
-    it on the axis rather than inheriting one that flattens the series.
-    """
+    """Choose a display scale from the data's magnitude."""
 
     largest = max((abs(value) for value in values if value is not None), default=0.0)
     for divisor, label in _UNIT_SCALES:
@@ -127,7 +98,6 @@ def _parse_number(text: str) -> float | None:
     cleaned = text.strip()
     if cleaned in ("", "-", "–", "—", "null", "None"):
         return None
-    # Written Vietnamese-style by build_linechart_block: '.' groups, ',' decimal.
     cleaned = cleaned.replace(".", "").replace(",", ".")
     try:
         return float(cleaned)
@@ -136,11 +106,7 @@ def _parse_number(text: str) -> float | None:
 
 
 def parse_linechart(body: str) -> ChartSpec | None:
-    """Parse a ```linechart body, or None when it is not readable.
-
-    Returning None rather than raising is the contract that lets
-    ``charts_to_html`` leave a malformed block untouched instead of eating it.
-    """
+    """Parse a ```linechart body, or None when it is not readable."""
 
     title = unit = note = ""
     columns: list[str] = []
@@ -186,11 +152,7 @@ def build_linechart_block(
     series: list[list[float | None]],
     note: str = "",
 ) -> str:
-    """Write a ```linechart block from already-computed figures.
-
-    Called by the pipeline, never by an agent: the whole point is that these
-    numbers are transcribed from extracted JSON rather than retyped by a model.
-    """
+    """Write a ```linechart block from already-computed figures."""
 
     lines = [f"title: {title}", f"unit: {unit}"]
     if note:
@@ -296,7 +258,6 @@ def line_chart_svg(spec: ChartSpec) -> str | None:
             f"{html.escape('Đơn vị: ' + spec.unit)}</text>"
         )
 
-    # Rotated month labels, thinned only as far as collisions require.
     widest_x = max(_text_width(label, AXIS_FONT) for label in spec.labels) * 0.72
     x_stride = _stride_for(count, plot_width, widest_x)
     for index, label in enumerate(spec.labels):
@@ -312,8 +273,6 @@ def line_chart_svg(spec: ChartSpec) -> str | None:
 
     all_series = [spec.series(index) for index in range(len(spec.columns))]
 
-    # A point's label goes above or below depending on where the other series
-    # sits at that x, so the two never land on each other at a crossing.
     def label_offset(series_index: int, point_index: int) -> float:
         own = all_series[series_index][point_index]
         others = [
@@ -336,8 +295,6 @@ def line_chart_svg(spec: ChartSpec) -> str | None:
 
     for series_index, values in enumerate(all_series):
         colour = SERIES_COLOURS[series_index % len(SERIES_COLOURS)]
-        # Break the line wherever a month has no figure. A missing reporting
-        # period is not a value of zero and must not be drawn as a slope.
         run: list[str] = []
         for index, value in enumerate(values):
             if value is None:
@@ -395,9 +352,6 @@ def line_chart_svg(spec: ChartSpec) -> str | None:
         )
 
     parts.append("</svg>")
-    # Every font here is a fixed constant rather than a scale factor, so this is
-    # a design guard rather than a runtime one: it fires only if someone tunes a
-    # size below what prints legibly.
     if min(AXIS_FONT, VALUE_FONT, NOTE_FONT) < MIN_READABLE_FONT:
         parts.append(
             f"<!-- chart font below {MIN_READABLE_FONT}pt; illegible in print -->"

@@ -8,19 +8,12 @@ from pathlib import Path
 import openpyxl
 import pandas as pd
 from openpyxl.utils import get_column_letter
-from pptx import Presentation
 
 from src.utils.reading.ocr import ocr_pdf
 
 
 def _read_csv_rows(csv_path: str) -> list[list[str]]:
-    """Every row of a CSV, decoded and stripped. Never truncates.
-
-    Reading in full is what lets de-duplication run before the row cap: a file
-    whose pasted block sits ahead of the real data would otherwise spend the
-    whole allowance on copies. Affordable because a CSV row is a list of short
-    strings, and upload size is bounded before the file gets here.
-    """
+    """Every row of a CSV, decoded and stripped. Never truncates."""
 
     last_error = None
     for encoding in ("utf-8", "latin-1"):
@@ -58,13 +51,7 @@ def extract_csv_text(
 
 
 def _format_number(value: float, number_format: str) -> str:
-    """Render a numeric cell the way Excel displays it.
-
-    Percent-formatted cells are scaled (0.15 -> "15%") so they cannot be
-    mistaken for plain ratios, and grouped formats ("#,##0") use the Vietnamese
-    convention ('.' thousands, ',' decimal) to match OCR'd statement text and
-    ``src.utils.formatting.to_billion_vnd``.
-    """
+    """Render a numeric cell the way Excel displays it."""
     fmt = number_format or ""
 
     if "%" in fmt:
@@ -120,10 +107,6 @@ def _sheet_grid(worksheet) -> list[list[str]]:
     if not grid:
         return []
 
-    # A merged range stores its value only in its top-left cell; repeat it so
-    # merged sub-headers/labels appear on every row and column they describe.
-    # Ranges spanning the sheet's full width are cosmetic banners (report title,
-    # company name), so repeating them would only add noise — keep those once.
     used_width = max((len(row) for row in grid), default=0)
     for merged in worksheet.merged_cells.ranges:
         top, left = merged.min_row - 1, merged.min_col - 1
@@ -160,22 +143,7 @@ def _clean_grid(grid: list[list[str]]) -> tuple[list[list[str]], list[int]]:
 
 
 def _dedup_rows(grid: list[list[str]]) -> tuple[list[list[str]], int]:
-    """Keep the first occurrence of each distinct row; also return how many went.
-
-    Customers paste a block down a sheet — one workbook arrived with the same two
-    columns repeated past a million rows — and every copy after the first tells
-    the model nothing it has not already read. On one such file 498 of the 500
-    rows that reached the prompt were copies of the other two.
-
-    Global rather than run-length: the paste usually repeats a *block*, so
-    consecutive rows differ and collapsing equal neighbours catches nothing. A
-    50-row block pasted 100 times measured 5,001 rows either way under
-    run-length, and 51 under this.
-
-    Order is preserved. Row order carries meaning in a Vietnamese ledger — the
-    printed total sits at the bottom — so the rows may be dropped but never
-    rearranged.
-    """
+    """Keep the first occurrence of each distinct row; also return how many went."""
 
     seen: set[tuple[str, ...]] = set()
     kept: list[list[str]] = []
@@ -189,13 +157,7 @@ def _dedup_rows(grid: list[list[str]]) -> tuple[list[list[str]], int]:
 
 
 def _sheet_header(title: str, rows: int, columns: int, duplicates: int) -> str:
-    """The "--- Sheet: … ---" line, naming duplicates when any were dropped.
-
-    Said out loud rather than trimmed in silence: this line is also the only
-    thing that would surface the rare case where dedup is wrong — two genuinely
-    identical detail rows. A summary ledger keyed by counterparty should not
-    have them, but if it does, the count says so.
-    """
+    """The "--- Sheet: … ---" line, naming duplicates when any were dropped."""
 
     dropped = f", đã bỏ {duplicates} dòng trùng lặp" if duplicates else ""
     return f"--- Sheet: {title} ({rows} dòng x {columns} cột{dropped}) ---"
@@ -221,14 +183,7 @@ def _grid_to_tsv(
 
 @dataclass(frozen=True)
 class SheetText:
-    """One sheet of a spreadsheet, already cleaned, de-duplicated and capped.
-
-    The structured form exists because two callers want the same reading with
-    different shapes: the general OCR path wants one string per file, and the
-    ledger pass wants one JSON object per sheet. Splitting the string back apart
-    with a regex was the alternative, and the "--- Sheet: … ---" line it would
-    have to match changed this week when duplicate counts joined it.
-    """
+    """One sheet of a spreadsheet, already cleaned, de-duplicated and capped."""
 
     sheet_name: str
     content: str
@@ -241,17 +196,7 @@ def read_sheets(
     excel_path: str,
     max_rows_per_sheet: int = 500,
 ) -> list[SheetText]:
-    """Every sheet of a spreadsheet, one record each.
-
-    Handles the three formats behind one signature: ``.xlsx`` through openpyxl
-    in normal mode (read-only does not expose ``merged_cells.ranges``, which is
-    needed to propagate merged headers), ``.xls`` through pandas + xlrd, and
-    ``.csv`` as a single unnamed sheet.
-
-    An empty sheet still gets a record, with empty ``content`` and a zero
-    ``row_count`` — dropping it here would make the sheet count the ledger pass
-    checks against disagree with the workbook.
-    """
+    """Every sheet of a spreadsheet, one record each."""
 
     suffix = Path(excel_path).suffix.lower()
     if suffix == ".csv":
@@ -273,9 +218,6 @@ def read_sheets(
             if not grid:
                 sheets.append(SheetText(worksheet.title, "", 0, 0, 0))
                 continue
-            # Before the row cap, not after: a sheet whose pasted block sits
-            # ahead of the real data would otherwise spend the whole 500-row
-            # window on copies and drop every real row behind them.
             grid, duplicates = _dedup_rows(grid)
             sheets.append(SheetText(
                 worksheet.title,
@@ -340,50 +282,13 @@ def extract_excel_text(
     max_rows_per_sheet: int = 500,
     max_chars: int = 100000,
 ) -> str:
-    """Extract XLS/XLSX workbook content as LLM-readable text grouped by sheet.
-
-    The grid is emitted as-is (no header inference), led by Excel column letters
-    so the LLM can align columns and cite a specific cell. Cells are rendered the
-    way Excel displays them (percent, dates, thousands grouping).
-
-    A thin join over ``read_sheets``, which does the reading for both shapes this
-    module hands out — see ``SheetText``.
-    """
+    """Extract XLS/XLSX workbook content as LLM-readable text grouped by sheet."""
 
     return _sheets_to_text(read_sheets(excel_path, max_rows_per_sheet), max_chars)
 
 
-def extract_pptx_text(pptx_path: str, max_chars: int = 100000) -> str:
-    """Extract PowerPoint slide text (and tables) as LLM-readable text.
-
-    Every shape with a text frame contributes its text, in shape order; a
-    table's rows are rendered tab-separated, the same convention
-    ``extract_excel_text`` uses for its sheet grids. One block per slide, led
-    by the slide's title if it has one — mirrors the "--- Page N ---" /
-    "--- Sheet: ... ---" markers used elsewhere so a citation can point at a
-    specific slide.
-    """
-    presentation = Presentation(pptx_path)
-    blocks = []
-    for index, slide in enumerate(presentation.slides, start=1):
-        title = _slide_title(slide)
-        header = f"--- Slide {index}: {title} ---" if title else f"--- Slide {index} ---"
-        lines = _slide_text(slide)
-        body = "\n".join(lines) if lines else "(trống)"
-        blocks.append(f"{header}\n{body}")
-
-    return _join_sheet_blocks(blocks, max_chars)
-
-
 def extract_xml_text(file_path: str, max_chars: int = 120_000) -> str:
-    """Flatten an XML file to readable text.
-
-    The fallback path for XML. A tax filing normally goes through
-    ``utils.tax_xml``, which reads its indicator codes directly; this is what
-    happens when that module does not recognise the form, and what any other XML
-    gets. Element paths are kept because for an unrecognised schema the nesting
-    is most of what tells a reader — or the classifier — what they are holding.
-    """
+    """Flatten an XML file to readable text."""
 
     import xml.etree.ElementTree as ET
 
@@ -416,6 +321,7 @@ def extract_document_text(
     ocr_timeout_seconds: float | None = None,
 ) -> str:
     """Extract text from supported uploaded documents."""
+    
     spreadsheet_extensions = {".csv", ".xls", ".xlsx"}
 
     extension = Path(file_path).suffix.lower()
@@ -425,8 +331,6 @@ def extract_document_text(
         return extract_csv_text(file_path)
     if extension in spreadsheet_extensions - {".csv"}:
         return extract_excel_text(file_path)
-    if extension == ".pptx":
-        return extract_pptx_text(file_path)
     if extension == ".xml":
         return extract_xml_text(file_path)
     raise ValueError(f"Unsupported file extension: {extension}")

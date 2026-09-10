@@ -1,65 +1,18 @@
-"""Read Vietnamese e-tax XML filings — financial statements and VAT returns.
-
-HTKK and eTax export a filing as XML carrying the form's official indicator
-codes. That is a better source than the scanned PDF of the same document: no
-OCR layer, no model reading a table, and the figures come with the codes the
-form itself defines.
-
-It is also the source that removes a failure this project has already been bitten
-by. Commit 08e4008 fixed the metrics block picking "11. Thu nhập khác" as giá vốn
-hàng bán, because the extraction had copied each label's ordinal into the code
-field and 11 is giá vốn's TT200 code. Nothing in this module can produce that: it
-never guesses which line is which, it reads the code the filing states.
-
-Three things here exist because the sample files taught them, not because they
-seemed prudent:
-
-- **Never flatten by tag name.** A balance sheet holds two year columns as
-  sibling blocks, and the two appendices name their columns differently
-  (SoCuoiNam/SoDauNam versus NamNay/NamTruoc). Reading every ``ct*`` element into
-  one dict silently keeps whichever column came last — which, on the sample,
-  returned the prior year's revenue while looking entirely correct.
-
-- **Codes mean different things under different circulars.** TT133's ct200 is
-  TỔNG CỘNG TÀI SẢN; TT200's 200 is TÀI SẢN DÀI HẠN. So this module emits the
-  canonical Vietnamese *label* and leaves ``code`` empty. FinancialRatioCalculator
-  ranks a label match above a code match (see its match_metric), which makes the
-  label the safe channel and a code the dangerous one.
-
-- **The file may not be well formed.** One sample begins ``<Image <?xml
-  version=...``, which ElementTree rejects at column 7. Parsing starts from the
-  declaration.
-
-Every reading is checked against the identities the form guarantees — a balance
-sheet balances, ct10 is ct01 minus ct02 — and a filing whose arithmetic does not
-hold is reported rather than returned, because the likeliest cause is that the
-wrong block was read.
-"""
+"""Read Vietnamese e-tax XML filings — financial statements and VAT returns."""
 
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Any
 
+
 NAMESPACE = "http://kekhaithue.gdt.gov.vn/TKhaiThue"
 _NS = {"n": NAMESPACE}
 _CODE = re.compile(r"ct\d+\w*")
 
-# maTKhai values this module knows how to read. Anything else is reported as
-# unrecognised rather than read on the assumption that one filing looks like
-# another — the codes are only meaningful once the form is known.
 FORM_VAT_01GTGT = "842"
 FORM_BCTC_B01A_DNN = "683"
 
-# B01a-DNN, TT133/2016. Derived from the sample and confirmed against the form's
-# own identities (ct200 = 110+120+…+180, ct300 = 311..320, ct400 = 411..417,
-# ct500 = ct300+ct400), not from memory of the circular.
-#
-# Labels are worded to match FinancialRatioCalculator's aliases exactly; each one
-# below was checked to resolve to the metric named in the comment. "Phải thu của
-# khách hàng" — the form's own wording — does not match, "Phải thu khách hàng"
-# does, and that difference is the whole reason these are spelled out here rather
-# than copied off the form.
 _B01A_BALANCE = {
     "ct110": "Tiền và các khoản tương đương tiền",   # cash
     "ct130": "Các khoản phải thu",
@@ -82,14 +35,6 @@ _B01A_BALANCE = {
     "ct417": "Lợi nhuận sau thuế chưa phân phối",
     "ct500": "TỔNG CỘNG NGUỒN VỐN",
 }
-# Deliberately absent: ct316 "Vay và nợ thuê tài chính". B01a-DNN does not split
-# borrowings into short and long term, and the calculator has a metric for each.
-# Mapping it to either would state a maturity the filing never gave.
-#
-# Also absent by construction: current_assets and current_liabilities. B01a lists
-# assets in decreasing liquidity with no current/non-current division at all, so
-# any ratio needing that split cannot come from this form. Recorded in the notes
-# rather than approximated.
 
 _B02_INCOME = {
     "ct01": "Doanh thu bán hàng và cung cấp dịch vụ",             # gross_revenue
@@ -119,8 +64,6 @@ _LCTT_CASHFLOW = {
     "ct70": "Tiền và tương đương tiền cuối kỳ",
 }
 
-# 01/GTGT. ct34 is the figure the debt/revenue chart wants: total revenue of
-# goods and services sold, which the form defines as ct26 + ct27 + ct32a.
 VAT_TOTAL_REVENUE = "ct34"
 
 
@@ -139,12 +82,7 @@ class TaxXmlResult:
 
 
 def _root(path: str) -> ET.Element:
-    """Parse from the XML declaration, ignoring anything before it.
-
-    One real filing arrived as ``<Image <?xml version="1.0"…``. Whatever put that
-    there, the document after it is valid, and refusing the file would lose a
-    statement over a stray seven characters.
-    """
+    """Parse from the XML declaration, ignoring anything before it."""
 
     raw = open(path, encoding="utf-8-sig").read()
     start = raw.find("<?xml")
@@ -161,11 +99,7 @@ def _text(node: ET.Element | None, tag: str) -> str:
 
 
 def _column(parent: ET.Element | None, name: str) -> dict[str, float]:
-    """Every ct* code inside one named column block.
-
-    Scoped to the block on purpose. The alternative — walking the parent and
-    keying by tag — merges the year columns into each other.
-    """
+    """Every ct* code inside one named column block."""
 
     if parent is None:
         return {}
@@ -196,14 +130,7 @@ def _statement(
     values_by_year: dict[str, dict[str, float]],
     code_labels: dict[str, str],
 ) -> dict[str, Any]:
-    """One statement in the shape financial_statement_extraction already uses.
-
-    ``code`` is left empty on every line. The codes are real and correct, but
-    they are TT133's, and FinancialRatioCalculator's tables are TT200's — where
-    200 means long-term assets rather than total assets. Passing them through
-    would invite exactly the mis-map that tiering label above code was added to
-    stop.
-    """
+    """One statement in the shape financial_statement_extraction already uses."""
 
     years = [year for year in values_by_year if year]
     line_items = []
@@ -222,7 +149,6 @@ def _statement(
         "source_unit": "dong",
         "page": None,
         "years": years,
-        # Same positional shape the OCR pass returns, so readers need no branch.
         "item_columns": ["label", "code", *years, "page"],
         "line_items": line_items,
     }
@@ -232,12 +158,7 @@ def _check_identities(
     balance: dict[str, dict[str, float]],
     income: dict[str, dict[str, float]],
 ) -> list[str]:
-    """Report where the filing's own arithmetic fails to hold.
-
-    These identities are true by construction on a correctly-read filing, so a
-    break means the reading is wrong — most likely the wrong column block. Worth
-    more than any assertion this module could make about itself.
-    """
+    """Report where the filing's own arithmetic fails to hold."""
 
     problems: list[str] = []
     for year, values in balance.items():
@@ -247,9 +168,6 @@ def _check_identities(
                 f"{year}: bảng cân đối không cân — nợ phải trả {debts:,.0f} cộng "
                 f"vốn chủ sở hữu {equity:,.0f} khác tổng tài sản {total:,.0f}."
             )
-        # Assets equal liabilities-and-equity twice over in this form: once as
-        # ct300+ct400 and once as the stated ct500. Checking only the first left
-        # a corrupted ct500 to pass through unnoticed.
         funding = values.get("ct500")
         if None not in (total, funding) and abs(funding - total) > 1:
             problems.append(
@@ -399,12 +317,7 @@ def _parse_vat(root: ET.Element, result: TaxXmlResult) -> TaxXmlResult:
 
 
 def parse_tax_xml(path: str) -> TaxXmlResult:
-    """Read one e-tax XML, or say why it could not be read.
-
-    Never raises and never returns a half-filled record: either the filing was
-    recognised and its arithmetic held, or ``error`` says what stopped it and the
-    caller falls back to reading the file as text.
-    """
+    """Read one e-tax XML, or say why it could not be read."""
 
     result = TaxXmlResult()
     try:

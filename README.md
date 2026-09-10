@@ -270,6 +270,29 @@ the rendered block drops 55% — which matters more than the saving, because tha
 capped at 40,000 characters and a 342-row dossier used to reach the agent with only 102 of
 its rows. It now arrives whole, and the ceiling holds 384 rows instead of 114.
 
+**Blocks render through `render_record`, not `json.dumps(indent=2)`.** Once `line_items`
+became positional arrays, `indent=2` put every element of every row on its own line — the
+exact waste `render_record` was written to avoid for the ledger. Switching the three
+remaining sites took the BCTC block from 8,849 tokens to 6,413 (−28%) while keeping one row
+per line; fully compacting would have saved another 4% and made it unreadable.
+
+Three ledger keys went at the same time, all of them things nothing read. `code_evidence`
+was a sentence restating what `source_sheet_name` and `code_source` already say in
+structured form. `period.as_printed` repeated the dates already in `from`/`to`.
+`source_files` was identical on every account and to the record's own top-level
+`source_files` — so `fill_source_files` puts it back from `sheet_inventory`, which already
+knows which file each sheet came from. The model writes the part only it knows (which sheet
+fed this account); the program looks up the rest. A sheet name matching nothing leaves the
+list empty and says so, because the model does get sheet names wrong and a guessed filename
+would dress that up as provenance. Together: 565 tokens off the pass's output, 270 off its
+prompt, and the schema down from 10 keys to 8.
+
+Commentary is capped at **three bullets of sixty words**, down from five of a hundred.
+Measured across fifteen logged reports, the word cap was never the binding constraint —
+bullets average 34 words and only one ever passed 70 — so the bullet count is what actually
+shortens a report: 64 bullets become 48, about 9% of the FA memo, without leaving any
+section empty.
+
 `items` is also no longer every row, and it is no longer one list. The report lists **at
 most five** counterparties or stock items per section, so everything past the fifth was paid
 for and never read. But the sections do not agree on what "largest" means, and one account is
@@ -412,7 +435,7 @@ Applied to every branch before returning, in this order and for stated reasons:
 │   ├── utils/
 │   │   ├── common.py, paths.py
 │   │   ├── reading/                  # ocr.py, extractors.py, tax_xml.py
-│   │   └── report/                   # citations, formatting, markdown_fixups,
+│   │   └── report/                   # citations, formatting, source_list,
 │   │       └── visualization/        #   charts, diagrams, graph_svg, report_html/style
 │   └── templates/                    # Per-agent structure + guidance Markdown
 ├── samples/<testcase>/               # Uploaded files, one folder per upload box (gitignored)

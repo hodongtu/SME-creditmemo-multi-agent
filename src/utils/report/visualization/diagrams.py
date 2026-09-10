@@ -6,18 +6,12 @@ from dataclasses import dataclass, replace
 
 from src.utils.report.visualization.graph_svg import render_svg
 
+
 MERMAID_BLOCK = re.compile(
     r"^```mermaid[ \t]*\n(.*?)^```[ \t]*$",
     re.DOTALL | re.MULTILINE,
 )
-# "flowchart LR" / "graph TD" ...
 _HEADER = re.compile(r"^\s*(?:flowchart|graph)\s+(LR|RL|TD|TB|BT)\b", re.IGNORECASE)
-# A --> B, A -->|nhãn| B, A --- B, A -.-> B, A ==> B, and mermaid's other way of
-# writing an edge label: A -- nhãn --> B, A == nhãn ==> B.
-#
-# The inline-label forms must come FIRST. Tried in the other order, "-{2,3}>"
-# matches the leading "--" of "-- 65% -->" and the label text is then read as
-# part of the next node id, which collapses the whole line into one box.
 _CONNECTOR = re.compile(
     r"\s*(?:"
     r"-{2}\s*(?P<dashlabel>[^|>=-][^>]*?)\s*-{2,3}>"
@@ -27,17 +21,10 @@ _CONNECTOR = re.compile(
 )
 _NODE_ID = re.compile(r"\s*(?P<id>[A-Za-z0-9_]+)\s*")
 _OPEN_TO_CLOSE = {"[": "]", "(": ")", "{": "}"}
-# classDef hilite fill:#C6E0B4,stroke:#333
 _CLASSDEF = re.compile(r"^classDef\s+(?P<name>[A-Za-z0-9_]+)\s+(?P<body>.+)$")
-# class A,B hilite
 _CLASS_APPLY = re.compile(r"^class\s+(?P<ids>[A-Za-z0-9_,\s]+?)\s+(?P<name>[A-Za-z0-9_]+)\s*$")
-# style A fill:#eee
 _STYLE_DECL = re.compile(r"^style\s+(?P<id>[A-Za-z0-9_]+)\s+(?P<body>.+)$")
-# The ":::hilite" suffix, which follows the node's label when it has one
-# ("VNM[Vinamilk]:::hilite"), so it has to be consumed while scanning rather
-# than matched against the bare id.
 _INLINE_CLASS = re.compile(r"\s*:::(?P<name>[A-Za-z0-9_]+)")
-# subgraph id[Tiêu đề]  |  subgraph Tiêu đề
 _SUBGRAPH = re.compile(
     r"^subgraph\s+(?:(?P<id>[A-Za-z0-9_]+)\s*\[(?P<title>.+?)\]|(?P<plain>.+?))\s*$"
 )
@@ -74,11 +61,7 @@ def _scan_class(text: str, start: int) -> tuple[str | None, int]:
 def _scan_line(
     line: str,
 ) -> tuple[list[tuple[str, str | None, str | None]], list[tuple[int, str]]]:
-    """Split ``A[x] -->|l| B[y]:::cls --> C`` into its nodes and the links.
-
-    Chains must be walked sequentially — a plain regex scan would treat each
-    destination as consumed and silently drop the rest of the chain.
-    """
+    """Split ``A[x] -->|l| B[y]:::cls --> C`` into its nodes and the links."""
 
     nodes: list[tuple[str, str | None, str | None]] = []
     links: list[tuple[int, str]] = []
@@ -111,13 +94,6 @@ def _scan_line(
     return nodes, links
 
 
-# Colours match mermaid's default theme, because the same report is read as
-# markdown (where mermaid renders for real) and as PDF (where it cannot, so this
-# stands in). Arrows are drawn from pseudo-elements rather than typed, since a
-# "→" glyph next to a real diagram looks like a fallback.
-#
-# Only the fallback paths in _render still use these classes; everything with
-# edges is drawn by graph_svg.
 DIAGRAM_CSS = """
 /* Diagrams and charts are emitted as bare <svg> with explicit width and height.
    Only the centring is left to CSS: a top-down flowchart is much narrower than
@@ -189,23 +165,14 @@ def _clean_label(raw: str | None, fallback: str) -> str:
 
 @dataclass(frozen=True)
 class Flowchart:
-    """A parsed mermaid flowchart.
-
-    A dataclass rather than a widening tuple: styling and grouping took the
-    parse result past the point where positional unpacking stays readable.
-    """
+    """A parsed mermaid flowchart."""
 
     direction: str
     order: list[str]
     labels: dict[str, str]
     edges: list[tuple[str, str, str]]
-    # node id -> style, resolved from classDef/class/:::/style declarations.
     node_style: dict[str, dict[str, str]]
-    # node id -> "hexagon" for {{...}}, "rect" for everything else. Only two
-    # shapes because the reports only use two; mermaid's rounded, stadium and
-    # cylinder forms would be code nobody has asked for.
     node_shape: dict[str, str]
-    # (title, member node ids) for each subgraph, in declaration order.
     groups: list[tuple[str, list[str]]]
 
     @property
@@ -245,10 +212,6 @@ def _parse(source: str) -> Flowchart:
             order.append(node_id)
         elif raw_label:
             labels[node_id] = _clean_label(raw_label, labels[node_id])
-        # Read from the raw label before _clean_label strips the brackets off.
-        # A node written once with its shape and referenced bare afterwards —
-        # "KH{{Công ty A}}" then "V1 --> KH" — keeps the shape it was declared
-        # with, so only a label that carries brackets may set it.
         if raw_label and raw_label.startswith("{{"):
             node_shape[node_id] = "hexagon"
         elif raw_label:
@@ -315,8 +278,6 @@ def _parse(source: str) -> Flowchart:
             if node_class:
                 node_classes[node_id] = node_class
 
-    # Unclosed subgraphs still count: a missing "end" should not discard the
-    # grouping the author clearly intended.
     while group_stack:
         groups.append(group_stack.pop())
 
@@ -336,48 +297,13 @@ def _parse(source: str) -> Flowchart:
     )
 
 
-# business-activity-guidance.md's own threshold for "lý do nghiệp vụ" to
-# highlight a partner box — matches the 42% worked example in
-# logs/ba_diagram_preview/preview.md.
 _CONCENTRATION_THRESHOLD = 40.0
 _PERCENT_LABEL = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
-# Rose, and rose is used nowhere else: graph_svg's level palette runs green,
-# blue, slate, amber, violet precisely so this hue stays free. A flag sharing a
-# colour with an ordinary level stops being a flag.
-#
-# The text colour carries as much of the signal as the fill does. Every other box
-# prints near-black on a pale tint, so a box whose words are themselves coloured
-# reads as marked before its background is even noticed — which matters because
-# these fills all sit at the same lightness and cannot separate by weight.
 _AUTO_WARN_STYLE = {"fill": "#f7e2e5", "stroke": "#c1616f", "color": "#c1616f"}
 
 
 def _auto_color_concentration(chart: Flowchart) -> Flowchart:
-    """Highlight a partner node the model forgot to color despite a high-% edge.
-
-    Measured against a real specialist run: guidance.md and the report
-    skeleton both ask for a `:::warn`/`:::hi` highlight on any partner at
-    ~40%+ concentration, but the model coloured one of two equally-qualifying
-    nodes in the same report and missed the other (non-determinism, not a
-    one-off). Same gap the citation and list fixups close elsewhere — a prompt
-    rule the model sometimes skips gets a code-level fallback so the reader
-    sees it every time, not on a coin flip.
-
-    Overrides whatever the node already carried. It used to fill a gap only,
-    leaving a model-styled node alone, and the report above is why that was
-    wrong: the model wrote `classDef warn fill:#FFC000` and applied it to the
-    55% customer, then forgot the 68% supplier in the next diagram. One
-    concentration finding came out amber and the other rose, in the same
-    report, for the same reason — and a reader has no way to know the two
-    marks mean the same thing. The house style wins so that they match.
-
-    A node the model marked but that does not clear the threshold is left
-    alone; this function only speaks for the rule it enforces.
-
-    The "hub" side of a fan (out-degree/in-degree > 1) is never coloured by
-    this — only the single-degree partner at the other end of the qualifying
-    edge, which is the shape mục 4/5's fan diagrams always have.
-    """
+    """Highlight a partner node the model forgot to color despite a high-% edge."""
 
     degree: dict[str, int] = {}
     for src, _label, dst in chart.edges:
@@ -393,13 +319,6 @@ def _auto_color_concentration(chart: Flowchart) -> Flowchart:
         value = float(match.group(1).replace(",", "."))
         if value < _CONCENTRATION_THRESHOLD:
             continue
-        # The hub is whichever end has more connections; the other end is the
-        # partner this edge is about. Compared, not tested against 1: the old
-        # rule demanded the partner be a leaf, and in the shape mục 1 actually
-        # draws — product -> partner -> company — a supplier carries its own
-        # product edge, so a 45% supplier scored degree 2 and was passed over
-        # while a 40% customer with no product box was flagged. Same finding,
-        # different topology, opposite outcome.
         src_degree, dst_degree = degree.get(src, 0), degree.get(dst, 0)
         if src_degree > dst_degree:
             partner = dst
@@ -414,17 +333,7 @@ def _auto_color_concentration(chart: Flowchart) -> Flowchart:
     return replace(chart, node_style=node_style) if changed else chart
 
 
-# The same <br/> spelling _label_html and graph_svg._text_lines both accept:
-# mermaid writes <br>, <br/> and <br /> interchangeably.
 _BR = re.compile(r"<br\s*/?>")
-# "3,65 tỷ", "1.850 triệu đồng", "2,48 tỉ VNĐ" — a bare money amount carrying no
-# percent sign of its own. A magnitude word may be followed by a currency word,
-# which is what "3.650 triệu đồng" is and what an earlier version of this missed:
-# it required the line to end at "triệu".
-#
-# One of the two words has to be there. Digits alone are left alone — a bare "45"
-# beside a percentage is not necessarily money, and this only removes what it can
-# name.
 _MONEY_UNIT = r"(?:tỷ|tỉ|triệu|nghìn|ngàn|tr)"
 _MONEY_CUR = r"(?:đồng|đ|vnđ|vnd)"
 _MONEY_BODY = (
@@ -435,21 +344,7 @@ _MONEY_PAREN = re.compile(rf"\s*\(\s*{_MONEY_BODY}\s*\)", re.IGNORECASE)
 
 
 def _percent_only_edge_labels(chart: Flowchart) -> Flowchart:
-    """Drop the absolute figure from an edge label that already carries a %.
-
-    A share of revenue is what a connector in mục 1 is annotating, and the
-    percentage says it. Adding "3,65 tỷ" underneath says the same thing twice in
-    a place with no room for it: the label is the widest thing in the gap between
-    two boxes, and the gap is sized from it, so the second line pushes the whole
-    diagram wider and then gets scaled back down — every box on the page loses
-    text size to a number the table beside it already gives.
-
-    Narrow on purpose. Only a line that is nothing but an amount goes, and only
-    when another line in the same label carries a percent sign. "45 ngày" on the
-    inventory connector has no percentage next to it and survives; so does
-    "trả chậm 30 ngày", and so does a lone "3,65 tỷ" on a diagram that quotes no
-    shares at all.
-    """
+    """Drop the absolute figure from an edge label that already carries a %."""
 
     edges = []
     changed = False
@@ -476,14 +371,7 @@ def _node_html(label: str) -> str:
 
 
 def _arrow_html(label: str, vertical: bool) -> str:
-    """One arrow between two nodes.
-
-    The arrow itself is drawn in CSS (see DIAGRAM_CSS), so no glyph goes in the
-    markup — emitting one too would stack a character on top of the drawn
-    shape. Labelled arrows carry their own class rather than relying on a
-    :has() selector, which keeps the styling independent of how much of
-    Selectors Level 4 the PDF renderer implements.
-    """
+    """One arrow between two nodes."""
 
     if not label:
         return '<div class="mmd-arrow"></div>'
@@ -504,25 +392,13 @@ def _render(source: str) -> str | None:
     chart = _auto_color_concentration(chart)
     order, labels, edges = chart.order, chart.labels, chart.edges
     if not edges:
-        # Nodes only: no layout to compute, so a single row of boxes.
         boxes = "".join(_node_html(labels[node]) for node in order)
         return f'<div class="mmd"><div class="mmd-row">{boxes}</div></div>'
 
-    # Everything with edges goes to the layered SVG drawer.
-    #
-    # There used to be flex-box special cases ahead of this — a linear chain and
-    # a hub-and-spokes fan — and the fan one was wrong: flex draws the hub once,
-    # in the row it happens to sit in, so every other spoke's arrow pointed at
-    # empty page. Measured side by side on the section 4 and 5 diagrams, the SVG
-    # drawer also beat the chain case: uniform box heights, no ragged wrapping,
-    # and a third of the vertical space.
     svg = render_svg(chart)
     if svg is not None:
         return svg
 
-    # Last resort, if the layout could not run at all: one row per edge. Ugly,
-    # and it repeats a hub's name once per edge, but it still shows every node
-    # and every connection rather than dropping the diagram.
     rows = [
         '<div class="mmd-row">'
         + _node_html(labels[src])

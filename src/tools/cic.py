@@ -1,14 +1,4 @@
-"""Credit-bureau data, queried instead of read off an uploaded CIC report.
-
-The record this returns is deliberately the SAME SHAPE the CIC S10A extraction
-pass produces — same keys, same units, same row fields. Everything downstream
-already reads that shape: the prompt block, the report template, and
-merge_debt_series behind the debt/revenue chart. A second shape would fork all
-three, which is where two parallel paths stop being cheap.
-
-Three queries, one tool. Splitting them into three would return three fragments
-that no longer match the extracted shape, and the parity above is the point.
-"""
+"""Credit-bureau data, queried instead of read off an uploaded CIC report."""
 
 import json
 from typing import Annotated, Any
@@ -50,9 +40,6 @@ ORDER  BY rating_year DESC
     "get_bureau_credit_report",
     extras={
         "heading": "[BUREAU CREDIT REPORT]",
-        # The customer's own CIC report beats a bureau lookup: a folder holding
-        # one does not pay for the other, and the extracted version is what the
-        # officer actually filed.
         "superseded_by": ("cic_khach_hang_vay", "cic_tai_san_bao_dam"),
     },
 )
@@ -60,18 +47,7 @@ def get_bureau_credit_report(
     tax_code: Annotated[str, InjectedToolArg],
     executor: Annotated[Any, InjectedToolArg],
 ) -> str:
-    """Quan hệ tín dụng của khách hàng tại CÁC TCTD, tra từ trung tâm thông tin tín dụng.
-
-    Dùng cho MỤC 2 của báo cáo. Cùng bộ trường với khối CIC đọc từ file khách nộp:
-    "du_no_hien_tai", "du_no_12_thang", "xep_hang_tin_dung" — nên mọi chỗ đọc khối
-    CIC đều đọc được khối này.
-
-    Số liệu truy vấn thẳng từ hệ thống, độ tin cậy cao hơn bản scan. Trường "page"
-    là null vì con số không đến từ trang giấy nào.
-
-    Khối này chỉ xuất hiện khi hồ sơ KHÔNG có file CIC; có file thì bản đọc từ file
-    được dùng và khối này vắng mặt.
-    """
+    """Quan hệ tín dụng của khách hàng tại CÁC TCTD, tra từ trung tâm thông tin tín dụng."""
 
     outstanding = executor(OUTSTANDING_SQL, {"tax_code": tax_code})
     monthly = executor(MONTHLY_DEBT_SQL, {"tax_code": tax_code})

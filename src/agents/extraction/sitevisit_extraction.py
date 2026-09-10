@@ -8,6 +8,7 @@ from src.agents.extraction.structured_extraction import (
     scale_declared_blocks,
 )
 
+
 REQUIRED_TOP_LEVEL_KEYS = {
     "survey_info",
     "business_profile",
@@ -16,7 +17,6 @@ REQUIRED_TOP_LEVEL_KEYS = {
     "lc_terms",
     "conclusion",
 }
-
 
 _AMOUNT_FIELDS: dict[str, tuple[str, ...]] = {
     "business_plan_next_year": (
@@ -115,12 +115,7 @@ into a Vietnamese report:
 
 
 def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
-    """Convert every amount to đồng using the block's own source_unit, in place.
-
-    This is the only place the conversion happens — see the module docstring for
-    what it cost to have it in two. Runs even when the multiplier is 1, because
-    the rounding is wanted whether or not there was a unit to apply.
-    """
+    """Convert every amount to đồng using the block's own source_unit, in place."""
 
     scale_declared_blocks(result, _AMOUNT_FIELDS)
     return result
@@ -136,19 +131,7 @@ _RATIO_FIELDS = (
 
 
 def normalize_lc_ratios(result: dict[str, Any]) -> dict[str, Any]:
-    """Force lc_terms shares onto a 0-1 scale, in place, and say what changed.
-
-    The prompt asks for decimals and a model will still answer 60 for "60%"
-    often enough to matter: the credit-need table multiplies these by 100 to
-    display and by the projected COGS to size the facility, so an unnoticed 60
-    becomes 6000% and a hundredfold LC turnover.
-
-    A value between 1 and 100 can only be a percentage — the scale it is
-    supposed to be on stops at 1 — so it is divided and the reinterpretation is
-    written into extraction_notes rather than done quietly. Anything above 100,
-    or negative, is not a share at all: it is dropped so the calculator falls
-    back to its documented default instead of computing on nonsense.
-    """
+    """Force lc_terms shares onto a 0-1 scale, in place, and say what changed."""
 
     block = result.get("lc_terms")
     if not isinstance(block, dict):
