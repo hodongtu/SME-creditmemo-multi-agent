@@ -22,7 +22,7 @@ A Vietnamese bank underwriting an SME facility produces a credit memo: a structu
 assessment of the customer's business, their financial statements, their credit
 history, and the facility being proposed. Today a credit officer assembles it by
 hand from a folder that typically holds audited financial statements (BCTC), CIC
-credit bureau reports (S10A and R21), detail ledgers exported from the customer's
+credit bureau reports (S10A and R20), detail ledgers exported from the customer's
 accounting software, a site-visit report written by the officer, and the credit
 application itself.
 
@@ -359,7 +359,7 @@ on the upload screen.
 |---|---|---|---|---|
 | `BusinessActivityAnalysis` | `BUSINESS_ACTIVITY_AGENT` | Operations, core products, supply chain, sales outlook | Sitevisit, Ledger | — |
 | `FinancialAnalysis` | `FINANCIAL_ANALYSIS_AGENT` | Financial analysis on pre-computed ratios | BCTC, Sitevisit, Ledger | — |
-| `CreditRelationshipAnalysis` | `CREDIT_RELATIONSHIP_AGENT` | Credit history, internal and bureau | CIC S10A, CIC R21, Sitevisit, Ledger | 3 |
+| `CreditRelationshipAnalysis` | `CREDIT_RELATIONSHIP_AGENT` | Credit history, internal and bureau | CIC S10A, CIC R20, Sitevisit, Ledger | 3 |
 | `CreditProposalAnalysis` | `CREDIT_PROPOSAL_AGENT` | Facility, limit, tenor, collateral | BCTC, Proposal, CIC S10A, Sitevisit | 1 |
 
 Each class carries its own `structure_relative_path` and `guidance_relative_path`
@@ -375,7 +375,7 @@ names are declared exactly once:
 | `[EXTRACTED FINANCIAL STATEMENTS]` | BCTC pass |
 | `[EXTRACTED CREDIT APPLICATION]` | Proposal pass |
 | `[EXTRACTED CIC S10A REPORT]` | CIC S10A pass |
-| `[EXTRACTED CIC R21 REPORT]` | CIC R21 pass |
+| `[EXTRACTED CIC R20 REPORT]` | CIC R20 pass |
 | `[EXTRACTED SITE VISIT REPORT]` | Sitevisit pass |
 | `[EXTRACTED DETAIL LEDGER]` | Ledger pass |
 | `[PRE-COMPUTED FINANCIAL METRICS]` | `FinancialRatioCalculator` |
@@ -552,7 +552,7 @@ flowchart TD
 | BCTC | `is_financial_statement` | `[EXTRACTED FINANCIAL STATEMENTS]` | no | FA, CP |
 | Proposal | `is_proposal` | `[EXTRACTED CREDIT APPLICATION]` | no | CP |
 | CIC S10A | `is_cic_s10a` | `[EXTRACTED CIC S10A REPORT]` | no | CR, CP |
-| CIC R21 | `is_cic_r21` | `[EXTRACTED CIC R21 REPORT]` | no | CR |
+| CIC R20 | `is_cic_r20` | `[EXTRACTED CIC R20 REPORT]` | no | CR |
 | Sitevisit | `is_sitevisit` | `[EXTRACTED SITE VISIT REPORT]` | no | all four |
 | Ledger | `is_ledger` | `[EXTRACTED DETAIL LEDGER]` | **yes** | BA, FA, CR |
 
@@ -700,7 +700,7 @@ figures, and a payload large enough to break the export.
 | Pass | `required` | On failure |
 |---|---|---|
 | BCTC, Proposal, Sitevisit | **yes** | Run ends, naming each file and why |
-| CIC S10A, CIC R21, Ledger | no | Raw OCR, as before |
+| CIC S10A, CIC R20, Ledger | no | Raw OCR, as before |
 
 Three causes count as failure, because all three end with no JSON and raw OCR in the
 prompt: the chain raised, no LLM is configured for that pass, or the extraction budget cut

@@ -59,7 +59,7 @@ class ClassifiedDocument:
     is_financial_statement: bool = False
     is_proposal: bool = False
     is_cic_s10a: bool = False
-    is_cic_r21: bool = False
+    is_cic_r20: bool = False
     is_sitevisit: bool = False
     is_ledger: bool = False
     financial_statement_extraction: dict[str, Any] | None = None
@@ -69,8 +69,8 @@ class ClassifiedDocument:
     proposal_extraction_error: str = ""
     cic_s10a_extraction: dict[str, Any] | None = None
     cic_s10a_extraction_error: str = ""
-    cic_r21_extraction: dict[str, Any] | None = None
-    cic_r21_extraction_error: str = ""
+    cic_r20_extraction: dict[str, Any] | None = None
+    cic_r20_extraction_error: str = ""
     sitevisit_extraction: dict[str, Any] | None = None
     sitevisit_extraction_error: str = ""
     ledger_extraction: dict[str, Any] | None = None

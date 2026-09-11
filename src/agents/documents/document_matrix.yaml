@@ -30,13 +30,11 @@
 #   cic_s10a_extraction : true = extract the CIC credit-relationship report,
 #               form S10A (src/agents/cic_s10a_extraction.py). Named after the
 #               form code because CIC issues several reports whose structures
-#               have nothing in common: S10A is credit relationships, R20/R21 is
+#               have nothing in common: S10A is credit relationships, R20 is
 #               loan collateral.
-#   cic_r21_extraction : true = extract the CIC loan-collateral report
-#               (src/agents/cic_r21_extraction.py). The printed form code is
-#               "R20"; the flag keeps "r21" because that is the name the module
-#               was registered under — only this YAML and the Python module need
-#               to agree, and neither has to match what the report prints.
+#   cic_r20_extraction : true = extract the CIC loan-collateral report,
+#               form R20 (src/agents/cic_r20_extraction.py). Named after the
+#               form code, like the S10A pass above.
 #               EACH flag costs one extra LLM call per matching document.
 #
 # --- Choosing the primary agent ----------------------------------------------
@@ -526,7 +524,7 @@ groups:
       - id: cic_tai_san_bao_dam
         short_label: "Thông tin CIC tài sản bảo đảm"
         label: "Thông tin CIC Tài sản bảo đảm của Khách hàng vay"
-        cic_r21_extraction: true
+        cic_r20_extraction: true
         requirement:
           cap_moi: "Không bắt buộc"
           tai_cap: "Không bắt buộc"

@@ -42,7 +42,7 @@ class Config:
     financial_statement_extraction_llm: Any = None
     proposal_extraction_llm: Any = None
     cic_s10a_extraction_llm: Any = None
-    cic_r21_extraction_llm: Any = None
+    cic_r20_extraction_llm: Any = None
     sitevisit_extraction_llm: Any = None
     ledger_extraction_llm: Any = None
     query_executor: Any = None

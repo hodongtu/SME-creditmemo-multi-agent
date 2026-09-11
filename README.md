@@ -53,7 +53,7 @@ all agent logic lives in the importable package [src/](src/).
 | [src/agents/specialist.py](src/agents/specialist.py) | The four specialist agents |
 | [src/agents/prompt_blocks.py](src/agents/prompt_blocks.py) | Turns extracted JSON + computed figures into the labelled blocks an agent's prompt carries |
 | [src/agents/calculator/](src/agents/calculator/) | Deterministic financial ratios and credit-need computation |
-| [src/agents/extraction/](src/agents/extraction/) | The five structured-extraction passes (BCTC, proposal, CIC S10A, CIC R21, site visit) + VAT revenue parsing |
+| [src/agents/extraction/](src/agents/extraction/) | The five structured-extraction passes (BCTC, proposal, CIC S10A, CIC R20, site visit) + VAT revenue parsing |
 | [src/config.py](src/config.py) | LLM client factory + runtime `Config` |
 | [src/types.py](src/types.py) | Shared types (`AgentName`, `WorkflowMode`, `ClassifiedDocument`, `UnderwritingGraphState`…) |
 | [src/utils/reading/](src/utils/reading/) | OCR, PDF/CSV/XLSX extraction, tax-XML parsing |
@@ -203,7 +203,7 @@ consumes are run:
 |---|---|
 | `BUSINESS_ACTIVITY_AGENT` | site visit, ledger |
 | `FINANCIAL_ANALYSIS_AGENT` | BCTC, site visit, ledger |
-| `CREDIT_RELATIONSHIP_AGENT` | CIC S10A, CIC R21, site visit, ledger |
+| `CREDIT_RELATIONSHIP_AGENT` | CIC S10A, CIC R20, site visit, ledger |
 | `CREDIT_PROPOSAL_AGENT` | BCTC, CIC S10A, proposal, site visit |
 
 The six passes are declared **once**, as the `EXTRACTION_PASSES` table in
@@ -390,7 +390,7 @@ receives:
 |---|---|
 | `BusinessActivityAnalysis` | Operations, core products/services, supply chain, sales outlook |
 | `FinancialAnalysis` | Financial analysis, built on the pre-computed ratios |
-| `CreditRelationshipAnalysis` | Credit relationships and debt history, from CIC S10A/R21 |
+| `CreditRelationshipAnalysis` | Credit relationships and debt history, from CIC S10A/R20 |
 | `CreditProposalAnalysis` | Facility, limit, tenor, collateral — built on the computed credit need |
 
 ### Stage 5 — Finalization (`_finalize`)
@@ -431,7 +431,7 @@ Applied to every branch before returning, in this order and for stated reasons:
 │   │   │   ├── document_matrix.py    # Loads and validates the YAML
 │   │   │   └── document_matrix.yaml  # 22 document types -> consuming agents, per program
 │   │   ├── calculator/               # financial ratios, credit need
-│   │   └── extraction/               # BCTC, proposal, CIC S10A, CIC R21, site visit, VAT
+│   │   └── extraction/               # BCTC, proposal, CIC S10A, CIC R20, site visit, VAT
 │   ├── utils/
 │   │   ├── common.py, paths.py
 │   │   ├── reading/                  # ocr.py, extractors.py, tax_xml.py
@@ -599,5 +599,5 @@ Each run creates a `logs/<testcase>_<timestamp>/` directory containing:
 | `financial_statement_extraction.json` | BCTC extraction JSON, per document |
 | `proposal_extraction.json` | Credit-application extraction JSON, per document |
 | `cic_s10a_extraction.json` | CIC S10A extraction JSON, per document |
-| `cic_r21_extraction.json` | CIC R21 extraction JSON, per document |
+| `cic_r20_extraction.json` | CIC R20 extraction JSON, per document |
 | `sitevisit_extraction.json` | Site-visit extraction JSON, per document |

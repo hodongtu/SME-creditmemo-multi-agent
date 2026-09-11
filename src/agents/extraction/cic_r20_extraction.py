@@ -1,4 +1,4 @@
-"""LLM extraction of the CIC R20/R21 collateral report into structured JSON"""
+"""LLM extraction of the CIC R20 collateral report into structured JSON"""
 
 from typing import Any
 
@@ -16,9 +16,9 @@ REQUIRED_TOP_LEVEL_KEYS = {
     "tai_san_bao_dam",
 }
 
-CIC_R21_EXTRACTION_SYSTEM_PROMPT = """
+CIC_R20_EXTRACTION_SYSTEM_PROMPT = """
 You extract a LOAN SECURITY INFORMATION REPORT (form R20, sometimes labelled
-R21) from Vietnam's National Credit Information Centre (CIC), for SME credit
+R20) from Vietnam's National Credit Information Centre (CIC), for SME credit
 underwriting. This is a DIFFERENT report from the "Báo cáo chi tiết quan hệ tín
 dụng" (form S10A) — S10A is about outstanding debt, this one is only about
 COLLATERAL.
@@ -110,10 +110,10 @@ Return EXACTLY this JSON schema and no other text:
 """
 
 
-def build_cic_r21_extraction_chain(llm: Any):
-    """Build the JSON-output extraction chain for the CIC R20/R21 report."""
+def build_cic_r20_extraction_chain(llm: Any):
+    """Build the JSON-output extraction chain for the CIC R20 report."""
 
-    return build_extraction_chain(CIC_R21_EXTRACTION_SYSTEM_PROMPT, llm)
+    return build_extraction_chain(CIC_R20_EXTRACTION_SYSTEM_PROMPT, llm)
 
 
 def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
@@ -127,7 +127,7 @@ def normalize_amounts(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def extract_cic_r21_structured_data(
+def extract_cic_r20_structured_data(
     chain: Any,
     filename: str,
     content: str,
@@ -140,6 +140,6 @@ def extract_cic_r21_structured_data(
         filename,
         content,
         REQUIRED_TOP_LEVEL_KEYS,
-        "No CIC R21 extraction LLM configured.",
+        "No CIC R20 extraction LLM configured.",
         normalize_amounts,
     )

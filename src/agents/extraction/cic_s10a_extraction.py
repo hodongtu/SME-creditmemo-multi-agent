@@ -52,7 +52,7 @@ READING NUMBERS — the easiest thing to get wrong, read carefully:
    re-sort.
 
 7. No section 2.6 at all — for instance the document is really a loan security
-   report, form R20/R21 — set "du_no_12_thang": [] and record why in
+   report, form R20 — set "du_no_12_thang": [] and record why in
    "extraction_notes". Never invent a twelve-month series.
 
 Write every month as "MM/YYYY", two digits for the month, e.g. "03/2026".

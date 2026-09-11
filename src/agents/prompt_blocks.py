@@ -56,7 +56,7 @@ FINANCIAL_STATEMENT_BLOCK_HEADING = "[EXTRACTED FINANCIAL STATEMENTS]"
 PROPOSAL_BLOCK_HEADING = "[EXTRACTED CREDIT APPLICATION]"
 CREDIT_NEED_BLOCK_HEADING = "[CREDIT NEED CALCULATION]"
 CIC_S10A_BLOCK_HEADING = "[EXTRACTED CIC S10A REPORT]"
-CIC_R21_BLOCK_HEADING = "[EXTRACTED CIC R21 REPORT]"
+CIC_R20_BLOCK_HEADING = "[EXTRACTED CIC R20 REPORT]"
 SITEVISIT_BLOCK_HEADING = "[EXTRACTED SITE VISIT REPORT]"
 LEDGER_BLOCK_HEADING = "[EXTRACTED DETAIL LEDGER]"
 DEBT_CHART_TITLE = "Diễn biến dư nợ và doanh thu VAT 12 tháng gần nhất"
@@ -340,16 +340,16 @@ def _build_cic_s10a_structured_block(
     )
 
 
-def _build_cic_r21_structured_block(
+def _build_cic_r20_structured_block(
     selected: list[ClassifiedDocument],
 ) -> str:
-    """Render the extracted CIC R20/R21 collateral records for the prompt."""
+    """Render the extracted CIC R20 collateral records for the prompt."""
 
     return _render_structured_records(
-        selected, "is_cic_r21", "cic_r21_extraction",
-        CIC_R21_BLOCK_HEADING,
+        selected, "is_cic_r20", "cic_r20_extraction",
+        CIC_R20_BLOCK_HEADING,
         [
-            "Read from the CIC collateral report (form R20/R21): which lenders "
+            "Read from the CIC collateral report (form R20): which lenders "
             "hold security, and each pledged asset under that lender.",
             "UNITS: \"gia_tri_trieu_vnd\" is already in đồng despite the field "
             "name (the printed unit was triệu đồng).",

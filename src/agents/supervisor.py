@@ -50,7 +50,7 @@ from src.agents.documents.document_matrix import (
     get_type,
     load_matrix,
     is_financial_statement_type,
-    is_cic_r21_type,
+    is_cic_r20_type,
     is_sitevisit_type,
     is_ledger_type,
     is_cic_s10a_type,
@@ -69,9 +69,9 @@ from src.agents.extraction.cic_s10a_extraction import (
     build_cic_s10a_extraction_chain,
     extract_cic_s10a_structured_data,
 )
-from src.agents.extraction.cic_r21_extraction import (
-    build_cic_r21_extraction_chain,
-    extract_cic_r21_structured_data,
+from src.agents.extraction.cic_r20_extraction import (
+    build_cic_r20_extraction_chain,
+    extract_cic_r20_structured_data,
 )
 from src.agents.extraction.sitevisit_extraction import (
     build_sitevisit_extraction_chain,
@@ -187,16 +187,16 @@ EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
         extra_consumers=("CREDIT_PROPOSAL_AGENT",),
     ),
     ExtractionPass(
-        label="CIC R21",
-        tag="CIC R21",
-        flag_attr="is_cic_r21",
-        result_attr="cic_r21_extraction",
-        error_attr="cic_r21_extraction_error",
-        llm_attr="cic_r21_extraction_llm",
-        build_chain=build_cic_r21_extraction_chain,
-        extract=extract_cic_r21_structured_data,
-        build_block=prompt_blocks._build_cic_r21_structured_block,
-        heading=prompt_blocks.CIC_R21_BLOCK_HEADING,
+        label="CIC R20",
+        tag="CIC R20",
+        flag_attr="is_cic_r20",
+        result_attr="cic_r20_extraction",
+        error_attr="cic_r20_extraction_error",
+        llm_attr="cic_r20_extraction_llm",
+        build_chain=build_cic_r20_extraction_chain,
+        extract=extract_cic_r20_structured_data,
+        build_block=prompt_blocks._build_cic_r20_structured_block,
+        heading=prompt_blocks.CIC_R20_BLOCK_HEADING,
         json_agents=("CREDIT_RELATIONSHIP_AGENT",),
     ),
     ExtractionPass(
@@ -859,7 +859,7 @@ class Supervisor:
             is_financial_statement = is_financial_statement_type(document_type)
             is_proposal = is_proposal_type(document_type)
             is_cic_s10a = is_cic_s10a_type(document_type)
-            is_cic_r21 = is_cic_r21_type(document_type)
+            is_cic_r20 = is_cic_r20_type(document_type)
             is_sitevisit = is_sitevisit_type(document_type)
             is_ledger = is_ledger_type(document_type)
             steps.append(
@@ -901,7 +901,7 @@ class Supervisor:
                     is_financial_statement=is_financial_statement,
                     is_proposal=is_proposal,
                     is_cic_s10a=is_cic_s10a,
-                    is_cic_r21=is_cic_r21,
+                    is_cic_r20=is_cic_r20,
                     is_sitevisit=is_sitevisit,
                     is_ledger=is_ledger,
                 )
@@ -1589,7 +1589,7 @@ class Supervisor:
         financial_statement_block = json_blocks["BCTC"]
         proposal_block = json_blocks["Proposal"]
         cic_s10a_block = json_blocks["CIC S10A"]
-        cic_r21_block = json_blocks["CIC R21"]
+        cic_r20_block = json_blocks["CIC R20"]
         sitevisit_block = json_blocks["Sitevisit"]
         ledger_block = json_blocks["Ledger"]
         target_class = SPECIALIST_BY_AGENT.get(target_agent)
@@ -1622,7 +1622,7 @@ class Supervisor:
                 financial_statement_block,
                 proposal_block,
                 cic_s10a_block,
-                cic_r21_block,
+                cic_r20_block,
                 sitevisit_block,
                 ledger_block,
                 credit_need_block,
@@ -1646,7 +1646,7 @@ class Supervisor:
             - len(self.DOC_SECTION_HEADER)
             - len(proposal_block)
             - len(cic_s10a_block)
-            - len(cic_r21_block)
+            - len(cic_r20_block)
             - len(sitevisit_block)
             - len(ledger_block)
             - sum(len(block) for block in reference_sections)
@@ -1703,7 +1703,7 @@ class Supervisor:
         docs_text = self.DOC_BLOCK_SEPARATOR.join(blocks)
         proposal_section = f"{proposal_block}\n\n" if proposal_block else ""
         cic_s10a_section = f"{cic_s10a_block}\n\n" if cic_s10a_block else ""
-        cic_r21_section = f"{cic_r21_block}\n\n" if cic_r21_block else ""
+        cic_r20_section = f"{cic_r20_block}\n\n" if cic_r20_block else ""
         sitevisit_section = f"{sitevisit_block}\n\n" if sitevisit_block else ""
         ledger_section = f"{ledger_block}\n\n" if ledger_block else ""
         reference_text = "".join(f"{block}\n\n" for block in reference_sections)
@@ -1719,7 +1719,7 @@ class Supervisor:
                 f"{financial_statement_block}\n\n"
                 f"{proposal_section}"
                 f"{cic_s10a_section}"
-                f"{cic_r21_section}"
+                f"{cic_r20_section}"
                 f"{sitevisit_section}"
                 f"{ledger_section}"
                 f"{reference_text}"
