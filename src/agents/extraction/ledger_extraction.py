@@ -17,6 +17,16 @@ REQUIRED_TOP_LEVEL_KEYS = {"accounts"}
 LEDGER_BLOCK_CHAR_BUDGET = 40_000
 RESIDUAL_LABEL = "Các đối tác còn lại"
 LABEL_KEYS = ("counterparty_name", "counterparty_code", "item_name")
+# The label columns that must read as text. counterparty_code is left out: plenty
+# of accounting packages number their customers, and a code of digits is correct.
+NAME_KEYS = ("counterparty_name", "item_name")
+# Hyphen, en dash, em dash: how a ledger prints an empty cell.
+DASHES = {"-", "–", "—"}
+# A group subtotal ("Cộng nhóm") has to be told from a counterparty whose name
+# opens with "Công ty", and the two are the SAME STRING once normalize_text
+# strips the accents — both become "cong". So this one comparison keeps its
+# accents and does its own lowercasing.
+TOTAL_ROW_PREFIXES = {"tổng", "cộng", "total", "sum"}
 
 def _label_positions(columns: list[str]) -> list[int]:
     """Indexes of the text columns, in the order they appear."""
@@ -25,8 +35,6 @@ def _label_positions(columns: list[str]) -> list[int]:
 
 TOTAL_ROW_NAMES = {"tong", "tong cong", "cong", "total", "sum"}
 TOP_ROWS = 5
-# Below this, a coincidence with the worked example means nothing.
-EXAMPLE_FIGURE_FLOOR = 1_000_000
 TOP_ROW_CRITERIA: dict[str, tuple[str, ...]] = {
     "receivable": ("debit_movement", "closing_debit", "closing_credit"),
     "payable": ("credit_movement", "closing_debit", "closing_credit"),
@@ -52,16 +60,16 @@ The input is a JSON array, one object per sheet:
 Stay inside each object. NEVER take a figure from one file and file it under
 another.
 
-YOU ARE THE SOURCE OF EVERY NUMBER in the record. No program re-reads the file to
-correct you. Copy each figure digit for digit as printed.
+YOU DO NOT COPY FIGURES. A program reads them off the sheet itself. Your job is
+to say WHAT each sheet is and WHICH PRINTED COLUMN holds which field; it does the
+arithmetic and the ranking from there. So never add anything up, and never write
+a number that is not a date or a column letter.
 
 RETURN ONE ENTRY FOR EVERY SHEET. Work through the whole array; do not stop early
 and do not merge two sheets unless they are the same account AND the same period.
 A sheet you cannot place still has to be named in "extraction_notes" — dropping
 one in silence is the worst failure here, because the record still looks complete
 while half the ledger is gone.
-
-COPY EVERY DETAIL ROW of each sheet. Do not sample, do not summarise.
 
 ════ OUTER FRAME ════
 {{"accounts": {{...}}, "unmapped_columns": [], "extraction_notes": []}}
@@ -149,7 +157,7 @@ balances together. Several sheets with the SAME account AND the SAME period merg
 into one entry: Vietnamese ledgers often split one account across sheets by month
 or by product group.
 
-════ EACH ENTRY IN "accounts" — EXACTLY 8 KEYS ════
+════ EACH ENTRY IN "accounts" — EXACTLY 5 KEYS ════
 "category"       one of: cash receivable other_receivable inventory
                  fixed_asset payable other_payable borrowing equity unknown
                  Prefer "unknown" over a guess: an analyst can read an unlabelled
@@ -159,27 +167,20 @@ or by product group.
                  the sheet names that fed this entry, EXACTLY as printed on the
                  tab — "P.TRA KHAC", "TK VAY", "NXT". A list, because several
                  sheets of one account and one period merge into a single entry.
-                 Write [] for a .csv, which has no sheet.
+                 Write [] for a .csv, which has no sheet. THE PROGRAM READS THE
+                 FIGURES OFF THE SHEET YOU NAME HERE, so a wrong name here puts
+                 another account's money under this one.
 "period"         {{"from","to"}} — see below.
-"totals"         {{field: number}} — the total for the WHOLE account, across
-                 every detail row, not only the ones you return. This is the
-                 denominator the report divides by to state a counterparty's
-                 share, so a total covering only the rows you kept is wrong.
-                 FILL IT COLUMN BY COLUMN, not row by row. For each column: copy
-                 the figure from the printed "Tổng cộng" row if that cell holds
-                 one; where that cell is BLANK, add the rows up yourself.
-                 A printed total row can stop short. One sheet printed its
-                 totals as far as "Dư nợ cuối kỳ" and left "Dư có cuối kỳ"
-                 empty, while a detail row below it carried 96,735,674,467 —
-                 copied whole, that gives a denominator of 0 for a column that
-                 has money in it, and every share computed from it is nonsense.
-                 NEVER write 0 for a column whose detail rows are not all zero.
-"item_count"     how many detail rows the SHEET holds — not len(items). It tells
-                 the reader the returned rows are 5 of 143.
-"item_columns"   the field names of a detail row, in the order the values come.
-"rankings"       a LIST of {{"sorted_by": "<column>", "items": [rows]}} — one
-                 entry per column listed for this category, each holding that
-                 column's top 5. See "WHICH ROWS TO RETURN".
+"columns"        {{canonical field: column letter}} — the heart of your answer.
+                 The first line of each sheet is its Excel column letters. Say
+                 which letter each canonical field is printed in:
+                     {{"counterparty_name": "C", "closing_debit": "H"}}
+                 A letter, in quotes. Not the heading text, not a number, not a
+                 range. Map only the columns this sheet actually prints; leave a
+                 field out rather than guess at it.
+                 Headings can stack two rows deep, so the same word may head four
+                 different columns — read DOWN from the letter to the figures
+                 below it to be sure which one you are naming.
 
 ════ "period" ════
 "from"/"to"    ISO "YYYY-MM-DD", read from the banner line above the table.
@@ -192,89 +193,6 @@ Common phrasings and how they expand:
     "Tháng 12 năm 2018"                      -> 2018-12-01 / 2018-12-31
 If no line states a period, leave both "" — do NOT infer one from a file name
 that merely contains a year.
-
-════ WHICH ROWS TO RETURN — "rankings" ════
-Return the LARGEST rows, not all of them. The report lists at most five
-counterparties or items per section, so everything past that is paid for and
-never read.
-
-Different sections rank by different columns, and one account is asked for under
-several of them. So an account does NOT come back with one list of rows. It comes
-back with ONE SEPARATE LIST PER COLUMN, each labelled with the column it was
-sorted by. Here is which columns each category gets a list for:
-
-<<TOP_ROW_CRITERIA_TABLE>>
-
-Build each list on its own, and do NOT merge them:
-
-  1. Take the column named on the line for this account's category.
-  2. Sort EVERY detail row of the sheet by that column, largest first, by
-     ABSOLUTE value — so a large credit balance is not sorted below a small
-     debit one.
-  3. Keep the first 5. A sheet with fewer than 5 detail rows: keep all of them.
-  4. Write {{"sorted_by": "<that column name>", "items": [ ...those rows... ]}}.
-  5. Repeat from step 1 for the next column on the line.
-
-A counterparty that leads two of the lists APPEARS IN BOTH, with the same figures
-in both. Do not remove it from one of them, and do not try to combine the lists
-into a single de-duplicated list — the report reads one list per section and each
-section needs its own order.
-
-"sorted_by" must be one of the names in "item_columns", spelled identically.
-
-"totals" still covers the WHOLE account and "item_count" still counts the WHOLE
-sheet, no matter how few rows the lists hold.
-
-════ THE ROWS INSIDE "items" — THE EASIEST PART TO GET WRONG ════
-Name the columns ONCE per account in "item_columns", then give each detail row
-as an ARRAY of values in that exact order. Never repeat the field names on a row.
-The same "item_columns" governs the rows of EVERY list in "rankings".
-
-Debt sheets (receivables, payables, borrowings) — the CODE and the NAME are
-SEPARATE COLUMNS. A live run put "HSCANTHO" where the counterparty name belonged
-and the row became unreadable as either:
-
-"item_columns": ["counterparty_code","counterparty_name","opening_debit",
-                 "opening_credit","debit_movement","credit_movement","closing_debit"],
-"items": [["MAU01","CÔNG TY MẪU MỘT",0,0,333333333,222222222,0],
-          ["MAU02","CÔNG TY MẪU HAI",111111111,0,555555555,666666666,0]]
-
-Stock sheets (nhập xuất tồn) use their own column set:
-
-"item_columns": ["item_name","opening_quantity","opening_value",
-                 "inflow_quantity","inflow_value"],
-"items": [["Mặt hàng mẫu A",11,111111111,33,333333333]]
-
-EVERY ROW MUST HAVE EXACTLY len(item_columns) VALUES. A short row shifts every
-value after the gap into the wrong column, and the JSON stays valid while the
-figures stop meaning anything. If a column has no value for a row, write "" for
-a text column and 0 for a number — never leave it out.
-
-If the file has no code column, put "" in the counterparty_code position and
-keep the column. Never put a code in the name position or a name in the code
-position.
-
-Numbers are WHOLE ĐỒNG: no separators, no unit, no brackets.
-    right: 111111111
-    wrong: "111.111.111"   0,11 tỷ   (111111111)
-Negatives take a minus sign. An empty cell or a dash is 0.
-
-A PRINTED TOTAL ROW ("Tổng", "Tổng cộng", "Cộng", "Total") IS NOT A DETAIL ROW:
-keep it out of "items" and use it to fill "totals" instead. It is the account's
-own figure for every row including the ones you are not returning, which is
-exactly what "totals" needs.
-
-A TOTAL ROW IS IDENTIFIED BY ITS LABEL, NEVER BY ITS FIGURES. Two traps:
-
-* It is often printed ABOVE the detail rows, directly under the headings — do
-  not assume it sits at the bottom.
-* A detail row may carry the SAME amount as the total. When one counterparty
-  holds nearly the whole balance, its row and the total row read alike; the one
-  with a counterparty name is a detail row and MUST be kept. Dropping it loses
-  the largest position in the account.
-
-Every row that names a counterparty or an item is a detail row. Count them: your
-"item_count" must equal the number of named rows in the sheet, not fewer.
 
 ════ CANONICAL FIELD NAMES — TWO SETS, NEVER MIXED ════
 Debt (receivable, payable, borrowing):
@@ -296,81 +214,47 @@ measure underneath it:
     Loại xe | Số lượng | Giá trị  | Số lượng | Giá trị  | ...
 
 Join them top-to-bottom before mapping: "Dư đầu" + "Số lượng" -> opening_quantity,
-"Nhập vào" + "Giá trị" -> inflow_value. The joined result shows up as the field
-name in "item_columns" — a stock sheet whose headers were read correctly ends up
-with opening_quantity, opening_value, inflow_quantity … in there. Two header rows
-are a normal layout, not a reason to give up on the sheet.
+"Nhập vào" + "Giá trị" -> inflow_value. A stock sheet read correctly comes back
+with opening_quantity, opening_value, inflow_quantity … each against its own
+letter. Two header rows are a normal layout, not a reason to give up on a sheet.
 
 ════ WORKED EXAMPLE (one debt entry, one stock entry) ════
-EVERY FIGURE BELOW IS FAKE. The repeated digits (111.111.111, 888.888.888) and the
-2019 period mark them as illustration. They show you the SHAPE. Copying any of
-them into your answer hands the reader another company's balance sheet, and a
-program checks for exactly these numbers and will say so.
+The letters below stand for a sheet whose first line reads "A B C D E F G H I".
+Yours will differ — read them off the sheet in front of you.
 {{
   "accounts": {{
     "131@20190101-20191231": {{
       "category": "receivable",
       "code_source": "convention",
       "source_sheet_name": ["TK_131"],
-      "period": {{
-        "from": "2019-01-01",
-        "to": "2019-12-31"
-      }},
-      "totals": {{
-        "opening_debit": 111111111,
-        "opening_credit": 444444444,
-        "debit_movement": 888888888,
-        "credit_movement": 888888888,
-        "closing_debit": 222222222,
-        "closing_credit": 0
-      }},
-      "item_count": 2,
-      "item_columns": ["counterparty_code","counterparty_name","opening_debit","opening_credit","debit_movement","credit_movement","closing_debit"],
-      "rankings": [
-        {{"sorted_by": "debit_movement", "items": [
-          ["MAU02","CÔNG TY MẪU HAI",0,444444444,555555555,666666666,0],
-          ["MAU01","CÔNG TY MẪU MỘT",111111111,0,333333333,222222222,222222222]
-        ]}},
-        {{"sorted_by": "closing_debit", "items": [
-          ["MAU01","CÔNG TY MẪU MỘT",111111111,0,333333333,222222222,222222222],
-          ["MAU02","CÔNG TY MẪU HAI",0,444444444,555555555,666666666,0]
-        ]}},
-        {{"sorted_by": "closing_credit", "items": [
-          ["MAU01","CÔNG TY MẪU MỘT",111111111,0,333333333,222222222,222222222],
-          ["MAU02","CÔNG TY MẪU HAI",0,444444444,555555555,666666666,0]
-        ]}}
-      ]
+      "period": {{"from": "2019-01-01", "to": "2019-12-31"}},
+      "columns": {{
+        "counterparty_code": "B",
+        "counterparty_name": "C",
+        "opening_debit": "D",
+        "opening_credit": "E",
+        "debit_movement": "F",
+        "credit_movement": "G",
+        "closing_debit": "H",
+        "closing_credit": "I"
+      }}
     }},
     "156@20190101-20191231": {{
       "category": "inventory",
       "code_source": "convention",
       "source_sheet_name": ["NXT"],
-      "period": {{
-        "from": "2019-01-01",
-        "to": "2019-12-31"
-      }},
-      "totals": {{
-        "opening_quantity": 55,
-        "opening_value": 555555555,
-        "inflow_quantity": 88,
-        "inflow_value": 888888888,
-        "outflow_quantity": 88,
-        "outflow_value": 888888888,
-        "closing_quantity": 55,
-        "closing_value": 555555555
-      }},
-      "item_count": 2,
-      "item_columns": ["item_name","opening_quantity","opening_value","inflow_quantity","inflow_value","outflow_quantity","outflow_value","closing_quantity","closing_value"],
-      "rankings": [
-        {{"sorted_by": "outflow_value", "items": [
-          ["Mặt hàng mẫu B",44,444444444,55,555555555,66,666666666,33,333333333],
-          ["Mặt hàng mẫu A",11,111111111,33,333333333,22,222222222,22,222222222]
-        ]}},
-        {{"sorted_by": "closing_value", "items": [
-          ["Mặt hàng mẫu B",44,444444444,55,555555555,66,666666666,33,333333333],
-          ["Mặt hàng mẫu A",11,111111111,33,333333333,22,222222222,22,222222222]
-        ]}}
-      ]
+      "period": {{"from": "2019-01-01", "to": "2019-12-31"}},
+      "columns": {{
+        "item_name": "A",
+        "opening_quantity": "B",
+        "opening_value": "C",
+        "inflow_quantity": "D",
+        "inflow_value": "E",
+        "outflow_quantity": "F",
+        "outflow_value": "G",
+        "closing_quantity": "H",
+        "closing_value": "I"
+      }}
     }}
   }},
   "unmapped_columns": [],
@@ -505,34 +389,6 @@ def fit_to_budget(
 
 # ── The pass itself: fence every file, one call, one shared record ─────────
 
-def _render_criteria_table() -> str:
-    """The criteria table as prompt text, grouped by the columns they share.
-
-    Written out of TOP_ROW_CRITERIA rather than alongside it: the model ranks by
-    what this table says and _note_slice_problems checks against the dict, so two
-    hand-kept copies would let a category be graded by a rule it was never given.
-    """
-
-    grouped: dict[tuple[str, ...], list[str]] = {}
-    for category, columns in TOP_ROW_CRITERIA.items():
-        if not category:  # the fallback entry has no name to show the model
-            continue
-        grouped.setdefault(columns, []).append(category)
-    names = [", ".join(cats) for cats in grouped.values()]
-    width = max(len(n) for n in names)
-    return "\n".join(
-        f"  {name:<{width}} : {len(columns)} list"
-        f"{'s' if len(columns) > 1 else ''} — {', '.join(columns)}"
-        for name, columns in zip(names, grouped)
-    )
-
-
-LEDGER_EXTRACTION_SYSTEM_PROMPT = LEDGER_EXTRACTION_SYSTEM_PROMPT.replace(
-    "<<TOP_ROW_CRITERIA_TABLE>>", _render_criteria_table()
-)
-assert "<<TOP_ROW_CRITERIA_TABLE>>" not in LEDGER_EXTRACTION_SYSTEM_PROMPT
-
-
 def build_ledger_extraction_chain(llm: Any):
     """Build the JSON-output extraction chain for detail-ledger workbooks."""
 
@@ -645,279 +501,6 @@ def sheet_inventory(documents: list[tuple[str, str, str]]) -> list[str]:
     ]
 
 
-def _drop_total_rows(record: dict[str, Any]) -> None:
-    """Remove any printed total row the model left among the detail rows.
-
-    "totals" already holds those figures, so a row named "Tổng" sitting in
-    "items" is the same money twice — and it reads as an ordinary counterparty
-    to everything downstream, including ``fit_to_budget``'s aggregate row.
-    Rewrites ``item_count`` alongside, because the two disagreeing is worse than
-    either being wrong on its own.
-    """
-
-    for account in (record.get("accounts") or {}).values():
-        if not isinstance(account, dict):
-            continue
-        label_at = _label_positions(account.get("item_columns") or [])
-        dropped_labels: set[str] = set()
-        for ranking in account.get("rankings") or []:
-            if not isinstance(ranking, dict):
-                continue
-            rows = ranking.get("items") or []
-            kept = []
-            for row in rows:
-                names = [
-                    normalize_text(str(row[i])) for i in label_at if i < len(row)
-                ]
-                hit = [n for n in names if n in TOTAL_ROW_NAMES]
-                if hit:
-                    dropped_labels.add(hit[0])
-                else:
-                    kept.append(row)
-            if len(kept) != len(rows):
-                ranking["items"] = kept
-        if dropped_labels:
-            # Decremented, not reassigned: item_count is the sheet's own detail
-            # row count and a ranking is only the top-N slice of it, so setting
-            # it to a list length would shrink the sheet to the size of an
-            # excerpt. A printed total was never a detail row, so it comes off.
-            declared = account.get("item_count")
-            longest = max((len(r.get("items") or [])
-                           for r in (account.get("rankings") or [])
-                           if isinstance(r, dict)), default=0)
-            if isinstance(declared, int):
-                account["item_count"] = max(longest, declared - len(dropped_labels))
-
-
-def _example_figures() -> set[float]:
-    """Money-scale numbers the worked example prints, read from the prompt itself.
-
-    Parsed rather than listed so the two cannot drift: change a figure in the
-    example and this follows. Only values at or above EXAMPLE_FIGURE_FLOOR count —
-    a quantity of 11 in the example says nothing about a real sheet holding 11.
-    """
-
-    text = LEDGER_EXTRACTION_SYSTEM_PROMPT.replace("{{", "{").replace("}}", "}")
-    start = text.find('{\n  "accounts"')
-    end = text.find("Return EXACTLY this schema", start)
-    if start < 0 or end < 0:
-        return set()
-    found: set[float] = set()
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for value in node:
-                walk(value)
-        elif isinstance(node, (int, float)) and not isinstance(node, bool):
-            if abs(node) >= EXAMPLE_FIGURE_FLOOR:
-                found.add(float(node))
-
-    try:
-        walk(json.loads(text[start:end].strip()))
-    except json.JSONDecodeError:
-        return set()
-    return found
-
-
-def _note_copied_example(record: dict[str, Any]) -> None:
-    """Say so when the answer carries figures that came from the prompt.
-
-    A model under pressure transcribes the example instead of the file, and
-    nothing downstream can tell: the figures are well-formed, internally
-    consistent, and belong to somebody else. Haiku 4.5 did exactly this on a live
-    run, returning the example's "totals" verbatim.
-
-    This went unseen for as long as it did because the example used to be built
-    from the sample workbook, so on that dossier a copied answer and a correct
-    one were the same bytes. The example now prints repeated digits that no
-    ledger produces, which is what makes this check possible at all.
-
-    A note alone would leave the figure in the record for the report to print, so
-    the offending cells are blanked here as well: a column that reads as missing
-    is recoverable, a column carrying somebody else's balance is not.
-    """
-
-    figures = _example_figures()
-    if not figures:
-        return
-
-    def copied(value: Any) -> bool:
-        return (isinstance(value, (int, float)) and not isinstance(value, bool)
-                and float(value) in figures)
-
-    seen: dict[str, set[float]] = {}
-    for key, account in (record.get("accounts") or {}).items():
-        if not isinstance(account, dict):
-            continue
-        hits: set[float] = set()
-        totals = account.get("totals")
-        if isinstance(totals, dict):
-            for name, value in totals.items():
-                if copied(value):
-                    hits.add(float(value))
-                    totals[name] = None
-        for ranking in account.get("rankings") or []:
-            if not isinstance(ranking, dict):
-                continue
-            for row in ranking.get("items") or []:
-                if not isinstance(row, list):
-                    continue
-                for at, cell in enumerate(row):
-                    if copied(cell):
-                        hits.add(float(cell))
-                        row[at] = None
-        if hits:
-            seen[key] = hits
-    if not seen:
-        return
-    detail = "; ".join(
-        f"{key}: {', '.join(f'{v:,.0f}' for v in sorted(values)[:4])}"
-        for key, values in seen.items()
-    )
-    record.setdefault("extraction_notes", []).append(
-        "WARNING: figures from the prompt's worked example appear in this record "
-        f"— {detail}. Those numbers are illustration, not this customer's ledger, "
-        "so the cells holding them have been BLANKED rather than passed on. The "
-        "affected columns now read as missing, and every figure in the named "
-        "accounts should be treated as unverified until the source file is "
-        "checked by hand."
-    )
-
-
-def _note_slice_problems(record: dict[str, Any]) -> None:
-    """Check what stays true once each ranking is a top-N slice of one column.
-
-    ``item_count`` used to equal ``len(items)``, and comparing them caught a
-    reply cut off mid-array — ``JsonOutputParser`` repairs truncated JSON rather
-    than raising, so a cut answer arrives looking whole, and one live run had an
-    account declare 26 rows and carry 18. That comparison is now meaningless:
-    the two differ by design on every account with more than a handful of rows.
-
-    Five things still hold, and the first three only became checkable when each
-    list was cut down to a single criterion:
-
-    * every column named in ``TOP_ROW_CRITERIA`` for this category has a list,
-      and every list's ``sorted_by`` is a real column of ``item_columns``;
-    * each list is ordered by its own column, largest absolute value first;
-    * a counterparty appearing in two lists carries the same figures in both;
-    * a list holds at least ``TOP_ROWS`` rows whenever the sheet had that many —
-      the report asks for five, and fewer than five from a sheet that has them is
-      a failure, not a shorter answer;
-    * its column sums cannot exceed the account's own totals. A part is never
-      larger than the whole, so exceeding means either the wrong rows were kept
-      or ``totals`` is not the account's.
-
-    None of these notices a model that quietly picked the wrong five and ordered
-    them correctly. Nothing here can: that would need the rows it did not send.
-    """
-
-    problems = []
-    for key, account in (record.get("accounts") or {}).items():
-        if not isinstance(account, dict):
-            continue
-        columns = account.get("item_columns") or []
-        declared = account.get("item_count")
-        totals = account.get("totals") or {}
-        rankings = [r for r in (account.get("rankings") or []) if isinstance(r, dict)]
-
-        wanted = TOP_ROW_CRITERIA.get(account.get("category") or "", ())
-        got_by = [r.get("sorted_by") for r in rankings]
-        missing = [c for c in wanted if c not in got_by]
-        if missing:
-            problems.append(
-                f"{key}: missing ranking(s) for {', '.join(missing)} — expected "
-                f"{len(wanted)}, got {len(rankings)}"
-            )
-        for column in got_by:
-            if column not in columns:
-                problems.append(
-                    f"{key}: sorted_by {column!r} is not one of item_columns"
-                )
-
-        # Same counterparty, two lists, two sets of figures — one of them is a
-        # transcription the model invented on the second pass over the sheet.
-        label_at = _label_positions(columns)
-        seen: dict[str, tuple[Any, ...]] = {}
-        for ranking in rankings:
-            for row in ranking.get("items") or []:
-                name = "|".join(str(row[i]) for i in label_at if i < len(row))
-                if not name:
-                    continue
-                figures = tuple(row)
-                if name in seen and seen[name] != figures:
-                    problems.append(
-                        f"{key}: rows for {name!r} disagree between rankings"
-                    )
-                seen.setdefault(name, figures)
-
-        for ranking in rankings:
-            column = ranking.get("sorted_by")
-            rows = ranking.get("items") or []
-            label = f"{key}[{column}]"
-
-            if column in columns:
-                at = columns.index(column)
-                # A blank in the ranked column is a figure _note_copied_example
-                # took out, not a mis-sort: _row_value reads it as zero, and every
-                # row below it would then look out of order. Saying so twice about
-                # one problem buries the sentence that names the real cause.
-                blanked = any(at < len(row) and row[at] is None for row in rows)
-                values = [_row_value(row, at) for row in rows]
-                if not blanked and any(a < b for a, b in zip(values, values[1:])):
-                    problems.append(
-                        f"{label}: rows are not sorted by {column} — "
-                        f"{[f'{v:,.0f}' for v in values[:6]]}"
-                    )
-
-            if isinstance(declared, int) and len(rows) < min(declared, TOP_ROWS):
-                problems.append(
-                    f"{label}: sheet has {declared} rows but only {len(rows)} "
-                    "came back"
-                )
-
-            for index, name in enumerate(columns):
-                cap = totals.get(name)
-                if not isinstance(cap, (int, float)) or isinstance(cap, bool):
-                    continue
-                got = sum(
-                    row[index] for row in rows
-                    if index < len(row)
-                    and isinstance(row[index], (int, float))
-                    and not isinstance(row[index], bool)
-                )
-                # Rounding in the printed total is normal; a slice genuinely
-                # bigger than its account is not.
-                if abs(got) > abs(cap) + 1:
-                    # A zero total under non-zero rows is not a slice that grew
-                    # too large — it is a column the printed "Tổng cộng" row left
-                    # blank and the model copied as zero. Worth saying apart,
-                    # because the fix is different and the consequence is worse:
-                    # every share divided by it is meaningless.
-                    if not cap:
-                        problems.append(
-                            f"{label}.{name}: total is 0 while rows carry "
-                            f"{got:,.0f} — the printed total row most likely left "
-                            f"this column blank, so it is NOT a usable denominator"
-                        )
-                    else:
-                        problems.append(
-                            f"{label}.{name}: rows sum to {got:,.0f}, above the "
-                            f"account total of {cap:,.0f}"
-                        )
-
-    if problems:
-        record["extraction_notes"].append(
-            "WARNING: the top-row selection does not hold together — "
-            + "; ".join(problems)
-            + ". Either the model kept the wrong rows, or its answer was cut "
-            "short (raise the pass's max_tokens_env, e.g. LLM_LEDGER_MAX_TOKENS; "
-            "run testing/probe_max_tokens.py for the model's real ceiling)."
-        )
-
-
 def fill_source_files(record: dict[str, Any], documents) -> None:
     """Put back the per-account ``source_files`` the model no longer writes.
 
@@ -970,6 +553,289 @@ def fill_source_files(record: dict[str, Any], documents) -> None:
         )
 
 
+TRUNCATION_MARK = "... truncated after"
+
+
+def _parse_cell(cell: str) -> float | None:
+    """One printed cell as a number, or None where the cell holds no figure.
+
+    A ledger mixes both spellings inside one row: sheet PTHU_KHAC prints
+    "126.499.849.381" next to a bare "36961296987". Dots are thousands
+    separators here, never a decimal point — Vietnamese accounting software
+    writes whole đồng.
+
+    A dash is the printed form of NOTHING, not of zero, and is kept apart from
+    it: a column of dashes must not read as a column that was summed and came to
+    zero. That distinction is what lets the caller tell "no figure on this row"
+    from "this row is genuinely nil".
+    """
+
+    text = (cell or "").strip().replace(" ", "")
+    if not text or text in DASHES:
+        return None
+    bracketed = text.startswith("(") and text.endswith(")")
+    if bracketed:
+        text = text[1:-1]
+    if not re.fullmatch(r"-?\d{1,3}(\.\d{3})+|-?\d+", text):
+        return None
+    value = float(text.replace(".", ""))
+    return -value if bracketed else value
+
+
+def _sheet_grid(sheet: dict[str, str]) -> tuple[list[str], list[list[str]], bool]:
+    """A sheet's column letters, its remaining rows, and whether it was cut short.
+
+    The letters are the first line of the TSV, put there by ``_grid_to_tsv`` and
+    kept in step by ``_without_row_counter`` when it drops an "Stt" column. They
+    are the addressing scheme the model maps onto, and the only unambiguous one:
+    sheet NXT stacks its headings two deep, so the text "Số lượng" names four
+    different columns while the letter names exactly one.
+    """
+
+    lines = sheet.get("content", "").splitlines()
+    truncated = any(line.lstrip().startswith(TRUNCATION_MARK) for line in lines)
+    rows = [line.split("\t") for line in lines
+            if not line.lstrip().startswith(TRUNCATION_MARK)]
+    if not rows:
+        return [], [], truncated
+    return [c.strip() for c in rows[0]], rows[1:], truncated
+
+
+def _detail_rows(
+    rows: list[list[str]],
+    order: list[str],
+    at: dict[str, int],
+    label_fields: list[str],
+) -> tuple[list[list[Any]], list[float | None], list[str]]:
+    """Split a sheet into its detail rows, its printed total row, and suspects.
+
+    A row is a detail row when it names something, is not the printed total, and
+    carries at least one figure in a mapped column. Banner and heading rows fall
+    out on their own: they hold text but no figures in a money column, so nothing
+    has to know what a banner looks like.
+
+    The total row is recognised by an EXACT label match, never by a prefix. One
+    of this dossier's own counterparties is "Công ty Cổ phần cộng đồng xe tải
+    Việt Nam" — a prefix rule would delete the largest position in the account
+    and quietly shrink its total. Rows that merely START with a total word are
+    returned as suspects instead, for the caller to name rather than drop.
+    """
+
+    money = [f for f in order if f not in label_fields]
+    detail: list[list[Any]] = []
+    printed: list[float | None] = []
+    suspects: list[str] = []
+    for row in rows:
+        cell = {f: (row[at[f]] if at[f] < len(row) else "") for f in order}
+        figures = {f: _parse_cell(cell[f]) for f in money}
+        if all(v is None for v in figures.values()):
+            continue
+        names = [cell[f].strip() for f in label_fields if cell[f].strip()]
+        marks = [normalize_text(n) for n in names]
+        if any(m in TOTAL_ROW_NAMES for m in marks):
+            if not printed:
+                printed = [figures[f] for f in money]
+            continue
+        if not names:
+            continue
+        if any(n.lower().split()[0] in TOTAL_ROW_PREFIXES for n in names):
+            suspects.append(names[-1])
+        # A dash or an empty cell prints a nil balance, and the ledger's own
+        # total row counts it as one. Writing null here instead would put holes
+        # through the report that read as "not available" rather than "zero".
+        detail.append([
+            cell[f].strip() if f in label_fields else (figures[f] or 0)
+            for f in order
+        ])
+    return detail, printed, suspects
+
+
+def build_account_rows(record: dict[str, Any], sheets: list[dict[str, str]]) -> None:
+    """Fill each account's figures from the sheet, instead of asking the model.
+
+    The model reports which printed column is which canonical field; the
+    arithmetic is done here. That split follows what each side can actually be
+    held to. Adding 143 rows and returning 5 of them is a claim nothing can
+    check, and both ways it fails were seen in production: with no printed
+    "Tổng cộng" row the model would not add the rows up at all, and with two
+    periods in one call it filled one period's totals from the other file's
+    sheet. Naming the column a heading sits in is a claim the printed total row
+    can be checked against, column by column.
+
+    The account record keeps the shape the report already reads — "totals",
+    "item_count", "item_columns", "rankings" — so nothing downstream changes.
+    Only the author does.
+    """
+
+    by_name: dict[str, list[dict[str, str]]] = {}
+    for sheet in sheets:
+        by_name.setdefault(
+            normalize_text(sheet.get("sheet_name") or sheet.get("filename", "")), []
+        ).append(sheet)
+    lone = sheets[0] if len(sheets) == 1 else None
+
+    problems: list[str] = []
+    for key, account in (record.get("accounts") or {}).items():
+        if not isinstance(account, dict):
+            continue
+        columns = account.pop("columns", None)
+        if not isinstance(columns, dict) or not columns:
+            problems.append(f"{key}: no column map came back, so no figure could be read")
+            account.update(totals={}, item_count=0, item_columns=[], rankings=[])
+            continue
+
+        named = account.get("source_sheet_name") or []
+        if isinstance(named, str):
+            named = [named]
+        found = [s for n in named for s in by_name.get(normalize_text(str(n)), [])]
+        # A .csv names no sheet. Only when the account named none at all — an
+        # account naming a sheet that matched nothing is a mis-filing, and
+        # handing it the one sheet present would read figures off the wrong page.
+        if not found and not named and lone is not None:
+            found = [lone]
+        if not found:
+            problems.append(
+                f"{key}: sheet {named or '(none named)'} matched nothing that was "
+                "read, so no figure could be taken from it"
+            )
+            account.update(totals={}, item_count=0, item_columns=[], rankings=[])
+            continue
+
+        order = list(columns)
+        label_fields = [f for f in order if f in LABEL_KEYS]
+        # Two fields on one letter is the one wrong map arithmetic can see. A
+        # straight SWAP between two money columns cannot be caught here and is
+        # not worth pretending about: both sides of the reconciliation below
+        # would read the same wrong column and agree with each other. Telling
+        # "Phát sinh nợ" from "Dư nợ cuối kỳ" is reading, and reading is the
+        # model's half of this job.
+        shared: dict[str, list[str]] = {}
+        for field in order:
+            shared.setdefault(str(columns[field]).strip().upper(), []).append(field)
+        for letter, fields in shared.items():
+            if len(fields) > 1:
+                problems.append(
+                    f"{key}: {' and '.join(fields)} are all mapped to column "
+                    f"{letter} — at most one field can be printed in one column"
+                )
+        money = [f for f in order if f not in label_fields]
+        detail: list[list[Any]] = []
+        printed: list[float | None] = []
+        cut = False
+        for sheet in found:
+            letters, rows, truncated = _sheet_grid(sheet)
+            cut = cut or truncated
+            index = {letter: position for position, letter in enumerate(letters)}
+            at = {f: index.get(str(columns[f]).strip().upper(), -1) for f in order}
+            missing = [f for f in order if at[f] < 0]
+            if missing:
+                problems.append(
+                    f"{key}: column letter(s) "
+                    + ", ".join(f"{f}={columns[f]!r}" for f in missing)
+                    + f" are not in sheet {sheet.get('sheet_name') or sheet.get('filename')}"
+                )
+                continue
+            got, total_row, suspects = _detail_rows(rows, order, at, label_fields)
+            # A money field pointed at a column of names, or a name field pointed
+            # at a column of figures, shows up as soon as anything is read. Worth
+            # catching early because of what the second one does downstream: with
+            # the name field on a column of digits, the printed "Tổng cộng" row no
+            # longer looks like a total row, joins the detail rows, and doubles
+            # every figure in the account.
+            #
+            # Only NAME fields are held to this. A counterparty_code is often all
+            # digits, and grading it the same way would report a correct map.
+            # Measured against the column's filled cells, not against the rows
+            # kept: a bad map inflates the second number in step with the first,
+            # so the test disarms itself just as it is needed.
+            for field in order:
+                cells = [r[at[field]].strip() for r in rows if at[field] < len(r)]
+                # A dash is the printed form of nothing, so it says nothing about
+                # whether this column holds names or figures. Counting it as
+                # content puts it on the text side of the scale: TK_131's "Dư nợ
+                # cuối kỳ" is two figures and two dashes, which is enough to read
+                # as a column of words.
+                filled = [c for c in cells if c and c not in DASHES]
+                numeric = sum(1 for c in filled if _parse_cell(c) is not None)
+                if field in NAME_KEYS and numeric * 2 > len(filled):
+                    problems.append(
+                        f"{key}: {field} is mapped to column {columns[field]}, which "
+                        "holds figures rather than names"
+                    )
+                elif field not in label_fields and got and not numeric:
+                    problems.append(
+                        f"{key}: {field} is mapped to column {columns[field]}, which "
+                        "holds no figure at all"
+                    )
+            detail += got
+            if total_row and not printed:
+                printed = total_row
+            for name in suspects:
+                problems.append(
+                    f"{key}: row {name!r} reads like a subtotal but is counted as a "
+                    "detail row — if it is a group total its figures are counted twice"
+                )
+
+        account["item_columns"] = order
+        account["item_count"] = len(detail)
+
+        if cut:
+            # The reader stops at max_rows_per_sheet and says so. Summing what
+            # survived gives a total that is short by an unknown amount and looks
+            # exactly like a correct one, so the printed row is the only figure
+            # worth having here.
+            account["totals"] = {
+                f: printed[i] for i, f in enumerate(money)
+                if i < len(printed) and printed[i] is not None
+            }
+            problems.append(
+                f"{key}: the sheet was cut at the reader's row limit, so the rows "
+                "here are not all of them — totals are the printed total row only"
+                + ("" if printed else ", and the sheet printed none, so they are empty")
+            )
+        else:
+            account["totals"] = {
+                f: round(sum(row[order.index(f)] for row in detail
+                             if isinstance(row[order.index(f)], (int, float))))
+                for f in money
+            }
+            if printed:
+                for i, field in enumerate(money):
+                    if i >= len(printed) or printed[i] is None:
+                        continue
+                    got = account["totals"][field]
+                    if abs(printed[i] - got) > 1:
+                        problems.append(
+                            f"{key}.{field}: the sheet prints {printed[i]:,.0f} but its "
+                            f"rows add up to {got:,.0f} — one of them is not this "
+                            "column, so check the column letter"
+                        )
+            else:
+                problems.append(
+                    f"{key}: the sheet prints no total row, so the column map behind "
+                    "these totals was never checked against one"
+                )
+
+        rankings = []
+        for criterion in TOP_ROW_CRITERIA.get(account.get("category") or "", ()):
+            if criterion not in order:
+                continue
+            position = order.index(criterion)
+            rankings.append({
+                "sorted_by": criterion,
+                "items": sorted(detail, key=lambda r: _row_value(r, position),
+                                reverse=True)[:TOP_ROWS],
+            })
+        account["rankings"] = rankings
+
+    if problems:
+        record.setdefault("extraction_notes", []).append(
+            "WARNING: reading the sheets turned up problems — "
+            + "; ".join(problems[:10])
+            + "."
+        )
+
+
 def extract_ledger_batch(
     chain: Any,
     documents: list[tuple[str, str, str]],
@@ -1005,9 +871,7 @@ def extract_ledger_batch(
             f"sheet(s) were not sent: {', '.join(dropped[:10])}."
         )
 
-    _note_copied_example(record)
-    _note_slice_problems(record)
-    _drop_total_rows(record)
+    build_account_rows(record, sheets)
     fill_source_files(record, documents)
 
     expected = len(sheet_inventory(documents))
