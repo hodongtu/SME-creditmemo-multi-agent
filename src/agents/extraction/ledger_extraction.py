@@ -49,8 +49,28 @@ credit underwriting.
 The input is a JSON array, one object per sheet:
   [{{"filename": "...", "sheet_name": "...", "content": "<tab-separated grid>"}}]
 
-Stay inside each object. NEVER take a figure from one file and file it under
-another.
+ONE SHEET IS A SEALED BOX. Finish one object completely before you open the next
+one. While you are working on a sheet, the ONLY figures that exist are the ones
+inside that object's "content".
+
+- The only legitimate source for an account's figures is the sheet it names in
+  its own "source_sheet_name". There is no exception to this — not for a total
+  you cannot find, not for a column that looks empty, not for a sheet that seems
+  to be "the same account anyway".
+- TWO SHEETS OF TWO PERIODS LOOK ALMOST IDENTICAL: same columns, the same
+  counterparties in the same order, only the year differs. Taking one period's
+  totals for the other produces a record that is internally consistent and
+  entirely wrong, and NOTHING downstream can tell — the figures are well formed,
+  they add up against each other, and they belong to a different year of the
+  customer's life. This has happened on a live file.
+- BEFORE YOU WRITE ANY FIGURE, find it again in the "content" of the sheet you
+  are working on. Every figure you write must be there, character for character
+  — except the totals you added up yourself under HOW TO FILL "totals" below.
+  Cannot find it? Then it came from another sheet. Delete it and read again.
+- STUCK IS AN ANSWER. A sheet that will not yield a figure gets an empty value
+  and a line in "extraction_notes". An empty cell can be fixed by a human in a
+  minute; a cell holding another period's money cannot be fixed at all, because
+  nobody will know to look.
 
 YOU ARE THE SOURCE OF EVERY NUMBER in the record. No program re-reads the file to
 correct you. Copy each figure digit for digit as printed.
@@ -161,19 +181,9 @@ or by product group.
                  sheets of one account and one period merge into a single entry.
                  Write [] for a .csv, which has no sheet.
 "period"         {{"from","to"}} — see below.
-"totals"         {{field: number}} — the total for the WHOLE account, across
-                 every detail row, not only the ones you return. This is the
-                 denominator the report divides by to state a counterparty's
-                 share, so a total covering only the rows you kept is wrong.
-                 FILL IT COLUMN BY COLUMN, not row by row. For each column: copy
-                 the figure from the printed "Tổng cộng" row if that cell holds
-                 one; where that cell is BLANK, add the rows up yourself.
-                 A printed total row can stop short. One sheet printed its
-                 totals as far as "Dư nợ cuối kỳ" and left "Dư có cuối kỳ"
-                 empty, while a detail row below it carried 96,735,674,467 —
-                 copied whole, that gives a denominator of 0 for a column that
-                 has money in it, and every share computed from it is nonsense.
-                 NEVER write 0 for a column whose detail rows are not all zero.
+"totals"         {{field: number}} — one entry for EVERY column in
+                 "item_columns" that carries figures. See HOW TO FILL "totals"
+                 below; that section is the procedure, follow it step by step.
 "item_count"     how many detail rows the SHEET holds — not len(items). It tells
                  the reader the returned rows are 5 of 143.
 "item_columns"   the field names of a detail row, in the order the values come.
@@ -192,6 +202,63 @@ Common phrasings and how they expand:
     "Tháng 12 năm 2018"                      -> 2018-12-01 / 2018-12-31
 If no line states a period, leave both "" — do NOT infer one from a file name
 that merely contains a year.
+
+════ HOW TO FILL "totals" ════
+"totals" covers the WHOLE account — every detail row on the sheet, not the five
+you return. A total that covers only the rows you kept is wrong, and wrong in the
+direction nobody notices: every share computed from it comes out too large.
+
+STEP 1 — DOES THIS SHEET PRINT A TOTAL ROW?
+Find it by its LABEL ("Tổng", "Tổng cộng", "Cộng", "Total"), NEVER by its
+figures. Two things people get wrong here:
+  * It is often printed ABOVE the detail rows, right under the headings. Do not
+    assume it sits at the bottom.
+  * A row that names a counterparty is ALWAYS a detail row, even when its
+    figures match the total exactly — that happens when one counterparty holds
+    nearly the whole balance. Dropping it loses the largest position.
+
+STEP 2 — GO COLUMN BY COLUMN, NEVER ROW BY ROW.
+For each column in "item_columns" that carries figures:
+  * the total row has a figure in that column -> copy it, digit for digit;
+  * that cell is BLANK, or the sheet printed no total row at all -> add that one
+    column up yourself, by STEP 3.
+A PRINTED TOTAL ROW CAN STOP SHORT. One real sheet printed its totals as far as
+"Dư nợ cuối kỳ" and left "Dư có cuối kỳ" empty, while a detail row below carried
+77,777,777,777. Copying the row whole gave a denominator of 0 for a column with
+money in it, and every percentage computed from it was nonsense.
+
+STEP 3 — ADDING A COLUMN UP YOURSELF.
+This is ordinary arithmetic and you must actually do it. Do not estimate.
+  1. ONE COLUMN AT A TIME. Finish it before you start the next. Adding several
+     columns in parallel is where figures get swapped between them.
+  2. Go down EVERY detail row of the sheet, including the ones you will not
+     return in "rankings". Skip only the printed total row itself, and heading
+     or banner lines that carry no figures.
+  3. An empty cell or a dash counts as 0. A figure in brackets is negative.
+  4. ADD IN BLOCKS OF TEN. Total the first ten rows, write that subtotal down,
+     total the next ten, and so on; then add the subtotals together. A single
+     running total carried across 143 rows is the single most common way this
+     goes wrong.
+  5. Count the rows you added. That count must equal "item_count". If it does
+     not, you either skipped rows or counted the total row as a detail row —
+     start the column again.
+
+STEP 4 — CHECK EACH TOTAL BEFORE YOU WRITE IT. Three cheap tests:
+  * The total must be at least as large as the largest single row in that
+    column.
+  * The total must be at least as large as the five rows you return for that
+    column added together.
+  * The total may be 0 only if EVERY row in that column is 0. A column with
+    money in it and a total of 0 is a dead denominator: every percentage divided
+    by it is meaningless, and the report will print those percentages anyway.
+
+STEP 5 — NEVER DO ANY OF THESE.
+  * Never take a total from another sheet, another period, or another column.
+  * Never estimate, never round to a comfortable-looking number, never reuse a
+    figure because it "looks about right".
+  * Never leave a column out of "totals" just because it was hard to add. If you
+    genuinely cannot add it, say so in "extraction_notes" — name the account and
+    the column — rather than omitting it in silence.
 
 ════ WHICH ROWS TO RETURN — "rankings" ════
 Return the LARGEST rows, not all of them. The report lists at most five
@@ -258,6 +325,20 @@ Numbers are WHOLE ĐỒNG: no separators, no unit, no brackets.
     right: 111111111
     wrong: "111.111.111"   0,11 tỷ   (111111111)
 Negatives take a minus sign. An empty cell or a dash is 0.
+
+THE SAME AMOUNT REACHES YOU IN THREE SPELLINGS, because the reader prints each
+cell the way Excel displays it and the customer sets that per column. Tell the
+SEPARATOR from the DECIMAL POINT before you strip anything:
+    1.210.969.205      dots group thousands        -> 1210969205
+    1.210.969.204,91   dots group, COMMA decimal   -> 1210969204.91
+    1210969204.91      no grouping, DOT decimal    -> 1210969204.91
+The rule: whichever mark appears LAST and is followed by one or two digits is the
+decimal point; every other mark groups thousands. Dropping a comma decimal as if
+it grouped thousands multiplies the figure by a hundred.
+
+A MONEY CELL SHOWING "%" is a cell the customer formatted wrongly — 121.096.920.491%
+is not a percentage, it is 1210969204,91 with a percent format on it. Say so in
+"extraction_notes" and leave the field out rather than copy either reading.
 
 A PRINTED TOTAL ROW ("Tổng", "Tổng cộng", "Cộng", "Total") IS NOT A DETAIL ROW:
 keep it out of "items" and use it to fill "totals" instead. It is the account's
@@ -822,6 +903,27 @@ def _note_slice_problems(record: dict[str, Any]) -> None:
         declared = account.get("item_count")
         totals = account.get("totals") or {}
         rankings = [r for r in (account.get("rankings") or []) if isinstance(r, dict)]
+
+        # A column declared in "item_columns" but absent from "totals" has no
+        # denominator at all, and that reads downstream as an account with no
+        # figures in that column rather than as a failure. The zero-total check
+        # further down cannot see it: there is no key to find a zero in.
+        # Label columns are exempt — a counterparty name has no total.
+        absent = [
+            name for name in columns
+            if name not in LABEL_KEYS and name not in totals
+            and any(
+                isinstance(row[at], (int, float)) and not isinstance(row[at], bool)
+                for r in rankings
+                for row in (r.get("items") or [])
+                if (at := columns.index(name)) < len(row)
+            )
+        ]
+        if absent:
+            problems.append(
+                f"{key}: {', '.join(absent)} carry figures in the rows but have "
+                "no total, so nothing can be divided by them"
+            )
 
         wanted = TOP_ROW_CRITERIA.get(account.get("category") or "", ())
         got_by = [r.get("sorted_by") for r in rankings]
