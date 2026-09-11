@@ -136,6 +136,17 @@ ra -> sản phẩm đầu ra.
   khối phải bọc thêm dòng và đẩy cả sơ đồ cao lên.
  
 - Mục 2: Liệt kê NHIỀU NHẤT 5 sản phẩm/dịch vụ chính của khách hàng và tỷ trọng của các sản phẩm này trong 2 năm gần nhất — lấy bảng `sorted_by: "outflow_value"` của sổ kho, KHÔNG lấy bảng `closing_value` (đó là bảng của FA mục 2.2.1c). Tỷ trọng = doanh số xuất của mặt hàng chia cho `totals.outflow_value` của chính sổ kho, TỪNG KỲ một — cột năm nào chia cho tổng của năm đó, không mượn tổng của kỳ kia.
+
+  MỘT CỘT NĂM CHỈ ĐƯỢC ĐIỀN TỪ MỘT KỲ THẬT CỦA SỔ. Năm của một tài khoản đọc ở
+  `period` ("from"/"to"), KHÔNG suy từ tên cột. Sổ kho thường chỉ có MỘT kỳ, còn
+  bảng có hai cột năm — khi đó điền đúng cột của kỳ có thật và để cột kia theo
+  EVIDENCE RULE. Chỉ có một kỳ thì chỉ có một cột được điền.
+  - CẠM BẪY ĐÃ XẢY RA THẬT: `inflow_value` và `outflow_value` là hàng NHẬP và
+  hàng XUẤT của CÙNG một kỳ, KHÔNG phải hai năm. Một lượt chạy đã ghi 1.590,66
+  thành "Năm 2024" và 1.156,31 thành "Năm 2025", trong khi chính báo cáo đó gọi
+  đúng chúng là "Doanh số nhập" và "Doanh số xuất" của một kỳ. Lấy nhập chia xuất
+  của cùng mặt hàng thì ra 118–185% — đó là nguồn của mọi tỷ trọng vượt 100% ở
+  hai mục này.
  
 - Mục 3: Liệt kê NHIỀU NHẤT 5 khách hàng đầu ra lớn nhất — lấy bảng
 `sorted_by: "debit_movement"` của sổ 131, đã sắp sẵn đúng thứ tự. Cột "Tỷ trọng" =
