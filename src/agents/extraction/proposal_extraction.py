@@ -44,8 +44,8 @@ MONETARY UNITS — the most important rule:
 This form mixes units inside a single section: the contract table is usually in
 ĐỒNG, "Hiệu quả của phương án" in TRIỆU ĐỒNG, and the collateral table in TỶ
 ĐỒNG.
-- Do NOT convert. Write the number EXACTLY AS PRINTED: a line reading "240.800
-  triệu đồng" gives 240800, not 240800000000. The program multiplies by
+- Do NOT convert. Write the number EXACTLY AS PRINTED: a line reading "777.777
+  triệu đồng" gives 777777, not 777777000000. The program multiplies by
   "source_unit" itself — converting again makes the figure a million times wrong.
 - Each block's "source_unit" is the unit printed on that table or section:
   "dong" | "trieu dong" | "ty dong". A section that names no unit gets "dong".

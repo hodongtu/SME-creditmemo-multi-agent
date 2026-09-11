@@ -57,7 +57,7 @@ MONEY UNITS:
 - WRITE THE NUMBER AS PRINTED ON THE PAGE, with only the thousands separators
   removed. Never multiply into millions or billions, never convert units — the
   program does the conversion. A statement headed "Đơn vị tính: triệu đồng"
-  printing 240.800 returns 240800, NOT 240800000000.
+  printing 777.777 returns 777777, NOT 777777000000.
 - Keep the sign: negative for items shown negative or in parentheses.
 - Each statement's "source_unit" records the unit printed at the head of THAT
   statement: "dong" | "trieu dong" | "ty dong". A statement with no unit note

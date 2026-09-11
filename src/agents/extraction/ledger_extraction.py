@@ -25,6 +25,8 @@ def _label_positions(columns: list[str]) -> list[int]:
 
 TOTAL_ROW_NAMES = {"tong", "tong cong", "cong", "total", "sum"}
 TOP_ROWS = 5
+# Below this, a coincidence with the worked example means nothing.
+EXAMPLE_FIGURE_FLOOR = 1_000_000
 TOP_ROW_CRITERIA: dict[str, tuple[str, ...]] = {
     "receivable": ("debit_movement", "closing_debit", "closing_credit"),
     "payable": ("credit_movement", "closing_debit", "closing_credit"),
@@ -75,11 +77,11 @@ BESIDE "accounts", never inside it — "accounts" holds account entries only.
 ════ THE "accounts" KEY — ONE FORMAT ONLY ════
     <account number>@<YYYYMMDD>-<YYYYMMDD>
 
-Example: "131@20250101-20251231". ALWAYS carries the period, even when the whole
+Example: "131@20190101-20191231". ALWAYS carries the period, even when the whole
 dossier holds only one.
 
-    Full year 2025        -> 131@20250101-20251231
-    Year 07/24-06/25      -> 131@20240701-20250630   (any period, not just years)
+    Full year 2019        -> 131@20190101-20191231
+    Year 07/18-06/19      -> 131@20180701-20190630   (any period, not just years)
 
 WHERE THE ACCOUNT NUMBER COMES FROM
 
@@ -160,11 +162,18 @@ or by product group.
                  Write [] for a .csv, which has no sheet.
 "period"         {{"from","to"}} — see below.
 "totals"         {{field: number}} — the total for the WHOLE account, across
-                 every detail row, not only the ones you return. Read it off the
-                 printed "Tổng cộng" row when the sheet has one; otherwise add up
-                 all the detail rows before selecting. This is the denominator
-                 the report divides by to state a counterparty's share, so a
-                 total covering only the rows you kept is wrong.
+                 every detail row, not only the ones you return. This is the
+                 denominator the report divides by to state a counterparty's
+                 share, so a total covering only the rows you kept is wrong.
+                 FILL IT COLUMN BY COLUMN, not row by row. For each column: copy
+                 the figure from the printed "Tổng cộng" row if that cell holds
+                 one; where that cell is BLANK, add the rows up yourself.
+                 A printed total row can stop short. One sheet printed its
+                 totals as far as "Dư nợ cuối kỳ" and left "Dư có cuối kỳ"
+                 empty, while a detail row below it carried 96,735,674,467 —
+                 copied whole, that gives a denominator of 0 for a column that
+                 has money in it, and every share computed from it is nonsense.
+                 NEVER write 0 for a column whose detail rows are not all zero.
 "item_count"     how many detail rows the SHEET holds — not len(items). It tells
                  the reader the returned rows are 5 of 143.
 "item_columns"   the field names of a detail row, in the order the values come.
@@ -176,11 +185,11 @@ or by product group.
 "from"/"to"    ISO "YYYY-MM-DD", read from the banner line above the table.
 
 Common phrasings and how they expand:
-    "Từ ngày 01/01/2025 đến ngày 31/12/2025" -> 2025-01-01 / 2025-12-31
-    "Kỳ báo cáo: 01/01/2025 - 31/12/2025"    -> 2025-01-01 / 2025-12-31
-    "Năm 2024"                               -> 2024-01-01 / 2024-12-31
-    "Quý 4/2024"                             -> 2024-10-01 / 2024-12-31
-    "Tháng 12 năm 2024"                      -> 2024-12-01 / 2024-12-31
+    "Từ ngày 01/01/2019 đến ngày 31/12/2019" -> 2019-01-01 / 2019-12-31
+    "Kỳ báo cáo: 01/01/2019 - 31/12/2019"    -> 2019-01-01 / 2019-12-31
+    "Năm 2018"                               -> 2018-01-01 / 2018-12-31
+    "Quý 4/2018"                             -> 2018-10-01 / 2018-12-31
+    "Tháng 12 năm 2018"                      -> 2018-12-01 / 2018-12-31
 If no line states a period, leave both "" — do NOT infer one from a file name
 that merely contains a year.
 
@@ -227,14 +236,14 @@ and the row became unreadable as either:
 
 "item_columns": ["counterparty_code","counterparty_name","opening_debit",
                  "opening_credit","debit_movement","credit_movement","closing_debit"],
-"items": [["HSCANTHO","Cty Hoa Sen Cần Thơ",0,0,20738000,20738000,0],
-          ["PHUTHINH","Cty Phú Thịnh",500000000,0,4825000000,4325000000,0]]
+"items": [["MAU01","CÔNG TY MẪU MỘT",0,0,333333333,222222222,0],
+          ["MAU02","CÔNG TY MẪU HAI",111111111,0,555555555,666666666,0]]
 
 Stock sheets (nhập xuất tồn) use their own column set:
 
 "item_columns": ["item_name","opening_quantity","opening_value",
                  "inflow_quantity","inflow_value"],
-"items": [["Đầu kéo",191,205670531917,1381,1590661714792]]
+"items": [["Mặt hàng mẫu A",11,111111111,33,333333333]]
 
 EVERY ROW MUST HAVE EXACTLY len(item_columns) VALUES. A short row shifts every
 value after the gap into the wrong column, and the JSON stays valid while the
@@ -246,8 +255,8 @@ keep the column. Never put a code in the name position or a name in the code
 position.
 
 Numbers are WHOLE ĐỒNG: no separators, no unit, no brackets.
-    right: 225510140846
-    wrong: "225.510.140.846"   225,51 tỷ   (225510140846)
+    right: 111111111
+    wrong: "111.111.111"   0,11 tỷ   (111111111)
 Negatives take a minus sign. An empty cell or a dash is 0.
 
 A PRINTED TOTAL ROW ("Tổng", "Tổng cộng", "Cộng", "Total") IS NOT A DETAIL ROW:
@@ -293,69 +302,73 @@ with opening_quantity, opening_value, inflow_quantity … in there. Two header r
 are a normal layout, not a reason to give up on the sheet.
 
 ════ WORKED EXAMPLE (one debt entry, one stock entry) ════
+EVERY FIGURE BELOW IS FAKE. The repeated digits (111.111.111, 888.888.888) and the
+2019 period mark them as illustration. They show you the SHAPE. Copying any of
+them into your answer hands the reader another company's balance sheet, and a
+program checks for exactly these numbers and will say so.
 {{
   "accounts": {{
-    "131@20250101-20251231": {{
+    "131@20190101-20191231": {{
       "category": "receivable",
       "code_source": "convention",
       "source_sheet_name": ["TK_131"],
       "period": {{
-        "from": "2025-01-01",
-        "to": "2025-12-31"
+        "from": "2019-01-01",
+        "to": "2019-12-31"
       }},
       "totals": {{
-        "opening_debit": 225510140846,
-        "opening_credit": 10000000,
-        "debit_movement": 527543796658,
-        "credit_movement": 528855090000,
-        "closing_debit": 224188847504,
+        "opening_debit": 111111111,
+        "opening_credit": 444444444,
+        "debit_movement": 888888888,
+        "credit_movement": 888888888,
+        "closing_debit": 222222222,
         "closing_credit": 0
       }},
       "item_count": 2,
       "item_columns": ["counterparty_code","counterparty_name","opening_debit","opening_credit","debit_movement","credit_movement","closing_debit"],
       "rankings": [
         {{"sorted_by": "debit_movement", "items": [
-          ["","ĐỒNG VĂN NGỌC",0,10000000,1391300000,1381300000,0],
-          ["","NGUYỄN XUÂN VĨ",0,0,20738000,20738000,0]
+          ["MAU02","CÔNG TY MẪU HAI",0,444444444,555555555,666666666,0],
+          ["MAU01","CÔNG TY MẪU MỘT",111111111,0,333333333,222222222,222222222]
         ]}},
         {{"sorted_by": "closing_debit", "items": [
-          ["","NGUYỄN XUÂN VĨ",0,0,20738000,20738000,0],
-          ["","ĐỒNG VĂN NGỌC",0,10000000,1391300000,1381300000,0]
+          ["MAU01","CÔNG TY MẪU MỘT",111111111,0,333333333,222222222,222222222],
+          ["MAU02","CÔNG TY MẪU HAI",0,444444444,555555555,666666666,0]
         ]}},
         {{"sorted_by": "closing_credit", "items": [
-          ["","NGUYỄN XUÂN VĨ",0,0,20738000,20738000,0],
-          ["","ĐỒNG VĂN NGỌC",0,10000000,1391300000,1381300000,0]
+          ["MAU01","CÔNG TY MẪU MỘT",111111111,0,333333333,222222222,222222222],
+          ["MAU02","CÔNG TY MẪU HAI",0,444444444,555555555,666666666,0]
         ]}}
       ]
     }},
-    "156@20250101-20251231": {{
+    "156@20190101-20191231": {{
       "category": "inventory",
       "code_source": "convention",
       "source_sheet_name": ["NXT"],
       "period": {{
-        "from": "2025-01-01",
-        "to": "2025-12-31"
+        "from": "2019-01-01",
+        "to": "2019-12-31"
       }},
       "totals": {{
-        "opening_quantity": 705,
-        "opening_value": 775511777881,
-        "inflow_quantity": 3059,
-        "inflow_value": 3577157767500,
-        "outflow_quantity": 2206,
-        "outflow_value": 2564487338322,
-        "closing_quantity": 1558,
-        "closing_value": 1788182207060
+        "opening_quantity": 55,
+        "opening_value": 555555555,
+        "inflow_quantity": 88,
+        "inflow_value": 888888888,
+        "outflow_quantity": 88,
+        "outflow_value": 888888888,
+        "closing_quantity": 55,
+        "closing_value": 555555555
       }},
       "item_count": 2,
       "item_columns": ["item_name","opening_quantity","opening_value","inflow_quantity","inflow_value","outflow_quantity","outflow_value","closing_quantity","closing_value"],
       "rankings": [
         {{"sorted_by": "outflow_value", "items": [
-          ["Đầu kéo",191,205670531917,1381,1590661714792,1001,1156312267740,571,640019978969],
-          ["Mooc",49,22017037516,113,48305699921,112,48335332899,50,21987404538]
+          ["Mặt hàng mẫu B",44,444444444,55,555555555,66,666666666,33,333333333],
+          ["Mặt hàng mẫu A",11,111111111,33,333333333,22,222222222,22,222222222]
         ]}},
         {{"sorted_by": "closing_value", "items": [
-          ["Đầu kéo",191,205670531917,1381,1590661714792,1001,1156312267740,571,640019978969],
-          ["Mooc",49,22017037516,113,48305699921,112,48335332899,50,21987404538]
+          ["Mặt hàng mẫu B",44,444444444,55,555555555,66,666666666,33,333333333],
+          ["Mặt hàng mẫu A",11,111111111,33,333333333,22,222222222,22,222222222]
         ]}}
       ]
     }}
@@ -676,6 +689,104 @@ def _drop_total_rows(record: dict[str, Any]) -> None:
                 account["item_count"] = max(longest, declared - len(dropped_labels))
 
 
+def _example_figures() -> set[float]:
+    """Money-scale numbers the worked example prints, read from the prompt itself.
+
+    Parsed rather than listed so the two cannot drift: change a figure in the
+    example and this follows. Only values at or above EXAMPLE_FIGURE_FLOOR count —
+    a quantity of 11 in the example says nothing about a real sheet holding 11.
+    """
+
+    text = LEDGER_EXTRACTION_SYSTEM_PROMPT.replace("{{", "{").replace("}}", "}")
+    start = text.find('{\n  "accounts"')
+    end = text.find("Return EXACTLY this schema", start)
+    if start < 0 or end < 0:
+        return set()
+    found: set[float] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+        elif isinstance(node, (int, float)) and not isinstance(node, bool):
+            if abs(node) >= EXAMPLE_FIGURE_FLOOR:
+                found.add(float(node))
+
+    try:
+        walk(json.loads(text[start:end].strip()))
+    except json.JSONDecodeError:
+        return set()
+    return found
+
+
+def _note_copied_example(record: dict[str, Any]) -> None:
+    """Say so when the answer carries figures that came from the prompt.
+
+    A model under pressure transcribes the example instead of the file, and
+    nothing downstream can tell: the figures are well-formed, internally
+    consistent, and belong to somebody else. Haiku 4.5 did exactly this on a live
+    run, returning the example's "totals" verbatim.
+
+    This went unseen for as long as it did because the example used to be built
+    from the sample workbook, so on that dossier a copied answer and a correct
+    one were the same bytes. The example now prints repeated digits that no
+    ledger produces, which is what makes this check possible at all.
+
+    A note alone would leave the figure in the record for the report to print, so
+    the offending cells are blanked here as well: a column that reads as missing
+    is recoverable, a column carrying somebody else's balance is not.
+    """
+
+    figures = _example_figures()
+    if not figures:
+        return
+
+    def copied(value: Any) -> bool:
+        return (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and float(value) in figures)
+
+    seen: dict[str, set[float]] = {}
+    for key, account in (record.get("accounts") or {}).items():
+        if not isinstance(account, dict):
+            continue
+        hits: set[float] = set()
+        totals = account.get("totals")
+        if isinstance(totals, dict):
+            for name, value in totals.items():
+                if copied(value):
+                    hits.add(float(value))
+                    totals[name] = None
+        for ranking in account.get("rankings") or []:
+            if not isinstance(ranking, dict):
+                continue
+            for row in ranking.get("items") or []:
+                if not isinstance(row, list):
+                    continue
+                for at, cell in enumerate(row):
+                    if copied(cell):
+                        hits.add(float(cell))
+                        row[at] = None
+        if hits:
+            seen[key] = hits
+    if not seen:
+        return
+    detail = "; ".join(
+        f"{key}: {', '.join(f'{v:,.0f}' for v in sorted(values)[:4])}"
+        for key, values in seen.items()
+    )
+    record.setdefault("extraction_notes", []).append(
+        "WARNING: figures from the prompt's worked example appear in this record "
+        f"— {detail}. Those numbers are illustration, not this customer's ledger, "
+        "so the cells holding them have been BLANKED rather than passed on. The "
+        "affected columns now read as missing, and every figure in the named "
+        "accounts should be treated as unverified until the source file is "
+        "checked by hand."
+    )
+
+
 def _note_slice_problems(record: dict[str, Any]) -> None:
     """Check what stays true once each ranking is a top-N slice of one column.
 
@@ -749,8 +860,13 @@ def _note_slice_problems(record: dict[str, Any]) -> None:
 
             if column in columns:
                 at = columns.index(column)
+                # A blank in the ranked column is a figure _note_copied_example
+                # took out, not a mis-sort: _row_value reads it as zero, and every
+                # row below it would then look out of order. Saying so twice about
+                # one problem buries the sentence that names the real cause.
+                blanked = any(at < len(row) and row[at] is None for row in rows)
                 values = [_row_value(row, at) for row in rows]
-                if any(a < b for a, b in zip(values, values[1:])):
+                if not blanked and any(a < b for a, b in zip(values, values[1:])):
                     problems.append(
                         f"{label}: rows are not sorted by {column} — "
                         f"{[f'{v:,.0f}' for v in values[:6]]}"
@@ -775,10 +891,22 @@ def _note_slice_problems(record: dict[str, Any]) -> None:
                 # Rounding in the printed total is normal; a slice genuinely
                 # bigger than its account is not.
                 if abs(got) > abs(cap) + 1:
-                    problems.append(
-                        f"{label}.{name}: rows sum to {got:,.0f}, above the "
-                        f"account total of {cap:,.0f}"
-                    )
+                    # A zero total under non-zero rows is not a slice that grew
+                    # too large — it is a column the printed "Tổng cộng" row left
+                    # blank and the model copied as zero. Worth saying apart,
+                    # because the fix is different and the consequence is worse:
+                    # every share divided by it is meaningless.
+                    if not cap:
+                        problems.append(
+                            f"{label}.{name}: total is 0 while rows carry "
+                            f"{got:,.0f} — the printed total row most likely left "
+                            f"this column blank, so it is NOT a usable denominator"
+                        )
+                    else:
+                        problems.append(
+                            f"{label}.{name}: rows sum to {got:,.0f}, above the "
+                            f"account total of {cap:,.0f}"
+                        )
 
     if problems:
         record["extraction_notes"].append(
@@ -877,6 +1005,7 @@ def extract_ledger_batch(
             f"sheet(s) were not sent: {', '.join(dropped[:10])}."
         )
 
+    _note_copied_example(record)
     _note_slice_problems(record)
     _drop_total_rows(record)
     fill_source_files(record, documents)

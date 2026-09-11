@@ -40,7 +40,7 @@ MANDATORY RULES:
   recommendation made by the surveying officer belongs in "conclusion" and
   nowhere else; the other four blocks carry only what was read off the page.
 - Do NOT convert monetary units. Write the number EXACTLY AS PRINTED: a report
-  reading "240.800 triệu đồng" gives 240800, not 240800000000. The program
+  reading "777.777 triệu đồng" gives 777777, not 777777000000. The program
   multiplies by "source_unit" itself — converting again makes the figure a
   million times wrong.
 - "source_unit" is the unit printed on the page: "dong" | "trieu dong" |
