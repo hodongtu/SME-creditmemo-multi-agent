@@ -1,8 +1,20 @@
-"""Read the ```vat-doanh-thu``` block Credit Relationship Agent writes."""
+"""Monthly VAT revenue, from the agent's own block or from an e-tax XML filing.
+
+A VAT return 01/GTGT filed as XML is read here; the shared e-tax envelope that
+says which form a file is lives in src/utils/reading/etax_xml.py.
+"""
 
 import re
 
 from src.agents.extraction.cic_s10a_extraction import normalize_month_label
+from src.utils.reading.etax_xml import (
+    FORM_VAT_01GTGT,
+    filing_period,
+    indicator_codes,
+    load_filing,
+    main_block,
+    year_of,
+)
 
 
 VAT_BLOCK_FENCE = "vat-doanh-thu"
@@ -90,3 +102,63 @@ def merge_vat_series(
                 continue
             merged[month] = (revenue, estimated)
     return merged
+
+
+VAT_TOTAL_REVENUE = "ct34"
+# The form defines ct34 as the sum of these three, so a mismatch means the wrong
+# element was read rather than that the taxpayer filed something unusual.
+VAT_REVENUE_PARTS = ("ct26", "ct27", "ct32a")
+
+
+def _revenue_identity_error(codes: dict[str, float], revenue: float) -> str:
+    parts = sum(codes.get(code, 0.0) for code in VAT_REVENUE_PARTS)
+    if abs(parts - revenue) > 1:
+        return (f"{VAT_TOTAL_REVENUE} ({revenue:,.0f}) does not equal "
+                f"{'+'.join(VAT_REVENUE_PARTS)} ({parts:,.0f}), so the indicator "
+                "codes may not have been read correctly.")
+    return ""
+
+
+def read_vat_revenue_xml(path: str) -> tuple[dict[str, tuple[float, bool]], list[str], str]:
+    """One 01/GTGT filing as {"MM/YYYY": (revenue, is_estimated)}, notes and error.
+
+    A quarterly return is split evenly across its three months and every month
+    is flagged estimated, because the form declares the quarter as one figure.
+    """
+
+    root, header = load_filing(path)
+    if root is None:
+        return {}, [], header.error
+    if header.form_id != FORM_VAT_01GTGT:
+        return {}, [], header.error or "Not a VAT return (01/GTGT)."
+
+    codes = indicator_codes(main_block(root))
+    revenue = codes.get(VAT_TOTAL_REVENUE)
+    if revenue is None:
+        return {}, [], f"The return has no {VAT_TOTAL_REVENUE} indicator (total revenue)."
+    identity = _revenue_identity_error(codes, revenue)
+    if identity:
+        return {}, [], identity
+
+    period_type, label, end_date = filing_period(root)
+    year = year_of(end_date).replace("Năm ", "")
+    number = label.split("/")[0].strip()
+    if not year or not number.isdigit():
+        return {}, [], "Could not read the declaration period."
+
+    if period_type == "M":
+        series = {f"{int(number):02d}/{year}": (revenue, False)}
+        note = (f"Monthly return {number}/{year}: revenue is the declared figure, "
+                "not an estimate.")
+    elif period_type == "Q":
+        quarter = int(number)
+        share = revenue / 3
+        series = {
+            f"{month:02d}/{year}": (share, True)
+            for month in range(quarter * 3 - 2, quarter * 3 + 1)
+        }
+        note = (f"Quarterly return {quarter}/{year}: split evenly across 3 months "
+                "and flagged as estimated.")
+    else:
+        return {}, [], f"Unrecognised declaration period type: {period_type!r}."
+    return series, [note], ""

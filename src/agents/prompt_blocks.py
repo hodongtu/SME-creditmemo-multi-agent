@@ -13,11 +13,14 @@ from src.agents.documents.document_matrix import get_type
 from src.agents.extraction import financial_statement_extraction
 from src.agents.extraction import ledger_extraction
 from src.types import ClassifiedDocument
-from src.agents.extraction.vat_revenue import merge_vat_series, parse_vat_revenue_block
+from src.agents.extraction.vat_revenue import (
+    merge_vat_series,
+    parse_vat_revenue_block,
+    read_vat_revenue_xml,
+)
 from src.utils.report.visualization.charts import build_linechart_block, pick_unit
 from src.utils.report.formatting import format_vn_number
 from src.utils.report.source_list import build_source_lines
-from src.utils.reading.tax_xml import parse_tax_xml
 
 
 def _vat_revenue_from_xml(
@@ -29,9 +32,9 @@ def _vat_revenue_from_xml(
     for doc in documents:
         if not doc.path.lower().endswith(".xml"):
             continue
-        result = parse_tax_xml(doc.path)
-        if result.kind == "vat" and not result.error:
-            series.update(result.vat_revenue)
+        monthly, _notes, error = read_vat_revenue_xml(doc.path)
+        if not error:
+            series.update(monthly)
     return series
 
 
