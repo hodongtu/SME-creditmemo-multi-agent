@@ -420,8 +420,11 @@ Applied to every branch before returning, in this order and for stated reasons:
 ```
 .
 ├── local_underwriting_agents.ipynb   # Entry point — driver notebook
+├── config/
+│   └── prompts/                      # Every system prompt, one Markdown file each
 ├── src/
 │   ├── config.py                     # LLM factory + Config
+│   ├── prompts.py                    # The only reader of config/prompts/
 │   ├── types.py                      # Shared types
 │   ├── agents/
 │   │   ├── supervisor.py             # LangGraph orchestrator + EXTRACTION_PASSES
@@ -444,6 +447,45 @@ Applied to every branch before returning, in this order and for stated reasons:
 ├── .env / .env.example
 └── README.md
 ```
+
+### System prompts
+
+Every system prompt lives in [config/prompts/](config/prompts/), one
+Markdown file each — the same layout as `4. SME_bankstatementanalyzer` and `3. SME_postcheck`: a
+frontmatter with `name` and `description`, then the prompt exactly as the model reads it.
+[src/prompts.py](src/prompts.py) is the only reader.
+
+| File | Placeholder the code fills |
+|---|---|
+| `financial_statement_extraction.md`, `proposal_extraction.md`, `sitevisit_extraction.md`, `cic_r20_extraction.md`, `cic_s10a_extraction.md` | — |
+| `ledger_extraction.md` | `{{top_row_criteria_table}}`, rendered from `TOP_ROW_CRITERIA` in code |
+| `document_classification.md` | `{{document_type_catalogue}}`, rendered from the document matrix per upload group |
+| `specialist_rules.md` | `{{intro}}`, `{{citation_rule}}`, `{{analysis_guidance}}`, `{{output_template}}`, `{{slot_syntax}}` |
+| `specialist_citation_rule.md` | — (given to every specialist except financial analysis) |
+| `specialist_intro_<agent>.md` ×4 | — (the opening role statement of each specialist) |
+
+**The four specialists share one rules file.** Editing LANGUAGE, EVIDENCE, COMMENTARY or any
+other shared rule means editing `specialist_rules.md` once. Each agent fills it with its own
+intro (picked by the class attribute `prompt_name`), the citation rule if
+`require_citations`, and its `src/templates/*-guidance.md` and `*-structure.md` — those two
+stay where they are, because the structure file is also the report skeleton.
+
+`{{slot_syntax}}` exists because the rules have to *mention* the template's `{{TenTruong}}`
+slots, and writing that literally would make the loader read it as a placeholder. The code
+fills it with `{{TenTruong}}`.
+
+Two rules when editing one: **`{{name}}` is a value the code fills, and only that** — JSON
+examples are written with single braces, as the model should see them; and **the placeholders
+in a file must equal what the code fills** — a stray `{{customer}}` fails at load time instead of
+reaching the model as literal braces. `testing/test_prompts.py` enforces both, and fails if a
+system prompt is written back into code.
+
+What the model receives was verified before and after the move, through the real chain
+builders: byte for byte for the six extraction prompts and for the classifier under every
+upload group. For the specialists, both paths — `create_agent` for agents with tools, the
+direct chain for the rest — carry the same words line for line; the Python indentation that
+used to prefix every line is gone (about 1,100–1,600 characters less per call), and one
+doubled blank line after the intro is now single.
 
 > There are **no `__init__.py` files** anywhere under `src/` — it is a namespace package, imported
 > as `src.agents.supervisor` from the project root.

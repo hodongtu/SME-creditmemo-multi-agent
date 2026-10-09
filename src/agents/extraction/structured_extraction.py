@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from langchain_core.messages import SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -55,7 +56,7 @@ def build_extraction_chain(system_prompt: str, llm: Any):
 
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", system_prompt),
+            SystemMessage(content=system_prompt),
             (
                 "human",
                 """

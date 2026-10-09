@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from langchain_core.messages import SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, StateGraph
@@ -993,7 +994,7 @@ class Supervisor:
     def _build_document_classifier_chain(self, group_id: str = ""):
         prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", build_document_classification_prompt(group_id)),
+                SystemMessage(content=build_document_classification_prompt(group_id)),
                 (
                     "human",
                     """
