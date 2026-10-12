@@ -610,6 +610,7 @@ groups:
           CREDIT_RELATIONSHIP_AGENT: R
         filename_keywords:
           - "sitevisit"
+          - "bctd"
         keywords:
           - "bao cao khao sat"
           - "bao cao thuc dia"
