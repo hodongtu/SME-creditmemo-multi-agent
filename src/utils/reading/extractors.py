@@ -25,6 +25,15 @@ def _decode(raw: bytes) -> str:
     return raw.decode("latin-1", "replace")
 
 
+# Left to choose freely, the sniffer picks whatever character is most regular
+# across the sample. On a Windows file opened with newline="" — which the csv
+# module requires — that can be the "\r" of every line ending, and csv.reader
+# then refuses it ("bad delimiter value"). On a file whose first line is a
+# company name padded with commas it picked the SPACE, and split
+# "CÔNG TY TNHH AN CƯỜNG" into five cells.
+CSV_DELIMITERS = ",;\t|"
+
+
 def _read_csv_rows(csv_path: str) -> list[list[str]]:
     """Every row of a CSV, decoded and stripped. Never truncates."""
 
@@ -42,7 +51,7 @@ def _read_csv_rows(csv_path: str) -> list[list[str]]:
                 sample = csv_file.read(4096)
                 csv_file.seek(0)
                 try:
-                    dialect = csv.Sniffer().sniff(sample)
+                    dialect = csv.Sniffer().sniff(sample, delimiters=CSV_DELIMITERS)
                 except csv.Error:
                     dialect = csv.excel
                 return [
