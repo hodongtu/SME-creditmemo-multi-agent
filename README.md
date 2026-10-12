@@ -29,9 +29,10 @@ all agent logic lives in the importable package [src/](src/).
 - **Deterministic pipeline** via LangGraph: every step is a node, and no LLM decides which step
   runs next. The one branch in the graph is driven by the agent the user picked on screen.
 - **In-house OCR**: PDF → text using `pypdfium2` + Tesseract, with image preprocessing and caching.
-- **Document classification from the upload box down**: each of the six upload folders narrows the
-  candidate types before any keyword scoring happens, and an LLM is consulted only when the
-  keyword pass is genuinely unsure.
+- **Document classification from the upload box down**: each of the six typed upload folders
+  narrows the candidate types before any keyword scoring happens, and an LLM is consulted only
+  when the keyword pass is genuinely unsure. A seventh folder, `ho_so_khac`, classifies
+  nothing on purpose — see *"Hồ sơ khác"* below.
 - **4 specialist agents**, one per flow. Exactly one runs per request.
 - **Deterministic figures**: financial ratios (`FinancialRatioCalculator`) and the credit need
   (`credit_need_calculator`) are computed in code and handed to the agent as data, not left for
@@ -105,7 +106,7 @@ window on copies and drop every real row behind them. The count is named in the 
 (`đã bỏ N dòng trùng lặp`) rather than trimmed in silence — that line is also the only thing
 that would surface the rare case where two genuinely identical detail rows exist.
 
-A file under **none of the six upload boxes is dropped**, named in a warning of its own. The screen
+A file under **none of the seven upload boxes is dropped**, named in a warning of its own. The screen
 files every upload into a box, so a loose file did not come from the screen — it is an integration
 fault, and classifying it would launder that fault into a report. The drop happens here rather than
 in the classify loop because OCR runs there: discarded before `extract_document_text` costs nothing,
@@ -115,7 +116,7 @@ the officer hunting for a document they already uploaded.
 
 **2. `classify_documents`** — For each file:
 
-- **Upload box** — the folder a file sits in *is* its group. The screen creates six folders and
+- **Upload box** — the folder a file sits in *is* its group. The screen creates seven folders and
   the user drops files into them, so `ho_so_tai_chinh/BCTC_2025.pdf` declares its own group with no
   guessing involved. Every ancestor is checked, not just the parent, so `ho_so_tai_chinh/2025/BCTC.pdf`
   keeps its box.
@@ -137,6 +138,7 @@ the officer hunting for a document they already uploaded.
   | `ho_so_tai_san_dam_bao` | Hồ sơ tài sản đảm bảo | 2 |
   | `ho_so_noi_bo` | Hồ sơ nội bộ | 3 |
   | `ho_so_soan_thao_noi_bo` | Hồ sơ soạn thảo nội bộ | 2 |
+  | `ho_so_khac` | Hồ sơ khác | 0 — classifies nothing, by declaration |
 
 - **Text extraction** — PDF → OCR (`pypdfium2` renders pages → image preprocessing → Tesseract,
   cached by file hash); XLSX/CSV → tabular read via pandas; XML → tax-return parsing.
@@ -176,6 +178,18 @@ detected or inferred. The program actually applied is reported in `result["loan_
 (transcribed from `docs/document_matrix.xlsx`). Changing which agents see a kind of document is a
 YAML edit, not a code change. It is validated on load — an unknown agent name, a bad `R`/`O` value,
 or a per-loan-program map missing one of the four programs raises immediately.
+**"Hồ sơ khác"** (`ho_so_khac`) is a box declared with `catch_all: true` and **no types**, for
+the documents a dossier carries that the matrix has no row for. A file there is read like any
+other — OCR, spreadsheet, XML, text — and then takes exactly the path above: no type, no
+structured extraction pass, shown to all four specialists as general context at the lower
+budget weight, and required by nobody, so it never satisfies nor creates an evidence gap. No
+LLM is called to classify it: with no candidates there is no tie to break, and a call there
+would be three wasted calls in a three-file box.
+
+`catch_all: true` has to be written out in the YAML. An empty `types` list on its own is still
+rejected, so an edit that wipes a real box's types fails on load instead of quietly turning
+that box into this one.
+
 
 ### Stage 2 — Evidence gap check
 

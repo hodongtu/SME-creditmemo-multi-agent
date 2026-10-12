@@ -30,6 +30,7 @@ PROMPTS: dict[str, frozenset[str]] = {
     "block_relevance_required": frozenset(),
     "block_relevance_optional": frozenset(),
     "block_relevance_general": frozenset(),
+    "block_relevance_other_box": frozenset(),
     "block_source_list": frozenset(),
     "block_credit_need": frozenset(),
     "block_proposal": frozenset(),

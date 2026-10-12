@@ -42,6 +42,11 @@
 # group. When that agent is absent from a type's `agents` (e.g. I.1 lists only
 # RA), the first R-level agent wins, in the order CP > CR > FS > BA. It can
 # be overridden per type.
+#
+# --- A group without types ---------------------------------------------------
+# `catch_all: true` and no `types` declares an upload box that classifies
+# nothing: the file is read and shown to every specialist as general context.
+# See `ho_so_khac` at the bottom of this file.
 
 version: 1
 
@@ -608,3 +613,8 @@ groups:
           - "nhom khach hang lien quan"
           - "khach hang lien quan"
           - "nguoi co lien quan"
+
+  # ===========================================================================
+  - id: ho_so_khac
+    label: "Hồ sơ khác"
+    catch_all: true

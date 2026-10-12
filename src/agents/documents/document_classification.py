@@ -92,6 +92,24 @@ def _longest_filename_hit(type_id: str, normalized_name: str) -> int:
     return max((len(kw) for kw in keywords if kw in normalized_name), default=0)
 
 
+def _no_type_matched(
+    scores: dict[str, int],
+    group_id: str,
+    reasoning: str,
+) -> dict[str, Any]:
+    """The verdict that leaves a document unclassified, and therefore shared."""
+
+    return {
+        "document_type": "",
+        "reasoning": reasoning,
+        "confidence": 0.0,
+        "scores": scores,
+        "routing_unambiguous": False,
+        "filename_decisive": False,
+        "group_id": group_id,
+    }
+
+
 def rule_classify_document(
     filename: str,
     content: str,
@@ -101,6 +119,16 @@ def rule_classify_document(
     is still needed: confidence, routing_unambiguous, filename_decisive."""
 
     scores = document_type_scores(filename, content, group_id)
+    if not scores:
+        # A catch-all upload box: there is nothing to match against, and that is
+        # the declared intent, not a failure to recognise the document.
+        return _no_type_matched(
+            scores,
+            group_id,
+            f"Upload box {group_id!r} classifies nothing; the document is "
+            f"general context.",
+        )
+
     matrix_order = {type_id: index for index, type_id in enumerate(scores)}
     normalized_name = normalize_text(filename)
 
@@ -115,15 +143,11 @@ def rule_classify_document(
         ),
     )
     if best_score == 0:
-        return {
-            "document_type": "",
-            "reasoning": "No document type in the matrix matched this document.",
-            "confidence": 0.0,
-            "scores": scores,
-            "routing_unambiguous": False,
-            "filename_decisive": False,
-            "group_id": group_id,
-        }
+        return _no_type_matched(
+            scores,
+            group_id,
+            "No document type in the matrix matched this document.",
+        )
 
     sorted_scores = sorted(scores.values(), reverse=True)
     second_score = sorted_scores[1] if len(sorted_scores) > 1 else 0

@@ -51,6 +51,7 @@ from src.agents.documents.document_matrix import (
     agent_relevance_for_type,
     get_type,
     load_matrix,
+    is_catch_all_box,
     is_financial_statement_type,
     is_cic_r20_type,
     is_sitevisit_type,
@@ -936,6 +937,10 @@ class Supervisor:
         group_id: str = "",
     ) -> dict[str, Any]:
         rule = rule_classify_document(filename, content, group_id)
+        if is_catch_all_box(group_id):
+            # Nothing to break a tie between, so no LLM call: the box declares
+            # that whatever lands in it is general context.
+            return rule
         threshold = (
             self.config.document_classifier_grouped_confidence_threshold
             if group_id

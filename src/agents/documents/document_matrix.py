@@ -62,6 +62,9 @@ class DocumentMatrix:
     loan_programs: tuple[str, ...]
     loan_program_labels: dict[str, str]
     types: dict[str, DocumentType]
+    boxes: tuple[str, ...]
+    box_labels: dict[str, str]
+    catch_all_boxes: frozenset[str]
 
 
 def _fail(message: str) -> None:
@@ -202,12 +205,27 @@ def _load(path: Path) -> DocumentMatrix:
 
     types: dict[str, DocumentType] = {}
     group_ids: set[str] = set()
+    boxes: list[str] = []
+    box_labels: dict[str, str] = {}
+    catch_all_boxes: set[str] = set()
     for group in raw_groups:
         _need(group, dict, "each group must be a mapping")
         group_id = str(_need(group.get("id"), str, "each group needs an 'id'"))
         if group_id in group_ids:
             _fail(f"duplicate group id {group_id!r}")
         group_ids.add(group_id)
+
+        boxes.append(group_id)
+        box_labels[group_id] = str(group.get("label") or group_id)
+
+        if group.get("catch_all"):
+            if group.get("types"):
+                _fail(
+                    f"group {group_id!r}: a catch-all box classifies nothing, so "
+                    f"it cannot declare 'types'"
+                )
+            catch_all_boxes.add(group_id)
+            continue
 
         raw_types = _need(group.get("types"), list,
                           f"group {group_id!r}: 'types' must be a non-empty list")
@@ -284,6 +302,9 @@ def _load(path: Path) -> DocumentMatrix:
         loan_programs=tuple(programs),
         loan_program_labels=program_labels,
         types=types,
+        boxes=tuple(boxes),
+        box_labels=box_labels,
+        catch_all_boxes=frozenset(catch_all_boxes),
     )
 
 
@@ -296,6 +317,12 @@ def load_matrix() -> DocumentMatrix:
 
 def get_type(type_id: str) -> DocumentType | None:
     return load_matrix().types.get(type_id)
+
+
+def is_catch_all_box(group_id: str) -> bool:
+    """True for an upload box that declares no document types."""
+
+    return group_id in load_matrix().catch_all_boxes
 
 
 def document_type_keywords() -> dict[str, tuple[str, ...]]:

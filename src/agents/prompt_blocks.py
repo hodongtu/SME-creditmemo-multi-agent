@@ -9,7 +9,7 @@ from src.agents.calculator.financial_ratio_calculator import (
     FinancialRatioCalculator,
     _format_number,
 )
-from src.agents.documents.document_matrix import get_type
+from src.agents.documents.document_matrix import get_type, is_catch_all_box
 from src.agents.extraction import financial_statement_extraction
 from src.agents.extraction import ledger_extraction
 from src.prompts import system_prompt
@@ -81,6 +81,8 @@ def _document_block_header(
         relevance = system_prompt("block_relevance_required").strip()
     elif level == "O":
         relevance = system_prompt("block_relevance_optional").strip()
+    elif is_catch_all_box(doc.declared_group):
+        relevance = system_prompt("block_relevance_other_box").strip()
     else:
         relevance = system_prompt("block_relevance_general").strip()
     matched_type = get_type(doc.document_type)

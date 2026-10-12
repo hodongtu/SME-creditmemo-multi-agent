@@ -28,8 +28,13 @@ def compute_file_hash(path: str) -> str:
 
 @lru_cache(maxsize=1)
 def box_ids() -> frozenset[str]:
-    """The upload box ids, which are verbatim the folder names the screen makes."""
-    return frozenset(doc.group_id for doc in load_matrix().types.values())
+    """The upload box ids, which are verbatim the folder names the screen makes.
+
+    Read from the groups, not from the types they contain: a catch-all box has
+    no types and would otherwise be invisible here, which would make every file
+    filed in it look like a file filed nowhere.
+    """
+    return frozenset(load_matrix().boxes)
 
 
 def group_from_path(path: str) -> str:

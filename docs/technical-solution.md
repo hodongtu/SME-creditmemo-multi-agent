@@ -47,7 +47,7 @@ corrects and signs.
 | | |
 |---|---|
 | Report types | 4 — business activity, financial analysis, credit relationship, credit proposal. Exactly one runs per request. |
-| Document intake | 6 upload groups, **22 document types**, file types `.pdf .xlsx .xls .csv .pptx .txt .md .xml` |
+| Document intake | 7 upload groups (6 typed + `ho_so_khac`), **22 document types**, file types `.pdf .xlsx .xls .csv .pptx .txt .md .xml` |
 | Loan programs | 4 — `B1CP`, `MISA`, `PLPP`, `PLO` (default) |
 | Text acquisition | In-house OCR (Tesseract), spreadsheet readers, tax-return XML parsing |
 | Structured extraction | 6 passes turning raw text into JSON |
@@ -121,7 +121,7 @@ Seen as layers rather than as a graph:
 ```mermaid
 flowchart TD
     subgraph L1["Intake"]
-        U1["Upload folders<br/>6 boxes"] --> U2["discover_documents<br/>dedupe by path, then content hash"]
+        U1["Upload folders<br/>7 boxes"] --> U2["discover_documents<br/>dedupe by path, then content hash"]
     end
     subgraph L2["Text acquisition"]
         T1["PDF -> pypdfium2 -> preprocess -> Tesseract<br/>cached by file hash"]
@@ -424,7 +424,7 @@ sequenceDiagram
 | Cap | `max_files` = 50 | Excess files reported |
 | Deduplicate | By path, then by content hash | Second copy dropped, counted |
 | De-duplicate spreadsheet rows | First occurrence of each distinct row kept, order preserved, before the 500-row cap | Repeat count named in the sheet header. A pasted block repeated past a million rows left only 2 distinct rows among the 500 that reached the prompt; global rather than run-length, because a repeated *block* leaves consecutive rows different |
-| Require an upload box | Every ancestor folder checked; nearest box wins | A file under **none of the six boxes is dropped and named**. The screen files every upload into a box, so a loose file is an integration fault, and classifying it would launder that fault into a report |
+| Require an upload box | Every ancestor folder checked; nearest box wins | A file under **none of the seven boxes is dropped and named**. The screen files every upload into a box, so a loose file is an integration fault, and classifying it would launder that fault into a report |
 
 The box check sits in `_graph_discover_documents`, before Stage 2, because Stage 2 is where
 OCR runs: a file discarded before `extract_document_text` costs nothing, one discarded after
@@ -440,7 +440,7 @@ statement" is useless advice to somebody who sent one into a folder the screen n
 
 ```mermaid
 flowchart TD
-    A["File + upload folder"] --> B["Upload box narrows the catalogue<br/>6 folders -> that group's types only"]
+    A["File + upload folder"] --> B["Upload box narrows the catalogue<br/>6 typed folders -> that group's types only<br/>ho_so_khac -> no types at all"]
     B --> C["Score every candidate type<br/>filename hit x3 + body hit x1"]
     C --> D["confidence = min(0.95,<br/>0.40 + 0.35 x margin_ratio + 0.03 x min(score,6))<br/>capped at 0.6 if score &lt; 3"]
     D --> E{"confidence >= 0.65?"}
