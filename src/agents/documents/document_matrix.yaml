@@ -13,9 +13,13 @@
 #               substring. For terms that identify a document when someone puts
 #               them in a filename and mean nothing inside one — an account
 #               number is the case this exists for. Whole-word matching is what
-#               keeps "131" out of BCTC_20131231.xls. A term may not appear in
-#               both lists: one in `keywords` is already scored against the
-#               filename.
+#               keeps "131" out of BCTC_20131231.xls; a letter meeting a digit
+#               counts as a word break, so TK131.xls and CDKT2025.xlsx still
+#               match. Abbreviations people write in filenames (cdkt, kqkd,
+#               gtgt, nxt…) live here too: in a body they are rare, and where
+#               they do occur they name a line item, not the document. A term
+#               may not appear in both lists, and duplicates are judged after
+#               normalisation ("tai khoan: 131" IS "tai khoan 131").
 #   keywords  : terms that identify this type from the FILENAME and the CONTENT.
 #               Written unaccented and lowercase. The system strips accents and
 #               lowercases both keywords and text before comparing, so accented
@@ -88,6 +92,9 @@ groups:
           tai_cap: "Nếu có thông tin cập nhật"
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
+        filename_keywords:
+          - "dkkd"
+          - "gpkd"
         keywords:
           - "giay chung nhan dang ky kinh doanh"
           - "giay chung nhan dang ky doanh nghiep"
@@ -96,8 +103,6 @@ groups:
           - "quyet dinh thanh lap"
           - "giay phep dau tu"
           - "giay chung nhan dau tu"
-          - "dkkd"
-          - "gpkd"
           - "ma so doanh nghiep"
           - "nganh nghe kinh doanh"
           - "business registration"
@@ -178,11 +183,12 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
+        filename_keywords:
+          - "tmbctc"
         keywords:
           - "bctc"
           - "bao cao tai chinh"
           - "thuyet minh bao cao tai chinh"
-          - "tmbctc"
           - "bao cao luu chuyen tien te"
           - "luu chuyen tien te"
           - "lctt"
@@ -198,10 +204,11 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
+        filename_keywords:
+          - "cdkt"
         keywords:
           - "bang can doi ke toan"
           - "can doi ke toan"
-          - "cdkt"
           - "balance sheet"
           - "von chu so huu"
           - "no phai tra"
@@ -216,11 +223,12 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
+        filename_keywords:
+          - "kqkd"
         keywords:
           - "bao cao ket qua hoat dong kinh doanh"
           - "bao cao ket qua kinh doanh"
           - "ket qua kinh doanh"
-          - "kqkd"
           - "income statement"
           - "gia von hang ban"
           - "loi nhuan sau thue"
@@ -237,12 +245,13 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
+        filename_keywords:
+          - "gtgt"
         keywords:
           - "to khai thue gtgt"
           - "to khai gia tri gia tang"
           - "to khai thue"
           - "thue gtgt"
-          - "gtgt"
           - "vat declaration"
           - "phan mem ban hang"
 
@@ -263,6 +272,8 @@ groups:
           - "sao ke tctd"
           - "sao ke tai khoan thanh toan"
           - "bank statement"
+          - "settlement account number"
+          - "transaction code"
           - "phat sinh no"
           - "phat sinh co"
 
@@ -282,6 +293,8 @@ groups:
           BUSINESS_ACTIVITY_AGENT:  {B1CP: O, MISA: O, PLPP: O, PLO: R}
           FINANCIAL_ANALYSIS_AGENT: {B1CP: O, MISA: O, PLPP: O, PLO: R}
           CREDIT_RELATIONSHIP_AGENT: {B1CP: O, MISA: O, PLPP: O, PLO: R}
+        filename_keywords:
+          - "nxt"
         keywords:
           - "xuat nhap ton"
           - "bang tong hop xuat nhap ton"
@@ -296,7 +309,6 @@ groups:
           - "hang ton kho"
           - "so du dau ky"
           - "so du cuoi ky"
-          - "nxt"
 
       - id: so_chi_tiet_khoan_muc_khac
         ledger_extraction: true
@@ -348,13 +360,6 @@ groups:
           - "tk 214"
           - "tk 331"
           - "tk 341"
-          - "tai khoan: 131"
-          - "tai khoan: 154"
-          - "tai khoan: 156"
-          - "tai khoan: 211"
-          - "tai khoan: 214"
-          - "tai khoan: 331"
-          - "tai khoan: 341"
           - "so kho"
           - "so phu"
           - "so chi tiet cong no"
@@ -417,6 +422,9 @@ groups:
           tai_cap: "Bắt buộc"
         agents:
           BUSINESS_ACTIVITY_AGENT: R
+        filename_keywords:
+          - "hddr"
+          - "hddv"
         keywords:
           - "hop dong dau ra"
           - "hop dong dau vao"
@@ -428,8 +436,6 @@ groups:
           - "don dat hang"
           - "nha cung cap"
           - "hoa don"
-          - "HDDR"
-          - "HDDV"
 
       - id: ho_so_tien_do_nang_luc_hop_dong
         short_label: "Hồ sơ tiến độ, năng lực thực hiện hợp đồng"
@@ -464,11 +470,12 @@ groups:
           BUSINESS_ACTIVITY_AGENT: R
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
+        filename_keywords:
+          - "bbnt"
         keywords:
           - "bien ban nghiem thu khoi luong"
           - "bien ban nghiem thu"
           - "nghiem thu khoi luong hoan thanh"
-          - "bbnt"
           - "quyet toan hop dong"
           - "quyet toan"
           - "hop dong lon"
@@ -601,6 +608,8 @@ groups:
           FINANCIAL_ANALYSIS_AGENT: R
           CREDIT_PROPOSAL_AGENT: R
           CREDIT_RELATIONSHIP_AGENT: R
+        filename_keywords:
+          - "sitevisit"
         keywords:
           - "bao cao khao sat"
           - "bao cao thuc dia"
@@ -614,7 +623,6 @@ groups:
           - "bao cao de xuat cap tin dung"
           - "de xuat cap tin dung"
           - "danh gia rui ro"
-          - "sitevisit"
           - "site visit"
 
       - id: bao_cao_gioi_han_tin_dung_nhom_kh

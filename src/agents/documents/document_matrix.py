@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from src.types import SPECIALIST_DOCUMENT_AGENTS
+from src.utils.common import normalize_text
 
 
 MATRIX_PATH = Path(__file__).resolve().parent / "document_matrix.yaml"
@@ -150,18 +151,30 @@ def _parse_keywords(
     field: str,
     required: bool = True,
 ) -> list[str]:
-    """One keyword list: non-empty strings, no duplicates."""
+    """One keyword list: non-empty strings, no duplicates.
+
+    Duplicates are judged AFTER normalisation, because that is the form that
+    gets scored. "tai khoan: 131" and "tai khoan 131" are different strings and
+    the same keyword, and the pair sat in the matrix for all seven accounts —
+    every hit on one counted twice.
+    """
 
     if not required and not raw:
         return []
     raw = _need(raw, list, f"{where}: {field!r} must be a non-empty list")
     keywords: list[str] = []
+    seen: dict[str, str] = {}
     for keyword in raw:
         text = str(keyword).strip()
-        if not text:
+        normalized = normalize_text(text)
+        if not normalized:
             _fail(f"{where}: empty keyword in {field!r}")
-        if text in keywords:
-            _fail(f"{where}: duplicate keyword {text!r} in {field!r}")
+        if normalized in seen:
+            _fail(
+                f"{where}: {text!r} and {seen[normalized]!r} in {field!r} are "
+                f"the same keyword once normalised ({normalized!r})"
+            )
+        seen[normalized] = text
         keywords.append(text)
     return keywords
 
@@ -275,7 +288,10 @@ def _load(path: Path) -> DocumentMatrix:
                 "filename_keywords",
                 required=False,
             )
-            both = sorted(set(keywords) & set(filename_keywords))
+            both = sorted(
+                {normalize_text(k) for k in keywords}
+                & {normalize_text(k) for k in filename_keywords}
+            )
             if both:
                 _fail(
                     f"{where}: {both} appear in both 'keywords' and "

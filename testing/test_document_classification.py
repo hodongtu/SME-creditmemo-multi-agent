@@ -2,6 +2,7 @@
 
 import unittest
 
+from src.agents.documents import document_matrix
 from src.agents.documents.document_classification import (
     document_type_scores,
     routing_is_unambiguous,
@@ -71,11 +72,38 @@ class FilenameOnlyKeywordTest(unittest.TestCase):
         scores = document_type_scores("BCTC_20131231.xls", "", "ho_so_tai_chinh")
         self.assertEqual(scores["so_chi_tiet_khoan_muc_khac"], 0)
 
+    def test_a_code_glued_to_a_number_still_counts(self) -> None:
+        # Letters meeting digits is a word boundary in a filename; a run of
+        # digits is not, which is what the date case above depends on.
+        self.assertEqual(
+            rule_classify_document("TK131.xls", "", "ho_so_tai_chinh")["document_type"],
+            "so_chi_tiet_khoan_muc_khac",
+        )
+        self.assertEqual(
+            rule_classify_document("CDKT2025.xlsx", "", "ho_so_tai_chinh")["document_type"],
+            "bang_can_doi_ke_toan",
+        )
+
     def test_it_never_scores_the_body(self) -> None:
         scores = document_type_scores(
             "tong hop.xlsx", "So du 131 dong", "ho_so_tai_chinh"
         )
         self.assertEqual(scores["so_chi_tiet_khoan_muc_khac"], 0)
+
+
+class MatrixKeywordTest(unittest.TestCase):
+    def test_keywords_that_normalise_alike_are_refused(self) -> None:
+        with self.assertRaises(document_matrix.DocumentMatrixError):
+            document_matrix._parse_keywords(
+                ["tai khoan 131", "tai khoan: 131"], "type 'x'", "keywords"
+            )
+
+    def test_a_core_banking_export_reads_as_a_bank_statement(self) -> None:
+        header = ("#\taccount_number\tcurrency\tentry_id\tdebit_amount\t"
+                  "credit_amount\tnarrative\ttransaction_code\t"
+                  "transaction_name\tsettlement_account_number\n")
+        verdict = rule_classify_document("export.csv", header, "ho_so_tai_chinh")
+        self.assertEqual(verdict["document_type"], "sao_ke_tai_khoan_tctd")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Deciding what each document is: keyword scoring, and the LLM prompt for ties."""
 
+import re
 from functools import lru_cache
 from typing import Any
 
@@ -41,10 +42,19 @@ def _normalized_type_keywords() -> tuple[tuple[str, tuple[str, ...]], ...]:
     )
 
 
-def _tokens(text: str) -> tuple[str, ...]:
-    """The normalised text as whole words."""
+_LETTER_DIGIT_BOUNDARY = re.compile(r"(?<=[a-z])(?=[0-9])|(?<=[0-9])(?=[a-z])")
 
-    return tuple(normalize_text(text).split())
+
+def _tokens(text: str) -> tuple[str, ...]:
+    """The normalised text as whole words, split where letters meet digits.
+
+    Filenames glue codes to numbers — TK131.xls, CDKT2025.xlsx — and without the
+    split those are single words that no keyword matches. A run of digits is
+    never split, which is what keeps "131" out of the date in BCTC_20131231.xls.
+    Keywords go through the same function, so "s10a" and CIC_S10A.pdf agree.
+    """
+
+    return tuple(_LETTER_DIGIT_BOUNDARY.sub(" ", normalize_text(text)).split())
 
 
 @lru_cache(maxsize=1)
@@ -94,7 +104,7 @@ def document_type_scores(
     """
 
     name = normalize_text(filename)
-    name_tokens = tuple(name.split())
+    name_tokens = _tokens(filename)
     body = normalize_text(content)
     allowed = _types_in_group(group_id)
     filename_only = _normalized_filename_keywords()
@@ -169,7 +179,7 @@ def _longest_filename_hit(type_id: str, normalized_name: str) -> int:
 
     keywords = dict(_normalized_type_keywords()).get(type_id, ())
     longest = max((len(kw) for kw in keywords if kw in normalized_name), default=0)
-    tokens = tuple(normalized_name.split())
+    tokens = _tokens(normalized_name)
     for needle in _normalized_filename_keywords().get(type_id, ()):
         if _has_token_run(tokens, needle):
             longest = max(longest, len(" ".join(needle)))

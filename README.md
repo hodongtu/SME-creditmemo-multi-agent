@@ -161,7 +161,12 @@ the officer hunting for a document they already uploaded.
   terms which identify a document when someone puts them in a filename and mean nothing
   inside one. The account number is the case it exists for: `131.2025.xls` is the detail ledger
   of account 131, while `131` in a body is a line item, an amount, or part of a date — and
-  whole-word matching is exactly what keeps it out of `BCTC_20131231.xls`. Declaring such a
+  whole-word matching is exactly what keeps it out of `BCTC_20131231.xls`. A letter meeting a
+  digit is a word break, so `TK131.xls` and `CDKT2025.xlsx` still match; a run of digits is
+  never split. Filename abbreviations (`cdkt`, `kqkd`, `gtgt`, `nxt`, `dkkd`…) were moved here
+  after an audit over the 39 sample documents of the four RADAR projects: in a body they are
+  rare, and `gtgt` — the one that did occur — named a line item (*thuế GTGT được khấu trừ*) in
+  a financial statement and a bank statement, not the tax return it was meant to identify. Declaring such a
   term under plain `keywords` instead would score every workbook that happens to print the
   number, so the loader refuses a term that appears in both lists.
   Knowing the upload box restricts the candidates to that group first. If confidence clears the
