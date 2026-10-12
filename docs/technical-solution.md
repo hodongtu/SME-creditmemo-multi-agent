@@ -125,7 +125,7 @@ flowchart TD
     end
     subgraph L2["Text acquisition"]
         T1["PDF -> pypdfium2 -> preprocess -> Tesseract<br/>cached by file hash"]
-        T2["XLSX / XLS / CSV -> pandas, openpyxl"]
+        T2["Spreadsheet -> engine by file signature<br/>openpyxl, xlrd, SpreadsheetML, HTML, CSV"]
         T3["Tax return XML -> tax_xml.py"]
     end
     subgraph L3["Understanding"]
@@ -162,8 +162,16 @@ Versions are pinned in `requirements.txt`.
 | | `pytesseract` | 0.3.13 | Tesseract binding |
 | | `opencv-python` | 4.13.0.92 | Deskew, denoise, binarize |
 | | `pillow`, `numpy` | 12.2.0, 2.4.6 | Image handling |
-| Readers | `pandas` | 2.3.3 | CSV / tabular |
-| | `openpyxl` | 3.1.5 | XLSX, read directly for format fidelity |
+| Readers | `openpyxl` | 3.1.5 | XLSX, read directly for format fidelity |
+| | `xlrd` | 2.0.2 | Binary `.xls` (BIFF), with `formatting_info` |
+| | stdlib | — | Excel 2003 XML and HTML-table `.xls`, CSV |
+| | `python-pptx` | 1.0.2 | PPTX |
+| Output | `markdown` | 3.10.3 | Markdown -> HTML |
+| | `weasyprint` | 69.0 | HTML -> PDF |
+| Config | `pyyaml` | 6.0.3 | The routing matrix |
+| | `python-dotenv` | 1.2.2 | `.env` |
+| Hygiene | `nbstripout` | 0.9.1 | Strips notebook outputs before commit |
+| Tracing | `langsmith` | 0.8.18 | Optional; picked up from env, no code imports it |
 
 **Completion-token ceilings, measured not documented.** `testing/probe_max_tokens.py` sends
 `max_tokens=999999`; the API refuses with a 400 that names its own limit, and the request
@@ -175,14 +183,6 @@ is rejected before the model runs so it costs nothing.
 | `gpt-5.4-mini` | 128,000 | 1,836 |
 
 The eightfold spread is why `max_tokens` is set per pass rather than once.
-| | `xlrd` | 2.0.2 | Legacy `.xls` |
-| | `python-pptx` | 1.0.2 | PPTX |
-| Output | `markdown` | 3.10.3 | Markdown -> HTML |
-| | `weasyprint` | 69.0 | HTML -> PDF |
-| Config | `pyyaml` | 6.0.3 | The routing matrix |
-| | `python-dotenv` | 1.2.2 | `.env` |
-| Hygiene | `nbstripout` | 0.9.1 | Strips notebook outputs before commit |
-| Tracing | `langsmith` | 0.8.18 | Optional; picked up from env, no code imports it |
 
 **Not installable by pip** — Python 3.11+; Tesseract with the `vie` language pack;
 Pango / Cairo / GLib for WeasyPrint.

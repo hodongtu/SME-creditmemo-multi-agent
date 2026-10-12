@@ -141,7 +141,16 @@ the officer hunting for a document they already uploaded.
   | `ho_so_khac` | Hồ sơ khác | 0 — classifies nothing, by declaration |
 
 - **Text extraction** — PDF → OCR (`pypdfium2` renders pages → image preprocessing → Tesseract,
-  cached by file hash); XLSX/CSV → tabular read via pandas; XML → tax-return parsing.
+  cached by file hash); spreadsheets → TSV per sheet; XML → tax-return parsing; TXT/MD read as
+  they are; PPTX → one block per slide, tables included.
+
+  A spreadsheet is dispatched on **what its first bytes say it is**, not on its extension.
+  `.xls` is the extension four unrelated formats are saved under — the binary Excel 97–2003
+  workbook (`xlrd`, asking for `formatting_info` so number formats and merged ranges survive),
+  an HTML table, Excel 2003 XML, and a plain `.xlsx` someone renamed — and accounting software
+  here emits the middle two routinely. All four produce the same TSV, through one shared merge
+  rule: whether a header is one cell or four is what tells a reader which column a figure
+  belongs to.
 
 - **Classification** — identifies *which of the 22 `document_type` rows* in the routing matrix
   (`src/agents/documents/document_matrix.yaml`) the file is, by scoring that type's keywords against the
@@ -169,15 +178,6 @@ the officer hunting for a document they already uploaded.
 - A document matching no type falls back to `GENERAL_CONTEXT` and is shared with every agent, so a
   classification miss never hides evidence.
 
-**Loan program.** The matrix holds an `R`/`O` level per agent **per loan program** (`B1CP`, `MISA`,
-`PLPP`, `PLO`). The user picks it on the upload screen and it arrives as the `loan_program`
-argument; empty falls back to `DEFAULT_LOAN_PROGRAM` (**PLO**) and an unknown id raises. Nothing is
-detected or inferred. The program actually applied is reported in `result["loan_program"]`.
-
-**Editing the routing matrix**: `src/agents/documents/document_matrix.yaml` is the single source of truth
-(transcribed from `docs/document_matrix.xlsx`). Changing which agents see a kind of document is a
-YAML edit, not a code change. It is validated on load — an unknown agent name, a bad `R`/`O` value,
-or a per-loan-program map missing one of the four programs raises immediately.
 **"Hồ sơ khác"** (`ho_so_khac`) is a box declared with `catch_all: true` and **no types**, for
 the documents a dossier carries that the matrix has no row for. A file there is read like any
 other — OCR, spreadsheet, XML, text — and then takes exactly the path above: no type, no
@@ -190,6 +190,15 @@ would be three wasted calls in a three-file box.
 rejected, so an edit that wipes a real box's types fails on load instead of quietly turning
 that box into this one.
 
+**Loan program.** The matrix holds an `R`/`O` level per agent **per loan program** (`B1CP`, `MISA`,
+`PLPP`, `PLO`). The user picks it on the upload screen and it arrives as the `loan_program`
+argument; empty falls back to `DEFAULT_LOAN_PROGRAM` (**PLO**) and an unknown id raises. Nothing is
+detected or inferred. The program actually applied is reported in `result["loan_program"]`.
+
+**Editing the routing matrix**: `src/agents/documents/document_matrix.yaml` is the single source of truth
+(transcribed from `docs/document_matrix.xlsx`). Changing which agents see a kind of document is a
+YAML edit, not a code change. It is validated on load — an unknown agent name, a bad `R`/`O` value,
+or a per-loan-program map missing one of the four programs raises immediately.
 
 ### Stage 2 — Evidence gap check
 

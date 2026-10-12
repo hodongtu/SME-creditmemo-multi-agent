@@ -19,9 +19,9 @@ pytesseract==0.3.13
 opencv-python==4.13.0.92
 numpy==2.4.6
 pillow==12.2.0
-pandas==2.3.3
+pandas==2.3.3            # unused by src/ since the spreadsheet readers went direct
 openpyxl==3.1.5          # xlsx reading (direct, format-faithful)
-xlrd==2.0.2              # legacy .xls reading via pandas
+xlrd==2.0.2              # binary .xls (BIFF) reading, direct
 python-pptx==1.0.2       # pptx reading (src/utils/reading/extractors.py)
 markdown==3.10.3         # Markdown -> HTML for PDF export
 weasyprint==69.0         # HTML -> PDF (needs Pango/Cairo/GLib, see above)
