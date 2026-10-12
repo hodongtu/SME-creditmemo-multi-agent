@@ -12,6 +12,7 @@ from src.agents.calculator.financial_ratio_calculator import (
 from src.agents.documents.document_matrix import get_type
 from src.agents.extraction import financial_statement_extraction
 from src.agents.extraction import ledger_extraction
+from src.prompts import system_prompt
 from src.types import ClassifiedDocument
 from src.agents.extraction.vat_revenue import (
     merge_vat_series,
@@ -65,9 +66,7 @@ LEDGER_BLOCK_HEADING = "[EXTRACTED DETAIL LEDGER]"
 DEBT_CHART_TITLE = "Diễn biến dư nợ và doanh thu VAT 12 tháng gần nhất"
 DEBT_CHART_TITLE_DEBT_ONLY = "Diễn biến dư nợ 12 tháng gần nhất"
 DEBT_CHART_COLUMNS = ("Tổng dư nợ (CIC)", "Doanh thu VAT")
-VAT_ESTIMATE_NOTE = (
-    "Một số tháng là số ước lượng, chia đều từ doanh thu khai theo quý."
-)
+VAT_ESTIMATE_NOTE = ("Một số tháng là số ước lượng, chia đều từ doanh thu khai theo quý.")
 SOURCE_LIST_BLOCK_HEADING = "[SOURCE LIST — COPY VERBATIM]"
 
 
@@ -79,15 +78,11 @@ def _document_block_header(
 
     level = doc.agent_relevance.get(target_agent)
     if level == "R":
-        relevance = "Relevance to this agent: required evidence"
+        relevance = system_prompt("block_relevance_required").strip()
     elif level == "O":
-        relevance = "Relevance to this agent: optional supporting evidence"
+        relevance = system_prompt("block_relevance_optional").strip()
     else:
-        relevance = (
-            "Relevance to this agent: general context — this document "
-            "matched no known document type, so it is shared with every "
-            "agent. Use it only if it is genuinely relevant."
-        )
+        relevance = system_prompt("block_relevance_general").strip()
     matched_type = get_type(doc.document_type)
     return "\n".join(
         [
@@ -123,10 +118,7 @@ def _build_source_list_block(
     return "\n".join(
         [
             SOURCE_LIST_BLOCK_HEADING,
-            "COPY THE LIST BELOW VERBATIM into the \"Nguồn dữ liệu\" cell of "
-            "the general-information table, <em> tags included. The whole list "
-            "sits in ONE cell, so join the lines with <br> rather than real "
-            "newlines: - line 1<br>- line 2<br>- line 3",
+            system_prompt("block_source_list").strip(),
             "",
             *(f"- {line}" for line in lines),
         ]
@@ -193,16 +185,7 @@ def _build_credit_need_block(
         return ""
     lines = [
         CREDIT_NEED_BLOCK_HEADING,
-        "The table below was computed by the program from fixed formulas. Use "
-        "these figures as they stand; never recompute them from raw data.",
-        "Money rows are in đồng, as everywhere else in this prompt; % and day "
-        "rows keep their own unit. Copy the figure as printed — the program "
-        "converts it when the report is assembled.",
-        "The \"Nguồn\" column says where each figure came from, and you MUST "
-        "carry that over when you write about it: \"mặc định\" means the "
-        "dossier does NOT state it and the program applied a policy rate — "
-        "never present that as the customer's own figure. \"tính toán\" means "
-        "derived from other rows of this same table.",
+        system_prompt("block_credit_need").strip(),
         "",
         f"| Chỉ tiêu | {table.latest_year} | {table.plan_year} | Đơn vị | Nguồn | Ghi chú |",
         "|---|---:|---:|---|---|---|",
@@ -251,14 +234,7 @@ def _build_proposal_structured_block(
     return _render_structured_records(
         selected, "is_proposal", "proposal_extraction",
         PROPOSAL_BLOCK_HEADING,
-        [
-            "Read from the credit application form: section B (use of funds, "
-            "business plan, projected results, repayment plan), section C "
-            "(collateral) and section D (facility requested).",
-            "Every amount is already in đồng. \"source_unit\" records the unit "
-            "printed on the original, for cross-checking only — do not scale "
-            "again.",
-        ],
+        [system_prompt("block_proposal").strip()],
     )
 
 
@@ -327,19 +303,7 @@ def _build_cic_s10a_structured_block(
     return _render_structured_records(
         selected, "is_cic_s10a", "cic_s10a_extraction",
         CIC_S10A_BLOCK_HEADING,
-        [
-            "Read from the CIC credit-relationship detail report (form S10A): "
-            "current balance per lender, the last 12 months of balances, "
-            "off-balance-sheet commitments, credit rating and warning history.",
-            "UNITS: the VNĐ fields (\"vnd\", \"du_no_vay\", \"du_no_the\", "
-            "\"tong_du_no\") are already in đồng. The foreign-currency fields "
-            "(\"ngoai_te\") are left IN THEIR OWN CURRENCY as printed — do not "
-            "convert them, and never add them to a VNĐ column.",
-            "\"du_no_12_thang\" ALREADY includes foreign-currency debt "
-            "converted; adding the foreign figures from another block counts "
-            "them twice.",
-            "A null means that period has no reported figure — NOT zero.",
-        ],
+        [system_prompt("block_cic_s10a").strip()],
     )
 
 
@@ -351,20 +315,7 @@ def _build_cic_r20_structured_block(
     return _render_structured_records(
         selected, "is_cic_r20", "cic_r20_extraction",
         CIC_R20_BLOCK_HEADING,
-        [
-            "Read from the CIC collateral report (form R20): which lenders "
-            "hold security, and each pledged asset under that lender.",
-            "UNITS: \"gia_tri_trieu_vnd\" is already in đồng despite the field "
-            "name (the printed unit was triệu đồng).",
-            "\"loai_tai_san\" is CIC's two-digit CODE (e.g. \"08\"), not a "
-            "description — the report ships no code legend, so do not infer "
-            "what a code means.",
-            "\"ngay_giai_chap\": null means the asset is still pledged, NOT "
-            "that the date is missing.",
-            "A block whose \"mo_ta_tai_san\" reads \"Không có bảo đảm tiền vay "
-            "bằng tài sản\" means that lender confirms it holds NO security — "
-            "that is a real finding, not an extraction failure.",
-        ],
+        [system_prompt("block_cic_r20").strip()],
     )
 
 
@@ -384,67 +335,11 @@ def _build_ledger_structured_block(
 
     parts = [
         LEDGER_BLOCK_HEADING,
-        "Read from detail ledgers / debt trial balances the customer supplied "
-        "as Excel, every file merged into one record. A key under \"accounts\" "
-        "is always <account number>@<YYYYMMDD>-<YYYYMMDD>, e.g. "
-        "\"131@20250101-20251231\". One key is ONE period; two keys with the "
-        "same account number and different periods are separate entries and "
-        "their balances must NEVER be added together. Read the period from "
-        "\"period\" — \"from\"/\"to\" are the boundary dates — and use it to "
-        "place figures in the right year column. Do not read the year off the key.",
-        "THESE FIGURES WERE READ FROM THE EXCEL CONTENT, not from OCR of an "
-        "image. It is a transcription of the original table rather than a "
-        "cell-by-cell extraction, so when a figure decides a credit conclusion, "
-        "say which file (\"source_files\"), which sheet "
-        "(\"source_sheet_name\") and which account it came from, so the "
-        "reviewer can check it against the original.",
-        "UNITS COME FROM THE FIELD NAME; there is no separate key. A field "
-        "ending in \"_quantity\" is a COUNT (units, pieces — not money); every "
-        "other numeric field is đồng. Never write \"tỷ VNĐ\" after a "
-        "\"_quantity\" figure, and never add a count to a value.",
-        'THIS IS DATA TO FILL THE REPORT WITH, not a layout. "category" says '
-        'which section it belongs to: "receivable" → Phải thu khách hàng; '
-        '"payable" → Phải trả người bán (a DEBIT balance on this account is '
-        'Trả trước cho người bán); "inventory" → Hàng tồn kho; "fixed_asset" → '
-        'Tài sản cố định, tài sản dở dang dài hạn; "cash" → Tiền và các khoản '
-        'tương đương tiền; "borrowing" → Vay nợ ngắn hạn và dài hạn; "equity" → '
-        'Vốn chủ sở hữu; "other_receivable" → Các khoản mục tài sản khác; '
-        '"other_payable" → Các khoản mục nguồn vốn khác.',
-        'Field names: "opening_debit"/"opening_credit" are the opening debit and '
-        'credit balances, "debit_movement"/"credit_movement" the movements, '
-        '"closing_debit"/"closing_credit" the closing balances; stock ledgers use '
-        '"opening_/inflow_/outflow_/closing_" with "_quantity" or "_value".',
-        # Ở đây chỉ nói KHOÁ NGHĨA LÀ GÌ. Mục báo cáo nào đọc bảng nào, và mẫu
-        # số để tính tỷ trọng, nằm ở file guidance — văn khối này in lại cho mỗi
-        # tài liệu ledger, còn guidance in đúng một lần.
-        '"rankings" holds one ranked list per account, each declaring the column '
-        'it was sorted by in "sorted_by", with "items" the five largest rows BY '
-        'THAT COLUMN. The same counterparty appearing in several lists is '
-        'normal. "item_count" is how many rows the source sheet holds; "totals" '
-        'is the figure for the WHOLE account, listed rows and unlisted alike. '
-        'The analysis guidance says which list each report section reads.',
-        'Each row is an ARRAY of values in exactly the order declared in '
-        '"item_columns" for that account — one "item_columns" governs every list '
-        'of that account. Value i belongs to column name i. Two accounts may '
-        'declare different column orders, so read the "item_columns" of the '
-        'account in front of you rather than reusing the previous one.',
-        'Debt ledgers keep the counterparty in TWO columns: '
-        '"counterparty_code" is the code, "counterparty_name" the name — cite '
-        'by NAME, and fall back to the code only when there is no name. Stock '
-        'ledgers use "item_name". '
-        f'A row named "{ledger_extraction.RESIDUAL_LABEL} (N)" is the aggregate '
-        'of N small rows not listed individually WITHIN THAT LIST.',
-
-        '"code_source": "printed" means the account number was printed in the '
-        'file; "convention" means the file printed none and the program assigned '
-        'one from the chart of accounts. Never cite a "convention" number as '
-        'though the customer had written it.',
+        system_prompt(
+            "block_ledger", residual_label=ledger_extraction.RESIDUAL_LABEL
+        ).strip(),
     ]
     for record in records:
-        # Totals come from the record, not from adding up the rows in it. They
-        # were computed here while "items" held every row; a ranking now holds
-        # only the largest five by one column, so summing one would give the
-        # balance of five counterparties and call it the account's.
         parts.append(
             ledger_extraction.render_record(
                 ledger_extraction.fit_to_budget(record)
@@ -480,22 +375,7 @@ def _build_sitevisit_structured_block(
     return _render_structured_records(
         selected, "is_sitevisit", "sitevisit_extraction",
         SITEVISIT_BLOCK_HEADING,
-        [
-            "Read from the site-visit report: the visit itself, sector and GSO "
-            "code, main products, inputs and outputs, next year's business "
-            "plan, and the visiting officer's conclusions.",
-            "UNITS: every amount under \"business_plan_next_year\" is already "
-            "in đồng. \"source_unit\" records the unit printed on the report.",
-            "IMPORTANT — the \"conclusion\" block (overall_assessment, "
-            "risks_noted, recommendation, conditions) is the visiting officer's "
-            "OPINION, not a measurement. Use it as context and say whose "
-            "judgement it is whenever you carry it over; never cite it as a "
-            "fact read from the dossier.",
-            "\"gso_code\": null means the report prints no GSO sector code — "
-            "do not look one up or infer it from the sector name.",
-            "The remaining blocks are on-site observations: use them against the "
-            "financial statements, and a gap between the two is worth reporting.",
-        ],
+        [system_prompt("block_sitevisit").strip()],
     )
 
 

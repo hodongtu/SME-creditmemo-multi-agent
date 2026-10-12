@@ -6,6 +6,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
+from src.prompts import system_prompt as prompt_file
 from src.utils.common import normalize_text
 
 
@@ -57,17 +58,7 @@ def build_extraction_chain(system_prompt: str, llm: Any):
     prompt = ChatPromptTemplate.from_messages(
         [
             SystemMessage(content=system_prompt),
-            (
-                "human",
-                """
-                Tên file: {filename}
-
-                Văn bản OCR:
-                {content}
-
-                Trích xuất theo đúng schema JSON đã mô tả.
-                """,
-            ),
+            ("human", prompt_file("extraction_user")),
         ]
     )
     return prompt | llm | JsonOutputParser()

@@ -4,6 +4,7 @@ import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
+from src.prompts import system_prompt
 from src.utils.report.formatting import render_money
 from src.agents.extraction.financial_statement_extraction import (
     normalize_period_label,
@@ -687,10 +688,7 @@ class FinancialRatioCalculator:
         years = sorted(yearly_metrics)
         lines = [
             METRICS_BLOCK_HEADING,
-            "Computed by the program from the extracted documents — use these "
-            "as the primary source for every ratio table. Money is in đồng; "
-            "copy the figure as printed and the program converts it. Where a "
-            "value is missing, say so rather than estimating it.",
+            system_prompt("metrics_intro").strip(),
             "",
         ]
         warnings = (
@@ -698,20 +696,11 @@ class FinancialRatioCalculator:
             + self.data_quality_warnings(yearly_metrics)
         )
         if warnings:
-            lines.append(
-                "Data quality warnings (possible OCR/extraction errors — verify "
-                "against source before relying on these figures):"
-            )
+            lines.append(system_prompt("metrics_data_quality").strip())
             lines.extend(f"- {warning}" for warning in warnings)
             lines.append("")
         if source_files:
-            lines.extend(
-                [
-                    "SOURCE FILES — cite by the filenames below. "
-                    "\"[PRE-COMPUTED FINANCIAL METRICS]\" is this block's "
-                    "internal label; never write it into the report:",
-                ]
-            )
+            lines.append(system_prompt("metrics_source_files").strip())
             lines.extend(
                 f"- {year}: {', '.join(names)}"
                 for year, names in source_files.items()

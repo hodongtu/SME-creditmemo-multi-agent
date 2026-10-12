@@ -24,6 +24,7 @@ from src.utils.report.citations import (
 )
 
 from src.config import Config
+from src.prompts import system_prompt
 from src.types import (
     AgentName,
     ClassifiedDocument,
@@ -289,13 +290,7 @@ _BLOCKING_EVIDENCE = frozenset(
 class Supervisor:
     """Local  supervisor without API, cache, or database dependencies."""
 
-    MIXED_UNIT_WARNING = (
-        "CURRENCY UNIT NOTICE: the blocks below use DIFFERENT UNITS, and each "
-        "block states its own unit at the top. Read the unit of the block you "
-        "are quoting from. NEVER put a figure from one block beside a figure "
-        "from another without converting first — the same line item can appear "
-        "in two blocks under two units."
-    )
+    MIXED_UNIT_WARNING = system_prompt("user_mixed_unit_warning").strip()
 
     _document_block_header = staticmethod(prompt_blocks._document_block_header)
     _build_source_list_block = staticmethod(prompt_blocks._build_source_list_block)
@@ -995,17 +990,7 @@ class Supervisor:
         prompt = ChatPromptTemplate.from_messages(
             [
                 SystemMessage(content=build_document_classification_prompt(group_id)),
-                (
-                    "human",
-                    """
-                    Filename: {filename}
-
-                    Extracted document text sample:
-                    {content_sample}
-
-                    Classify this document.
-                    """,
-                ),
+                ("human", system_prompt("document_classification_user")),
             ]
         )
         return prompt | self.config.document_llm | JsonOutputParser()
@@ -1610,9 +1595,9 @@ class Supervisor:
             ).get("years")
             if periods:
                 base += (
-                    "\n\nReporting periods with data — use exactly this many "
-                    "year columns in every yearly table, oldest first: "
-                    f"{', '.join(periods)}"
+                    "\n\n" + system_prompt(
+                        "user_reporting_periods", periods=", ".join(periods)
+                    ).strip()
                 )
         credit_need_block = self._build_credit_need_block(documents, target_agent)
 
@@ -1686,8 +1671,9 @@ class Supervisor:
             )
             if pointed_at is not None:
                 content_section = (
-                    "Extracted document content: structured extraction "
-                    f"available — see {pointed_at.heading} below."
+                    system_prompt(
+                        "user_structured_pointer", heading=pointed_at.heading
+                    ).strip()
                 )
             else:
                 content_section = "\n".join(
