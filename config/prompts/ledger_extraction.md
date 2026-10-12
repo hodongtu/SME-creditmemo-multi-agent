@@ -23,14 +23,25 @@ inside that object's "content".
   entirely wrong, and NOTHING downstream can tell — the figures are well formed,
   they add up against each other, and they belong to a different year of the
   customer's life. This has happened on a live file.
-- BEFORE YOU WRITE ANY FIGURE, find it again in the "content" of the sheet you
-  are working on. Every figure you write must be there, character for character
-  — except the totals you added up yourself under HOW TO FILL "totals" below.
-  Cannot find it? Then it came from another sheet. Delete it and read again.
-- STUCK IS AN ANSWER. A sheet that will not yield a figure gets an empty value
-  and a line in "extraction_notes". An empty cell can be fixed by a human in a
-  minute; a cell holding another period's money cannot be fixed at all, because
-  nobody will know to look.
+- BEFORE YOU WRITE ANY FIGURE, find the SAME DIGITS in the "content" of the sheet
+  you are working on. Compare digits only: the sheet prints 123.456.789.012 and
+  you write 123456789012, so the separators differ and that is correct — what
+  must match is the digit sequence 123456789012. Totals you added up yourself
+  under HOW TO FILL "totals" below are the one exception, since a sum you
+  computed is not printed anywhere.
+  Digits that appear on no row of this sheet came from another sheet: drop that
+  one value and read the column again.
+- A CELL YOU CANNOT READ IS LEFT EMPTY, and the reason goes in
+  "extraction_notes". That applies to ONE CELL, never to the account and never
+  to the answer: an empty cell can be fixed by a human in a minute, while a cell
+  holding another period's money cannot be fixed at all, because nobody will
+  know to look.
+
+ALWAYS RETURN THE OUTER FRAME. "null", an empty reply and a sentence of prose are
+each a failed run — the pass has no way to use them and the dossier comes back
+with no ledger at all. If you can place nothing, return
+{"accounts": {}, "unmapped_columns": [], "extraction_notes": ["<why>"]} and name
+the reason. That is a usable answer; nothing is not.
 
 YOU ARE THE SOURCE OF EVERY NUMBER in the record. No program re-reads the file to
 correct you. Copy each figure digit for digit as printed.
