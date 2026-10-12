@@ -5,6 +5,7 @@ from typing import Any
 
 from src.agents.documents.document_matrix import (
     describe_types_for_prompt,
+    document_type_filename_keywords,
     document_type_keywords,
     load_matrix,
 )
@@ -40,20 +41,74 @@ def _normalized_type_keywords() -> tuple[tuple[str, tuple[str, ...]], ...]:
     )
 
 
+def _tokens(text: str) -> tuple[str, ...]:
+    """The normalised text as whole words."""
+
+    return tuple(normalize_text(text).split())
+
+
+@lru_cache(maxsize=1)
+def _normalized_filename_keywords() -> dict[str, tuple[tuple[str, ...], ...]]:
+    """Filename-only keywords, normalised once and split into tokens."""
+
+    return {
+        type_id: tuple(_tokens(keyword) for keyword in keywords)
+        for type_id, keywords in document_type_filename_keywords().items()
+        if keywords
+    }
+
+
+def _has_token_run(haystack: tuple[str, ...], needle: tuple[str, ...]) -> bool:
+    """True when `needle`'s words appear consecutively in `haystack`.
+
+    Whole words, unlike the substring test the body keywords use. That test is
+    right for prose, where "no phai tra" has to be found inside a sentence, and
+    wrong for a bare number: normalize_text turns 131.2025.xls into
+    "131 2025 xls", but it turns BCTC_20131231.xls into "bctc 20131231", and
+    "131" is a substring of that date.
+    """
+
+    if not needle:
+        return False
+    width = len(needle)
+    return any(
+        haystack[start:start + width] == needle
+        for start in range(len(haystack) - width + 1)
+    )
+
+
 def document_type_scores(
     filename: str,
     content: str,
     group_id: str = "",
 ) -> dict[str, int]:
-    """Weighted keyword hits per document type."""
+    """Weighted keyword hits per document type.
+
+    `keywords` are scored against both the filename and the body, the filename
+    at FILENAME_KEYWORD_WEIGHT. `filename_keywords` are scored against the
+    filename ALONE, at the same weight, and are matched by whole word. That is
+    for terms which identify a document when someone puts them in a filename
+    and mean nothing inside one: an account number is the case this was added
+    for — 131.2025.xls is a detail ledger of account 131, while "131" appearing
+    in a body is a line item, an amount, or part of a date.
+    """
 
     name = normalize_text(filename)
+    name_tokens = tuple(name.split())
     body = normalize_text(content)
     allowed = _types_in_group(group_id)
+    filename_only = _normalized_filename_keywords()
 
     return {
         type_id: (
-            FILENAME_KEYWORD_WEIGHT * sum(kw in name for kw in keywords)
+            FILENAME_KEYWORD_WEIGHT
+            * (
+                sum(kw in name for kw in keywords)
+                + sum(
+                    _has_token_run(name_tokens, kw)
+                    for kw in filename_only.get(type_id, ())
+                )
+            )
             + sum(kw in body for kw in keywords)
         )
         for type_id, keywords in _normalized_type_keywords()
@@ -113,7 +168,12 @@ def _longest_filename_hit(type_id: str, normalized_name: str) -> int:
     """Length of this type's longest keyword found in the filename."""
 
     keywords = dict(_normalized_type_keywords()).get(type_id, ())
-    return max((len(kw) for kw in keywords if kw in normalized_name), default=0)
+    longest = max((len(kw) for kw in keywords if kw in normalized_name), default=0)
+    tokens = tuple(normalized_name.split())
+    for needle in _normalized_filename_keywords().get(type_id, ()):
+        if _has_token_run(tokens, needle):
+            longest = max(longest, len(" ".join(needle)))
+    return longest
 
 
 def _no_type_matched(

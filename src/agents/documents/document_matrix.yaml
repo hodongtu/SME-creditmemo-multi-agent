@@ -8,6 +8,14 @@
 # --- How to read a `type` ----------------------------------------------------
 #   id        : technical key, never changed (it is written into logs/monitoring).
 #   label     : the document line verbatim from the source Excel file.
+#   filename_keywords : optional. Terms scored against the FILENAME ONLY, at the
+#               same 3x weight, and matched by WHOLE WORD rather than as a
+#               substring. For terms that identify a document when someone puts
+#               them in a filename and mean nothing inside one — an account
+#               number is the case this exists for. Whole-word matching is what
+#               keeps "131" out of BCTC_20131231.xls. A term may not appear in
+#               both lists: one in `keywords` is already scored against the
+#               filename.
 #   keywords  : terms that identify this type from the FILENAME and the CONTENT.
 #               Written unaccented and lowercase. The system strips accents and
 #               lowercases both keywords and text before comparing, so accented
@@ -300,6 +308,19 @@ groups:
         agents:
           FINANCIAL_ANALYSIS_AGENT: R
           BUSINESS_ACTIVITY_AGENT: R
+        # The account number alone, which identifies a ledger when it is the
+        # filename and nothing when it is in the body: 131.2025.xls is the
+        # detail ledger of account 131, while "131" inside a workbook is a line
+        # item, an amount, or part of a date. Same accounts as the "tk NNN"
+        # keywords below.
+        filename_keywords:
+          - "131"
+          - "154"
+          - "156"
+          - "211"
+          - "214"
+          - "331"
+          - "341"
         keywords:
           - "so chi tiet tai khoan"
           - "so chi tiet"

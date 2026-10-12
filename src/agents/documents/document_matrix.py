@@ -13,6 +13,8 @@ from src.types import SPECIALIST_DOCUMENT_AGENTS
 MATRIX_PATH = Path(__file__).resolve().parent / "document_matrix.yaml"
 
 RELEVANCE_LEVELS = ("R", "O")
+# Named only for the error message below; the scorer owns the real constant.
+FILENAME_KEYWORD_WEIGHT = 3
 DEFAULT_LOAN_PROGRAM = "PLO"
 
 PRIMARY_AGENT_PRECEDENCE = (
@@ -40,6 +42,7 @@ class DocumentType:
     group_stt: str
     group_label: str
     keywords: tuple[str, ...]
+    filename_keywords: tuple[str, ...]
     agents: dict[str, dict[str, str]]
     primary_agent: str
     requirement: dict[str, str] = field(default_factory=dict)
@@ -139,6 +142,28 @@ def _parse_agents(
             continue
         _fail(f"{where}/{agent}: expected 'R'/'O' or a per-program mapping")
     return agents
+
+
+def _parse_keywords(
+    raw: Any,
+    where: str,
+    field: str,
+    required: bool = True,
+) -> list[str]:
+    """One keyword list: non-empty strings, no duplicates."""
+
+    if not required and not raw:
+        return []
+    raw = _need(raw, list, f"{where}: {field!r} must be a non-empty list")
+    keywords: list[str] = []
+    for keyword in raw:
+        text = str(keyword).strip()
+        if not text:
+            _fail(f"{where}: empty keyword in {field!r}")
+        if text in keywords:
+            _fail(f"{where}: duplicate keyword {text!r} in {field!r}")
+        keywords.append(text)
+    return keywords
 
 
 def _resolve_primary_agent(
@@ -242,16 +267,21 @@ def _load(path: Path) -> DocumentMatrix:
                               f"{where}: 'label' is required")).strip()
             short_label = str(entry.get("short_label") or "").strip() or label
 
-            raw_keywords = _need(entry.get("keywords"), list,
-                                 f"{where}: 'keywords' must be a non-empty list")
-            keywords: list[str] = []
-            for keyword in raw_keywords:
-                text = str(keyword).strip()
-                if not text:
-                    _fail(f"{where}: empty keyword")
-                if text in keywords:
-                    _fail(f"{where}: duplicate keyword {text!r}")
-                keywords.append(text)
+            keywords = _parse_keywords(entry.get("keywords"), where, "keywords")
+
+            filename_keywords = _parse_keywords(
+                entry.get("filename_keywords") or [],
+                where,
+                "filename_keywords",
+                required=False,
+            )
+            both = sorted(set(keywords) & set(filename_keywords))
+            if both:
+                _fail(
+                    f"{where}: {both} appear in both 'keywords' and "
+                    f"'filename_keywords'; a term in 'keywords' is already "
+                    f"scored against the filename at {FILENAME_KEYWORD_WEIGHT}x"
+                )
 
             agents = _parse_agents(entry.get("agents"), tuple(programs), where)
             requirement = entry.get("requirement") or {}
@@ -267,6 +297,7 @@ def _load(path: Path) -> DocumentMatrix:
                 group_stt=str(group.get("stt") or ""),
                 group_label=str(group.get("label") or group_id),
                 keywords=tuple(keywords),
+                filename_keywords=tuple(filename_keywords),
                 agents=agents,
                 primary_agent=_resolve_primary_agent(
                     entry.get("primary_agent") or group.get("primary_agent"),
@@ -329,6 +360,15 @@ def document_type_keywords() -> dict[str, tuple[str, ...]]:
     """{document_type_id: keywords} — the input to rule-based classification."""
 
     return {type_id: doc.keywords for type_id, doc in load_matrix().types.items()}
+
+
+def document_type_filename_keywords() -> dict[str, tuple[str, ...]]:
+    """{document_type_id: keywords scored against the FILENAME only}."""
+
+    return {
+        type_id: doc.filename_keywords
+        for type_id, doc in load_matrix().types.items()
+    }
 
 
 def resolve_loan_program(loan_program: str = "") -> str:

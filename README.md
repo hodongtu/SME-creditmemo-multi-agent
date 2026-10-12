@@ -155,6 +155,15 @@ the officer hunting for a document they already uploaded.
 - **Classification** — identifies *which of the 22 `document_type` rows* in the routing matrix
   (`src/agents/documents/document_matrix.yaml`) the file is, by scoring that type's keywords against the
   filename and body (a filename hit counts triple — a well-named file states its own type).
+
+  A type may also declare **`filename_keywords`**, scored against the filename **alone**, at the
+  same triple weight, and matched by **whole word** rather than as a substring. That is for
+  terms which identify a document when someone puts them in a filename and mean nothing
+  inside one. The account number is the case it exists for: `131.2025.xls` is the detail ledger
+  of account 131, while `131` in a body is a line item, an amount, or part of a date — and
+  whole-word matching is exactly what keeps it out of `BCTC_20131231.xls`. Declaring such a
+  term under plain `keywords` instead would score every workbook that happens to print the
+  number, so the loader refuses a term that appears in both lists.
   Knowing the upload box restricts the candidates to that group first. If confidence clears the
   threshold (0.80, `document_classifier_grouped_confidence_threshold` when the box is known,
   `document_classifier_rule_confidence_threshold` when it is not) the keyword result is used as-is;

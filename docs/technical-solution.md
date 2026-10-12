@@ -441,7 +441,7 @@ statement" is useless advice to somebody who sent one into a folder the screen n
 ```mermaid
 flowchart TD
     A["File + upload folder"] --> B["Upload box narrows the catalogue<br/>6 typed folders -> that group's types only<br/>ho_so_khac -> no types at all"]
-    B --> C["Score every candidate type<br/>filename hit x3 + body hit x1"]
+    B --> C["Score every candidate type<br/>filename hit x3 + body hit x1<br/>filename_keywords: whole word, filename only, x3"]
     C --> D["confidence = min(0.95,<br/>0.40 + 0.35 x margin_ratio + 0.03 x min(score,6))<br/>capped at 0.6 if score &lt; 3"]
     D --> E{"confidence >= 0.80?"}
     E -->|yes| K["Keep keyword result"]
