@@ -156,13 +156,20 @@ the officer hunting for a document they already uploaded.
   (`src/agents/documents/document_matrix.yaml`) the file is, by scoring that type's keywords against the
   filename and body (a filename hit counts triple — a well-named file states its own type).
   Knowing the upload box restricts the candidates to that group first. If confidence clears the
-  threshold (0.65, `document_classifier_grouped_confidence_threshold` when the box is known,
+  threshold (0.80, `document_classifier_grouped_confidence_threshold` when the box is known,
   `document_classifier_rule_confidence_threshold` when it is not) the keyword result is used as-is;
   otherwise it **falls back to an LLM** classifier picking from the same catalogue.
 
   Two conditions keep the keyword result even below the threshold, because in both the LLM could
   not change anything that matters:
-  - every plausible type feeds the same agents — the label would change, the routing would not;
+  - **several** plausible types all feed the same agents — the label would change, the routing
+    would not. Both words are load-bearing. The check needs at least two candidates, since
+    "they all agree" said of one type is not agreement, and it needs the winner to have scored
+    at least `FILENAME_KEYWORD_WEIGHT`. Without that floor a single accidental hit vouched for
+    itself: separators are flattened before matching, so a ledger whose header puts a `Nợ`
+    column next to a `Phải trả…` label reads as "no phai tra" and scores a balance sheet —
+    `131.2025.xls` came out as `bang_can_doi_ke_toan` at 0.600, which is the value the formula
+    produces precisely when it is capping itself for distrusting the signal;
   - the filename names **exactly one** type and the body did not overturn it. Confidence is a
     margin measure, so a clearly-named statement whose text quotes a neighbouring type's
     vocabulary (a BCTC naming the balance sheet inside itself) can dip under the threshold with

@@ -443,9 +443,9 @@ flowchart TD
     A["File + upload folder"] --> B["Upload box narrows the catalogue<br/>6 typed folders -> that group's types only<br/>ho_so_khac -> no types at all"]
     B --> C["Score every candidate type<br/>filename hit x3 + body hit x1"]
     C --> D["confidence = min(0.95,<br/>0.40 + 0.35 x margin_ratio + 0.03 x min(score,6))<br/>capped at 0.6 if score &lt; 3"]
-    D --> E{"confidence >= 0.65?"}
+    D --> E{"confidence >= 0.80?"}
     E -->|yes| K["Keep keyword result"]
-    E -->|no| F{"routing_unambiguous?<br/>every plausible type feeds<br/>the same agents"}
+    E -->|no| F{"routing_unambiguous?<br/>score >= 3, two or more candidates,<br/>all feeding the same agents"}
     F -->|yes| K
     F -->|no| G{"filename_decisive?<br/>filename names exactly one type"}
     G -->|yes| K

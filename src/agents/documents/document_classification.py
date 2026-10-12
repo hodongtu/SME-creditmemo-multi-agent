@@ -13,6 +13,11 @@ from src.prompts import system_prompt
 
 FILENAME_KEYWORD_WEIGHT = 3
 CANDIDATE_SCORE_RATIO = 0.5
+# One filename hit is the weakest signal this project acts on anywhere: it is
+# the floor _cross_box_owner uses before it will even warn, and below it the
+# confidence formula caps itself at 0.6.
+MIN_ROUTING_EVIDENCE = FILENAME_KEYWORD_WEIGHT
+MIN_PLAUSIBLE_TYPES = 2
 
 
 @lru_cache(maxsize=8)
@@ -57,17 +62,36 @@ def document_type_scores(
 
 
 def routing_is_unambiguous(scores: dict[str, int]) -> bool:
-    """True when every plausible type routes to the same agents."""
+    """True when SEVERAL plausible types all route to the same agents.
+
+    The flag exists to skip an LLM call that could not change the outcome: when
+    every type still in the running feeds the same specialists, the label may be
+    wrong but the routing is not. Because it bypasses the confidence floor, it
+    must only answer that question, never a vacuous version of it. Two shapes
+    made it vacuous and both used to return True:
+
+    A single weak hit with nothing else scoring. A keyword lands by accident
+    more often than it looks: separators are flattened before matching, so a
+    "Nợ" column standing next to a "Phải trả…" label reads as "no phai tra" and
+    scores a balance sheet. One accidental point then vouched for itself, and a
+    ledger named 131.2025.xls came out as bang_can_doi_ke_toan at 0.600 — the
+    value the formula produces when it caps itself for distrusting the signal.
+
+    And a single candidate: "they all agree" said of one type is not agreement.
+    """
 
     top_score = max(scores.values(), default=0)
-    if top_score <= 0:
+    if top_score < MIN_ROUTING_EVIDENCE:
         return False
     threshold = max(1, CANDIDATE_SCORE_RATIO * top_score)
+    plausible = [
+        type_id for type_id, score in scores.items() if score >= threshold
+    ]
+    if len(plausible) < MIN_PLAUSIBLE_TYPES:
+        return False
     matrix = load_matrix()
     signatures = {
-        matrix.types[type_id].routing_signature
-        for type_id, score in scores.items()
-        if score >= threshold
+        matrix.types[type_id].routing_signature for type_id in plausible
     }
     return len(signatures) == 1
 

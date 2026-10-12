@@ -51,8 +51,8 @@ class Config:
     max_extraction_calls: int = 30
     max_extraction_input_chars: int = 2_000_000
     result_content_char_limit: int = 2_000
-    document_classifier_rule_confidence_threshold: float = 0.65
-    document_classifier_grouped_confidence_threshold: float = 0.65
+    document_classifier_rule_confidence_threshold: float = 0.80
+    document_classifier_grouped_confidence_threshold: float = 0.80
     enable_plan_and_execute: bool = True
     enable_self_ask_gap_analysis: bool = True
     agent_input_char_budgets: dict[str, int] | None = None
