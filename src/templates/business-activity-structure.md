@@ -4,10 +4,10 @@
  
 | Thông tin chung | &nbsp; |
 | --------------- | ------ |
-| *Tên khách hàng* | {{TenKhachHang}} |
-| *Nguồn dữ liệu* | {{TenFile}} |
-| *Ngành nghề kinh doanh* | {{NganhNghe}} |
-| *Mức độ tin cậy* | {{MucDoTinCay}} |
+| **Tên khách hàng** | {{TenKhachHang}} |
+| **Nguồn dữ liệu** | {{TenFile}} |
+| **Ngành nghề kinh doanh** | {{NganhNghe}} |
+| **Mức độ tin cậy** | {{MucDoTinCay}} |
  
 ## 1. Mô hình sản xuất kinh doanh
  
@@ -18,7 +18,7 @@ flowchart LR
   SP3[{{SanPhamDauVao3}}] --> V3[{{DauVao3}}]
   SP4[{{SanPhamDauVao4}}] --> V4[{{DauVao4}}]
   SP5[{{SanPhamDauVao5}}] --> V5[{{DauVao5}}]
-  V1 -->|{{TyTrong}}| KH[{{TenKhachHang}}]
+  V1 -->|{{TyTrong}}| KH{{{{TenKhachHang}}}}
   V2 -->|{{TyTrong}}| KH
   V3 -->|{{TyTrong}}| KH
   V4 -->|{{TyTrong}}| KH
@@ -35,7 +35,6 @@ flowchart LR
   R5 --> SR5[{{SanPhamDauRa5}}]
 ```
  
-*Nhận định*:
  
 ## 2. Lĩnh vực kinh doanh và sản phẩm
  
@@ -44,7 +43,6 @@ flowchart LR
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 ## 3. Đầu ra
  
@@ -53,7 +51,6 @@ flowchart LR
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 ## 4. Đầu vào
  
@@ -62,7 +59,6 @@ flowchart LR
  
 (Đơn vị: tỷ VNĐ)
  
-*Nhận định*:
  
 ## 5. Quy trình vận hành
  
@@ -73,7 +69,6 @@ flowchart LR
  
 ## 6. Kết luận
  
-*Nhận định*:
  
 *Ưu điểm*:
  
