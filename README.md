@@ -389,6 +389,12 @@ sheet that has five, or sum past `totals`. Three of those six only became checka
 each list was cut down to one criterion. None of them catches a model that quietly picked the
 wrong five and ordered them correctly — that would need the rows it never sent.
 `LLM_MAX_TOKENS` now sets the ceiling explicitly — left unset, the gateway picks its own.
+A reply that hits the ceiling is **refused rather than parsed**: `finish_reason` is read before
+the JSON is, because `JsonOutputParser` repairs a string cut mid-object into a record that looks
+complete with sheets missing. One live run returned 2 accounts out of 15 sheets that way. The
+other cut in that path is the reader's own 500-row cap per sheet, which is now named in
+`extraction_notes` by code — a sheet read 500 rows deep out of 4,000 has no usable total, because
+the rows that would complete the sum, and usually the printed total row itself, were never sent.
 
 **The ceiling is per pass, because one number cannot fit the whole fleet.** Measured by
 asking each model (`testing/probe_max_tokens.py` sends `max_tokens=999999` and reads the

@@ -52,7 +52,18 @@ A sheet you cannot place still has to be named in "extraction_notes" — droppin
 one in silence is the worst failure here, because the record still looks complete
 while half the ledger is gone.
 
-COPY EVERY DETAIL ROW of each sheet. Do not sample, do not summarise.
+READ EVERY DETAIL ROW of each sheet. Do not sample, do not skim the first
+screenful: "totals" covers every row and the rankings are sorted over every row,
+so a row you never looked at corrupts both. What you RETURN is only the largest
+five per column — see "WHICH ROWS TO RETURN". Read all of it, return the top
+of it.
+
+A SHEET CAN ARRIVE INCOMPLETE. When its last line reads
+"... truncated after 500 rows ...", the rows below that were never sent to you
+and neither was the printed total row if it sat at the bottom. Say so in
+"extraction_notes", naming the sheet, and give "item_count" as the number of
+rows you were actually given. Do not present a total you added up from them as
+the sheet's total.
 
 ════ OUTER FRAME ════
 {"accounts": {...}, "unmapped_columns": [], "extraction_notes": []}

@@ -9,7 +9,11 @@ from src.agents.extraction.structured_extraction import (
     run_extraction,
 )
 from src.utils.common import normalize_text
-from src.utils.reading.extractors import read_sheets
+from src.utils.reading.extractors import (
+    SHEET_ROW_CAP,
+    read_sheets,
+    row_cap_marker,
+)
 from src.prompts import system_prompt
 
 
@@ -275,6 +279,28 @@ def read_ledger_sheets(
             for sheet in found
         ]
     return sheets, notes
+
+
+def truncation_notes(sheets: list[dict[str, str]]) -> list[str]:
+    """One note per sheet the reader could not read to the end.
+
+    Found in code, not asked of the model: a cut sheet is the one case where
+    "totals" cannot be right whatever the model does, because the rows that
+    would complete the sum — and often the printed total row itself, which sits
+    at the bottom — were never sent. The model is told what the line means too,
+    but this note is the one that cannot be forgotten.
+    """
+
+    marker = row_cap_marker(SHEET_ROW_CAP)
+    return [
+        f"INCOMPLETE SHEET: {sheet['filename']} › "
+        f"{sheet['sheet_name'] or '(single sheet)'} was read down to "
+        f"{SHEET_ROW_CAP:,} rows and has more. Its totals cover only those rows "
+        f"and its item_count is at least {SHEET_ROW_CAP:,}, not the sheet's real "
+        f"depth."
+        for sheet in sheets
+        if marker in sheet.get("content", "")
+    ]
 
 
 def _json_payload(sheets: list[dict[str, str]]) -> tuple[str, list[str]]:
@@ -681,6 +707,7 @@ def extract_ledger_batch(
     record.setdefault("unmapped_columns", [])
     record.setdefault("extraction_notes", [])
     record["extraction_notes"] += read_notes
+    record["extraction_notes"] += truncation_notes(sheets)
     if dropped:
         record["extraction_notes"].append(
             f"Input exceeded {PAYLOAD_CHAR_BUDGET:,} characters, so {len(dropped)} "

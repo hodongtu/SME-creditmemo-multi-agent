@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from langchain_core.messages import SystemMessage
+from langchain_core.exceptions import OutputParserException
+from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -53,7 +54,15 @@ def scale_declared_blocks(
 
 
 def build_extraction_chain(system_prompt: str, llm: Any):
-    """Wire a system prompt to the LLM with a JSON-parsing tail."""
+    """Wire a system prompt to the LLM. The reply is parsed by run_extraction.
+
+    The JSON parser used to sit on the end of this chain, which threw away the
+    reply's metadata — and `finish_reason` is the only thing that knows the
+    model ran out of room. JsonOutputParser REPAIRS a JSON string cut mid-object
+    rather than refusing it, so a ledger pass that hit the ceiling returned a
+    record that looked complete with half its accounts missing. One live run
+    came back with 2 accounts out of 15 sheets.
+    """
 
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -61,7 +70,50 @@ def build_extraction_chain(system_prompt: str, llm: Any):
             ("human", prompt_file("extraction_user")),
         ]
     )
-    return prompt | llm | JsonOutputParser()
+    return prompt | llm
+
+
+# What each provider calls "I stopped because I ran out of output tokens".
+TRUNCATED_FINISH_REASONS = frozenset({"length", "max_tokens", "model_length"})
+
+
+def _finish_reason(reply: BaseMessage) -> str:
+    metadata = reply.response_metadata or {}
+    for key in ("finish_reason", "stop_reason"):
+        value = metadata.get(key)
+        if value:
+            return str(value).lower()
+    return ""
+
+
+def _parse_reply(reply: Any) -> tuple[dict[str, Any] | None, str]:
+    """The reply as a dict, or why it cannot be used.
+
+    A chain that still carries its own parser hands back a dict; that is left
+    alone so a caller which built one keeps working.
+    """
+
+    if isinstance(reply, dict):
+        return reply, ""
+    if not isinstance(reply, BaseMessage):
+        return None, f"Extraction returned {type(reply).__name__}, not a reply"
+
+    reason = _finish_reason(reply)
+    if reason in TRUNCATED_FINISH_REASONS:
+        tokens = (reply.usage_metadata or {}).get("output_tokens")
+        return None, (
+            f"The model ran out of output tokens (finish_reason={reason!r}"
+            + (f", {tokens:,} written" if tokens else "")
+            + "). The reply is incomplete, and the JSON parser would repair it "
+            "into a record that looks whole with sheets missing. Raise this "
+            "pass's max_tokens_env (LLM_LEDGER_MAX_TOKENS for the ledger pass; "
+            "run testing/probe_max_tokens.py for the model's real ceiling), or "
+            "send fewer sheets per call."
+        )[:500]
+    try:
+        return JsonOutputParser().parse(str(reply.content)), ""
+    except OutputParserException as exc:
+        return None, f"Reply was not JSON: {exc}"[:500]
 
 
 def _explain(exc: Exception) -> str:
@@ -92,10 +144,13 @@ def run_extraction(
     if chain is None:
         return None, missing_llm_message
     try:
-        result = chain.invoke({"filename": filename, "content": content})
+        reply = chain.invoke({"filename": filename, "content": content})
     except Exception as exc:
         return None, _explain(exc)
 
+    result, problem = _parse_reply(reply)
+    if problem:
+        return None, problem
     if not isinstance(result, dict):
         return None, f"Extraction returned non-dict result: {type(result).__name__}"
     missing = required_keys - result.keys()

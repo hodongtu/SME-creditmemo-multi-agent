@@ -13,6 +13,10 @@ from openpyxl.utils import get_column_letter
 
 from src.utils.reading.ocr import ocr_pdf
 
+# How deep any one sheet is read. A sheet with more rows than this comes
+# back ending in row_cap_marker() instead of its last rows.
+SHEET_ROW_CAP = 500
+
 
 def _decode(raw: bytes) -> str:
     """Bytes as text, trying the encodings office software actually writes."""
@@ -65,7 +69,7 @@ def _read_csv_rows(csv_path: str) -> list[list[str]]:
 
 def extract_csv_text(
     csv_path: str,
-    max_rows: int = 500,
+    max_rows: int = SHEET_ROW_CAP,
     max_chars: int = 100000,
 ) -> str:
     """Extract CSV content as tab-separated text for LLM analysis."""
@@ -73,7 +77,7 @@ def extract_csv_text(
     rows, duplicates = _dedup_rows(_read_csv_rows(csv_path))
     body = rows[:max_rows]
     if len(rows) > max_rows:
-        body = body + [[f"... truncated after {max_rows} rows ..."]]
+        body = body + [[row_cap_marker(max_rows)]]
     if duplicates:
         body = [[f"... đã bỏ {duplicates} dòng trùng lặp ..."]] + body
     return "\n".join("\t".join(row) for row in body)[:max_chars]
@@ -229,6 +233,18 @@ def _sheet_header(title: str, rows: int, columns: int, duplicates: int) -> str:
     return f"--- Sheet: {title} ({rows} dòng x {columns} cột{dropped}) ---"
 
 
+def row_cap_marker(max_rows: int) -> str:
+    """The line that stands in for the rows a sheet was cut off at.
+
+    Named here so the ledger pass can recognise its own reader's cut rather
+    than matching the wording by hand: a sheet read down to 500 rows of 4,000
+    has no usable total and no usable row count, and saying nothing about that
+    is how a quarter of a ledger gets reported as the whole of it.
+    """
+
+    return f"... truncated after {max_rows} rows ..."
+
+
 def _grid_to_tsv(
     grid: list[list[str]],
     kept_columns: list[int],
@@ -243,7 +259,7 @@ def _grid_to_tsv(
             trimmed.pop()
         lines.append("\t".join(trimmed))
     if len(grid) > max_rows:
-        lines.append(f"... truncated after {max_rows} rows ...")
+        lines.append(row_cap_marker(max_rows))
     return "\n".join(lines)
 
 
@@ -317,7 +333,7 @@ def _workbook_shape(path: str) -> str:
 
 def read_sheets(
     excel_path: str,
-    max_rows_per_sheet: int = 500,
+    max_rows_per_sheet: int = SHEET_ROW_CAP,
 ) -> list[SheetText]:
     """Every sheet of a spreadsheet, one record each, whatever wrote the file."""
 
@@ -678,7 +694,7 @@ def _sheets_to_text(sheets: list[SheetText], max_chars: int) -> str:
 
 def extract_excel_text(
     excel_path: str,
-    max_rows_per_sheet: int = 500,
+    max_rows_per_sheet: int = SHEET_ROW_CAP,
     max_chars: int = 100000,
 ) -> str:
     """Extract XLS/XLSX workbook content as LLM-readable text grouped by sheet."""
