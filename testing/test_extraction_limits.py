@@ -13,7 +13,16 @@ from src.agents.extraction.structured_extraction import (
     build_extraction_chain,
     run_extraction,
 )
-from src.utils.reading.extractors import SHEET_ROW_CAP, row_cap_marker
+from src.utils.reading.extractors import (
+    SHEET_ROW_CAP,
+    read_sheets,
+    row_cap_marker,
+)
+
+SAMPLE_WORKBOOK = (
+    Path(__file__).resolve().parents[1]
+    / "samples" / "case_1" / "ho_so_tai_chinh" / "VIMID_so_chi_tiet.xlsx"
+)
 
 # Cut mid-object, the way a reply that runs out of tokens arrives.
 CUT_REPLY = ('{"accounts":{"131@2025":{"item_count":60,"item_columns":["a"],'
@@ -98,6 +107,44 @@ class RowCapTest(unittest.TestCase):
         # a line it will never see.
         self.assertIn(row_cap_marker(SHEET_ROW_CAP),
                       ledger.LEDGER_EXTRACTION_SYSTEM_PROMPT)
+
+
+class PayloadBudgetTest(unittest.TestCase):
+    """The case the upload screen actually produces: 4 files x 6 sheets."""
+
+    FILES, SHEETS, ROWS = 4, 6, 143
+
+    def _dossier(self) -> list[dict[str, str]]:
+        """24 sheets of 143 detail rows, built from the real sheet's shape."""
+
+        real = read_sheets(str(SAMPLE_WORKBOOK))[0].content.splitlines()
+        header, template = real[:3], real[3]
+        body = "\n".join([*header, *(template for _ in range(self.ROWS))])
+        return [
+            {"filename": f"so_chi_tiet_{f}.xlsx", "sheet_name": f"TK_{s}",
+             "content": body}
+            for f in range(self.FILES) for s in range(self.SHEETS)
+        ]
+
+    def test_four_files_of_six_sheets_are_all_sent(self) -> None:
+        sheets = self._dossier()
+        self.assertEqual(len(sheets), 24)
+        payload, dropped = ledger._json_payload(sheets)
+        self.assertEqual(dropped, [], f"{len(payload):,} chars did not fit")
+        self.assertEqual(len(json.loads(payload)), 24)
+
+    def test_a_dossier_that_does_not_fit_says_which_sheets_went(self) -> None:
+        # Sized against the configured budget, not against a fixed multiple of
+        # it: with LEDGER_PAYLOAD_CHARS raised, "three dossiers" fits and the
+        # test was asserting on a case that no longer existed.
+        one = self._dossier()
+        per_sheet = len(json.dumps(one[:1], ensure_ascii=False)) 
+        copies = ledger.PAYLOAD_CHAR_BUDGET // (per_sheet * len(one)) + 2
+        payload, dropped = ledger._json_payload(one * copies)
+        self.assertTrue(dropped)
+        self.assertLessEqual(len(payload), ledger.PAYLOAD_CHAR_BUDGET)
+        # Named by file and sheet, so the reader can tell what is absent.
+        self.assertRegex(dropped[0], r"so_chi_tiet_\d+\.xlsx › TK_\d+")
 
 
 class PromptConsistencyTest(unittest.TestCase):

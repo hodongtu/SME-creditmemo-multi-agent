@@ -1,6 +1,7 @@
 """Detail-ledger spreadsheets (sổ chi tiết) into one JSON keyed by account."""
 
 import json
+import os
 import re
 from typing import Any
 
@@ -204,7 +205,23 @@ def build_ledger_extraction_chain(llm: Any):
     return build_extraction_chain(LEDGER_EXTRACTION_SYSTEM_PROMPT, llm)
 
 
-PAYLOAD_CHAR_BUDGET = 120_000
+# How much ledger TSV goes into one call. Sized for the case the screen actually
+# produces — 4 files of 6 sheets — at 143 detail rows a sheet, which is the depth
+# the prompt's own worked example cites ("the returned rows are 5 of 143"):
+#
+#     24 sheets x (200 + 143 x 86 chars)  =  300,000 chars  =  ~155,000 tokens
+#
+# measured at 1.93 chars per token with tiktoken on the real sample, not the
+# usual 4 — accented Vietnamese and dot-grouped figures both tokenise badly, and
+# every "." in 1.210.969.204,91 is its own token.
+#
+# Raising this is bounded by the MODEL'S INPUT CONTEXT, not by anything here:
+# the call also carries ~6,000 tokens of system prompt and must leave
+# LLM_LEDGER_MAX_TOKENS for the reply. Env-settable so the ceiling can be fitted
+# to the model without a code change.
+PAYLOAD_CHAR_BUDGET = int(os.getenv("LEDGER_PAYLOAD_CHARS", "300000"))
+# Warn while there is still room to act, rather than only once sheets are gone.
+PAYLOAD_WARN_FRACTION = 0.8
 
 
 def _without_row_counter(content: str) -> str:
@@ -711,7 +728,16 @@ def extract_ledger_batch(
     if dropped:
         record["extraction_notes"].append(
             f"Input exceeded {PAYLOAD_CHAR_BUDGET:,} characters, so {len(dropped)} "
-            f"sheet(s) were not sent: {', '.join(dropped[:10])}."
+            f"sheet(s) were not sent: {', '.join(dropped[:10])}. Raise "
+            f"LEDGER_PAYLOAD_CHARS if the model's context has room for them."
+        )
+    elif len(payload) > PAYLOAD_CHAR_BUDGET * PAYLOAD_WARN_FRACTION:
+        record["extraction_notes"].append(
+            f"This dossier used {len(payload):,} of the "
+            f"{PAYLOAD_CHAR_BUDGET:,}-character input budget "
+            f"({len(payload) / PAYLOAD_CHAR_BUDGET:.0%}) across "
+            f"{len(sheets)} sheet(s). Nothing was dropped, but one more file "
+            f"would be."
         )
 
     _note_copied_example(record)

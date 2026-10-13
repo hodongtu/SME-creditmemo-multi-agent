@@ -396,6 +396,16 @@ other cut in that path is the reader's own 500-row cap per sheet, which is now n
 `extraction_notes` by code — a sheet read 500 rows deep out of 4,000 has no usable total, because
 the rows that would complete the sum, and usually the printed total row itself, were never sent.
 
+The ledger pass stays **one call** — the figures have to be comparable across files, and splitting
+it would multiply the calls. What it holds is `LEDGER_PAYLOAD_CHARS` (default **300,000**),
+sized for the case the upload screen produces: 4 files of 6 sheets at ~143 detail rows each, the
+depth the prompt's own worked example cites. Measured at **1.93 characters per token** with
+`tiktoken` on real Vietnamese ledgers rather than the usual 4 — accented text and dot-grouped
+figures both tokenise badly, and every `.` in `1.210.969.204,91` is its own token. The reply side
+is not the constraint: 24 accounts cost **13,400 of the 32,000** output tokens, measured on a real
+record. Whatever still does not fit is named in the report, and a dossier past 80% of the budget
+says so while there is room to act.
+
 **The ceiling is per pass, because one number cannot fit the whole fleet.** Measured by
 asking each model (`testing/probe_max_tokens.py` sends `max_tokens=999999` and reads the
 figure back out of the 400): `gpt-4o-mini` allows 16,384 completion tokens, `gpt-5.4-mini`
