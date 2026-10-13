@@ -406,6 +406,24 @@ is not the constraint: 24 accounts cost **13,400 of the 32,000** output tokens, 
 record. Whatever still does not fit is named in the report, and a dossier past 80% of the budget
 says so while there is room to act.
 
+**Years nobody asked for are left out before the call.** Customers upload every year they have —
+five years, one sheet each — when two are asked for. Each sheet's period is read from its own
+text (`Từ ngày 01/01/2025 đến ngày 31/12/2025`, `Năm 2024`, `Quý 4/2024`, `Niên độ kế toán
+2024`…), matched on normalised tokens so `2.024.000.000` never reads as 2024 and the *nam* of
+*Việt Nam* never introduces a year. Sent are the `LEDGER_YEARS` (default 2) most recent years,
+reaching **back** to the oldest year the financial statements cover — taken from the same
+calculator that prints the report's year columns — but **never forward**: a 2025 ledger beside
+statements for 2023–2024 is the newest data in the dossier, and statements lag is exactly why an
+officer wants it. A sheet spanning the boundary is kept; a sheet whose year cannot be read is
+kept and named; a filter that would leave nothing sends everything instead. Every sheet left out
+is named with its year.
+
+This needed one fix first. `_without_row_counter` drops a column of consecutive integers, and
+the sample's `TK VAY` sheet keeps its title, company and period line in exactly that column —
+`_sheet_grid` leaves a full-width merge in column A. All four banner lines went with the
+counter, the model never saw the period, and the account came back as `341@unknown`. A line
+whose only text sits in that column is now kept.
+
 **The ceiling is per pass, because one number cannot fit the whole fleet.** Measured by
 asking each model (`testing/probe_max_tokens.py` sends `max_tokens=999999` and reads the
 figure back out of the 400): `gpt-4o-mini` allows 16,384 completion tokens, `gpt-5.4-mini`

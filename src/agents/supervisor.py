@@ -1,6 +1,7 @@
 import inspect
 import json
 import os
+import functools
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,6 +113,10 @@ class ExtractionPass:
     per_agent_block_args: bool = False
     batch: bool = False
     required: bool = False
+    # Keyword arguments the pass needs from passes that ran before it, read off
+    # the documents at the moment it runs — not when the graph is built, when
+    # none of them have run yet.
+    context: Callable[[list[ClassifiedDocument]], dict[str, Any]] | None = None
 
     def failures(
         self, docs: list[ClassifiedDocument]
@@ -139,6 +144,26 @@ class ExtractionPass:
 
     def consumers(self) -> set[str]:
         return set(self.json_agents) | set(self.extra_consumers)
+
+
+def _reporting_years(documents: list[ClassifiedDocument]) -> set[int]:
+    """The years the financial statements cover, as the report will show them.
+
+    Read through FinancialRatioCalculator, which is what builds the report's
+    year columns — so the ledger is filtered to exactly the years printed
+    beside it, not to a second reading of the statements that could disagree.
+    """
+
+    usable = [doc for doc in documents if doc.extraction_status == "success"]
+    try:
+        labels = FinancialRatioCalculator().metrics_from_documents(usable)
+    except Exception:
+        return set()
+    return {
+        int(year)
+        for label in labels
+        for year in re.findall(r"(?<!\d)(20\d{2})(?!\d)", str(label))
+    }
 
 
 EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
@@ -231,6 +256,7 @@ EXTRACTION_PASSES: tuple[ExtractionPass, ...] = (
         build_chain=build_ledger_extraction_chain,
         extract=extract_ledger_batch,
         batch=True,
+        context=lambda documents: {"report_years": _reporting_years(documents)},
         build_block=prompt_blocks._build_ledger_structured_block,
         heading=prompt_blocks.LEDGER_BLOCK_HEADING,
         json_agents=(
@@ -533,12 +559,15 @@ class Supervisor:
         for pass_ in EXTRACTION_PASSES:
             if pass_.label not in needed:
                 continue
+            extract = pass_.extract
+            if pass_.context:
+                extract = functools.partial(extract, **pass_.context(documents))
             self._run_structured_extraction(
                 documents,
                 steps,
                 flag_attr=pass_.flag_attr,
                 chain=getattr(self, pass_.chain_attr),
-                extract=pass_.extract,
+                extract=extract,
                 result_attr=pass_.result_attr,
                 error_attr=pass_.error_attr,
                 label=pass_.label,

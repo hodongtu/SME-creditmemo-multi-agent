@@ -254,9 +254,21 @@ def _without_row_counter(content: str) -> str:
             drop.add(column)
     if not drop:
         return content
-    return "\n".join(
-        "\t".join(v for i, v in enumerate(r) if i not in drop) for r in rows
-    )
+
+    def trimmed(row: list[str]) -> str:
+        rest = [v for i, v in enumerate(row) if i not in drop]
+        if not any(cell.strip() for cell in rest):
+            # A line whose only text sits in the counter's column is not a
+            # counter value: it is a banner. _sheet_grid leaves a full-width
+            # merge in column A alone, so the sheet's title, company and
+            # period all land exactly where the counter is — and dropping the
+            # column took them with it. TK VAY lost four lines that way and its
+            # account came back as 341@unknown, for want of the period line.
+            # With nothing else on the line there is nothing to misalign.
+            return "\t".join(row)
+        return "\t".join(rest)
+
+    return "\n".join(trimmed(r) for r in rows)
 
 
 def read_ledger_sheets(
@@ -296,6 +308,140 @@ def read_ledger_sheets(
             for sheet in found
         ]
     return sheets, notes
+
+
+# ── Keeping the years the report needs ────────────────────────────────────
+
+# How many of the most recent years of ledger the report needs. Customers
+# routinely upload every year they have — five years, one sheet each — when two
+# are asked for, and the older ones spend the input budget on nothing.
+LEDGER_YEARS = int(os.getenv("LEDGER_YEARS", "2"))
+
+_FULL_DATE = re.compile(r"(?<!\d)\d{1,2}[/-]\d{1,2}[/-](20[0-4]\d)(?!\d)")
+# Words that introduce a period, as normalised tokens. A year only counts as the
+# sheet's period when one of these says so.
+_PERIOD_WORDS = (
+    ("tu", "ngay"), ("den", "ngay"), ("tai", "ngay"), ("nam",), ("nien", "do"),
+    ("quy",), ("thang",), ("ky",), ("period",), ("year",),
+)
+_YEAR_WINDOW = 3
+
+
+def _is_year(token: str) -> bool:
+    return len(token) == 4 and token.isdigit() and 2000 <= int(token) <= 2049
+
+
+def sheet_years(content: str) -> set[int]:
+    """The years a sheet states as its period, read from its own text.
+
+    A year counts when a line says it is a period — "Từ ngày 01/01/2025 đến
+    ngày 31/12/2025", "Năm 2024", "Quý 4/2024", "Niên độ kế toán 2024". Only
+    when no line declares one do the dates on the detail rows stand in.
+
+    Matched on normalised TOKENS, which settles the two traps for free: the
+    figure 2.024.000.000 normalises to "2 024 000 000" and never yields the
+    token 2024, and "Việt Nam" carries the word "nam" with no year after it.
+    """
+
+    declared: set[int] = set()
+    dated: set[int] = set()
+    for line in content.splitlines():
+        on_line = {int(year) for year in _FULL_DATE.findall(line)}
+        dated |= on_line
+        tokens = normalize_text(line).split()
+        for start in range(len(tokens)):
+            for word in _PERIOD_WORDS:
+                end = start + len(word)
+                if tuple(tokens[start:end]) != word:
+                    continue
+                declared |= on_line
+                declared |= {
+                    int(token)
+                    for token in tokens[end:end + _YEAR_WINDOW]
+                    if _is_year(token)
+                }
+    return declared or dated
+
+
+def reporting_cutoff(
+    sheet_year_sets: list[set[int]],
+    report_years: set[int],
+) -> int | None:
+    """The oldest year worth sending, or None when no year is known at all.
+
+    The LEDGER_YEARS most recent, counted back from the newest year anything
+    in the dossier states — and reaching further back when the financial
+    statements cover older years, so the ledger never stops short of the years
+    the report analyses. It never moves FORWARD to them: a 2025 ledger beside a
+    BCTC for 2023-2024 is the newest data in the dossier, and the reason
+    statements lag is exactly why an officer wants it.
+    """
+
+    known = set(report_years).union(*sheet_year_sets) if sheet_year_sets else set(report_years)
+    if not known:
+        return None
+    cutoff = max(known) - (LEDGER_YEARS - 1)
+    if report_years:
+        cutoff = min(cutoff, min(report_years))
+    return cutoff
+
+
+def keep_recent_sheets(
+    sheets: list[dict[str, str]],
+    report_years: set[int],
+) -> tuple[list[dict[str, str]], list[str]]:
+    """The sheets worth sending, and a note naming every one that was not.
+
+    A sheet is left out only when EVERY year it states is older than the
+    cutoff, so one that spans the boundary — 01/12/2023 to 31/12/2024 — goes.
+    A sheet stating no year goes too: losing a ledger costs more than the
+    tokens it takes, and it is named so the reader knows the filter could not
+    judge it. And if the filter would leave nothing, it sends everything
+    instead — it exists to trim excess, not to delete the only ledger there is.
+    """
+
+    years = [sheet_years(sheet["content"]) for sheet in sheets]
+    cutoff = reporting_cutoff(years, report_years)
+    if cutoff is None:
+        return sheets, []
+
+    def label(sheet: dict[str, str]) -> str:
+        return f"{sheet['filename']} › {sheet['sheet_name'] or '(single sheet)'}"
+
+    kept, old, unknown = [], [], []
+    for sheet, stated in zip(sheets, years):
+        if not stated:
+            kept.append(sheet)
+            unknown.append(label(sheet))
+        elif max(stated) >= cutoff:
+            kept.append(sheet)
+        else:
+            old.append(f"{label(sheet)} ({', '.join(map(str, sorted(stated)))})")
+
+    notes = []
+    if old and not kept:
+        return sheets, [
+            f"Every ledger sheet is older than {cutoff}, the oldest year the "
+            f"report needs; all {len(sheets)} were sent anyway rather than "
+            f"leave the report with no ledger."
+        ]
+    if old:
+        notes.append(
+            f"Only {cutoff} onwards was sent — the {LEDGER_YEARS} most recent "
+            f"years"
+            + (f" and every year the financial statements cover "
+               f"({', '.join(map(str, sorted(report_years)))})"
+               if report_years else "")
+            + f". {len(old)} older sheet(s) were left out: "
+            f"{', '.join(old[:10])}{' …' if len(old) > 10 else ''}."
+        )
+    if unknown:
+        notes.append(
+            f"No reporting year could be read from {len(unknown)} sheet(s), so "
+            f"they were sent without being checked: "
+            f"{', '.join(unknown[:10])}{' …' if len(unknown) > 10 else ''}."
+        )
+    return kept, notes
 
 
 def truncation_notes(sheets: list[dict[str, str]]) -> list[str]:
@@ -637,9 +783,11 @@ def _note_slice_problems(record: dict[str, Any]) -> None:
         record["extraction_notes"].append(
             "WARNING: the top-row selection does not hold together — "
             + "; ".join(problems)
-            + ". Either the model kept the wrong rows, or its answer was cut "
-            "short (raise the pass's max_tokens_env, e.g. LLM_LEDGER_MAX_TOKENS; "
-            "run testing/probe_max_tokens.py for the model's real ceiling)."
+            # A reply cut at the token ceiling is refused before it gets here
+            # (run_extraction reads finish_reason), so advising a higher
+            # ceiling would send the reader after a cause already ruled out.
+            + ". The reply finished on its own, so the model kept the wrong "
+            "rows rather than running out of room."
         )
 
 
@@ -698,18 +846,29 @@ def fill_source_files(record: dict[str, Any], documents) -> None:
 def extract_ledger_batch(
     chain: Any,
     documents: list[tuple[str, str, str]],
+    report_years: set[int] | None = None,
 ) -> list[tuple[dict[str, Any] | None, str]]:
-    """Read every ledger file in one call, then share one record between them."""
+    """Read every ledger file in one call, then share one record between them.
+
+    `report_years` are the years the financial statements cover, when the
+    dossier has any; the sheets older than the report needs are left out before
+    the call, so the budget is spent on years somebody will read.
+    """
 
     sheets, read_notes = read_ledger_sheets(documents)
     if not sheets:
         reason = "; ".join(read_notes) or "No sheet could be read"
         return [(None, reason[:500]) for _ in documents]
 
+    sheets, year_notes = keep_recent_sheets(sheets, report_years or set())
     payload, dropped = _json_payload(sheets)
+    # Name only the files that are in the payload. The prompt makes the model
+    # account for every sheet it is told about, so listing a file it never
+    # receives asks it to report a missing sheet — or to invent one.
+    sent_files = list(dict.fromkeys(s["filename"] for s in json.loads(payload)))
     record, error = run_extraction(
         chain,
-        ", ".join(filename for filename, _, _ in documents),
+        ", ".join(sent_files),
         payload,
         REQUIRED_TOP_LEVEL_KEYS,
         "No ledger extraction LLM configured.",
@@ -724,6 +883,7 @@ def extract_ledger_batch(
     record.setdefault("unmapped_columns", [])
     record.setdefault("extraction_notes", [])
     record["extraction_notes"] += read_notes
+    record["extraction_notes"] += year_notes
     record["extraction_notes"] += truncation_notes(sheets)
     if dropped:
         record["extraction_notes"].append(
@@ -745,13 +905,17 @@ def extract_ledger_batch(
     _drop_total_rows(record)
     fill_source_files(record, documents)
 
-    expected = len(sheet_inventory(documents))
+    # Counted against what was SENT. Counting every sheet on disk would blame
+    # the model for the ones the year filter and the budget left out — and
+    # those are already named above.
+    expected = len(sheets) - len(dropped)
     returned = len(record.get("accounts") or {})
     if returned < expected:
         record["extraction_notes"].append(
-            f"WARNING: the input held {expected} sheets but only {returned} accounts "
-            f"came back. Absent a TRUNCATED warning above, the model skipped sheets "
-            f"— the figures below are NOT the whole ledger the customer "
-            f"submitted."
+            f"WARNING: {expected} sheets were sent but only {returned} accounts "
+            f"came back. The reply finished on its own — a reply cut at the "
+            f"token ceiling is refused before this point — so the model skipped "
+            f"or merged sheets, and the figures below are NOT the whole ledger "
+            f"that was sent."
         )
     return [(record, "") for _ in documents]

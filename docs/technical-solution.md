@@ -209,6 +209,7 @@ the notebook currently points it at the premium tier. Each pass binds to a varia
 |---|---:|---|
 | `max_files` | 50 | Files discovered per run |
 | `max_chars_per_document` | 120,000 | Text taken from one document |
+| `LEDGER_YEARS` | 2 | Most recent ledger years sent; older sheets are left out before the call and named. Extends back to the oldest year the financial statements cover, never forward past the newest ledger |
 | `LEDGER_PAYLOAD_CHARS` | 300,000 | Ledger TSV in the single ledger call — 4 files x 6 sheets at ~143 rows each. Bounded by the model's input context, not by this number: the call also carries ~6,000 prompt tokens and leaves `LLM_LEDGER_MAX_TOKENS` for the reply |
 | `agent_input_char_budgets` | 120,000 | The analysis prompt |
 | `max_extraction_calls` | 30 | LLM calls spent on extraction per run |
