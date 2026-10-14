@@ -22,6 +22,7 @@ REQUIRED_TOP_LEVEL_KEYS = {"accounts"}
 
 LEDGER_BLOCK_CHAR_BUDGET = 40_000
 RESIDUAL_LABEL = "Các đối tác còn lại"
+RESIDUAL_ITEM_LABEL = "Các mặt hàng còn lại"
 LABEL_KEYS = ("counterparty_name", "counterparty_code", "item_name")
 
 def _label_positions(columns: list[str]) -> list[int]:
@@ -99,23 +100,121 @@ def _magnitude(row: list[Any], label_at: set[int]) -> float:
     )
 
 
-def _aggregate(rows: list[list[Any]], columns: list[str]) -> list[Any]:
-    """One row summing every column of the rows it stands in for."""
+def _residual_label(columns: list[str]) -> str:
+    """What the remainder is called: counterparties on a debt ledger, items on a
+    stock ledger. One label for both would call a list of products "đối tác"."""
+
+    return RESIDUAL_ITEM_LABEL if "item_name" in columns else RESIDUAL_LABEL
+
+
+_RESIDUAL_NAME = re.compile(
+    rf"^(?:{re.escape(RESIDUAL_LABEL)}|{re.escape(RESIDUAL_ITEM_LABEL)}) \((\d+)\)$"
+)
+
+
+def _residual_count(row: list[Any], columns: list[str]) -> int | None:
+    """How many detail rows a remainder row stands for; None for a detail row."""
 
     label_at = _label_positions(columns)
-    out: list[Any] = []
-    for index in range(len(columns)):
+    if not label_at or label_at[-1] >= len(row):
+        return None
+    match = _RESIDUAL_NAME.match(str(row[label_at[-1]] or ""))
+    return int(match.group(1)) if match else None
+
+
+def _residual_row(
+    columns: list[str],
+    values: dict[str, Any],
+    count: int,
+) -> list[Any]:
+    """A remainder row: the label in the last label column, figures where known."""
+
+    label_at = _label_positions(columns)
+    return [
+        f"{_residual_label(columns)} ({count})" if label_at and index == label_at[-1]
+        else "" if index in label_at
+        else values.get(column)
+        for index, column in enumerate(columns)
+    ]
+
+
+def _aggregate(rows: list[list[Any]], columns: list[str]) -> list[Any]:
+    """One row summing every column of the rows it stands in for.
+
+    A remainder row among them counts for the rows IT stands for, not one, and
+    a figure it does not know (None) leaves the sum unknown rather than quietly
+    understated — merging it would otherwise report the rest of a 143-row sheet
+    as the handful of rows that happened to be listed.
+    """
+
+    label_at = set(_label_positions(columns))
+    count = sum(_residual_count(row, columns) or 1 for row in rows)
+    values: dict[str, Any] = {}
+    for index, column in enumerate(columns):
         if index in label_at:
-            out.append(f"{RESIDUAL_LABEL} ({len(rows)})" if index == label_at[-1] else "")
             continue
-        total = sum(
-            row[index] for row in rows
-            if index < len(row)
-            and isinstance(row[index], (int, float))
-            and not isinstance(row[index], bool)
-        )
-        out.append(round(total))
-    return out
+        cells = [row[index] if index < len(row) else None for row in rows]
+        if any(cell is None and _residual_count(row, columns) is not None
+               for cell, row in zip(cells, rows)):
+            values[column] = None
+            continue
+        numeric = [c for c in cells
+                   if isinstance(c, (int, float)) and not isinstance(c, bool)]
+        values[column] = round(sum(numeric)) if numeric else None
+    return _residual_row(columns, values, count)
+
+
+def add_remainder_rows(record: dict[str, Any]) -> None:
+    """Close every top-N list with one row for everything it leaves out.
+
+    The model returns the five largest rows and the account's "totals", which
+    cover every detail row on the sheet. The rest is then plain subtraction —
+    totals minus the rows listed — so it is done here rather than asked of the
+    model: that would cost output tokens for arithmetic, and add one more place
+    for a figure to go wrong. By construction the listed rows plus this one add
+    up to "totals", so a share column built on them sums to exactly 100%.
+
+    A column whose total the model did not give is left None, never 0: an
+    unknown remainder printed as nothing would read as "the top five are the
+    whole account". Likewise when the listed rows already exceed the total — the
+    slice check names that inconsistency, and a negative "rest" would only hide
+    it. Lists that already end in a remainder row are left alone.
+    """
+
+    for account in (record.get("accounts") or {}).values():
+        if not isinstance(account, dict):
+            continue
+        columns = account.get("item_columns") or []
+        totals = account.get("totals") if isinstance(account.get("totals"), dict) else {}
+        declared = account.get("item_count")
+        if not columns or not isinstance(declared, int) or isinstance(declared, bool):
+            continue
+        label_at = set(_label_positions(columns))
+        for ranking in account.get("rankings") or []:
+            if not isinstance(ranking, dict):
+                continue
+            rows = [r for r in ranking.get("items") or [] if isinstance(r, list)]
+            if any(_residual_count(r, columns) is not None for r in rows):
+                continue
+            remaining = declared - len(rows)
+            if remaining <= 0:
+                continue
+            values: dict[str, Any] = {}
+            for index, column in enumerate(columns):
+                if index in label_at:
+                    continue
+                total = totals.get(column)
+                if not isinstance(total, (int, float)) or isinstance(total, bool):
+                    values[column] = None
+                    continue
+                listed = sum(
+                    row[index] for row in rows
+                    if index < len(row) and isinstance(row[index], (int, float))
+                    and not isinstance(row[index], bool)
+                )
+                rest = total - listed
+                values[column] = round(rest) if rest >= -1 else None
+            ranking["items"] = rows + [_residual_row(columns, values, remaining)]
 
 
 def fit_to_budget(
@@ -133,21 +232,25 @@ def fit_to_budget(
             rankings = []
             for ranking in account.get("rankings") or []:
                 rows = ranking.get("items") or []
-                if len(rows) <= keep:
+                # The remainder is not a counterparty: it never competes for a
+                # place in the list, and it absorbs whatever the trim removes.
+                remainder = [r for r in rows if _residual_count(r, columns) is not None]
+                detail = [r for r in rows if _residual_count(r, columns) is None]
+                if len(detail) <= keep:
                     rankings.append(ranking)
                     continue
 
                 at = columns.index(ranking["sorted_by"]) \
                     if ranking.get("sorted_by") in columns else None
                 ordered = sorted(
-                    rows,
+                    detail,
                     key=(lambda r: _row_value(r, at)) if at is not None
                     else (lambda r: _magnitude(r, label_at)),
                     reverse=True,
                 )
                 rankings.append({**ranking,
                                  "items": ordered[:keep]
-                                 + [_aggregate(ordered[keep:], columns)]})
+                                 + [_aggregate(ordered[keep:] + remainder, columns)]})
             accounts[key] = {**account, "rankings": rankings}
         return {**record, "accounts": accounts}
 
@@ -904,6 +1007,9 @@ def extract_ledger_batch(
     _note_slice_problems(record)
     _drop_total_rows(record)
     fill_source_files(record, documents)
+    # Last, so every check above judges the model's own rows, and the remainder
+    # is taken against item_count after _drop_total_rows has corrected it.
+    add_remainder_rows(record)
 
     # Counted against what was SENT. Counting every sheet on disk would blame
     # the model for the ones the year filter and the budget left out — and

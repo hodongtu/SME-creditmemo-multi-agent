@@ -37,7 +37,7 @@ PROMPTS: dict[str, frozenset[str]] = {
     "block_cic_s10a": frozenset(),
     "block_cic_r20": frozenset(),
     "block_sitevisit": frozenset(),
-    "block_ledger": frozenset({"residual_label"}),
+    "block_ledger": frozenset({"residual_label", "residual_item_label"}),
     "user_mixed_unit_warning": frozenset(),
     "user_reporting_periods": frozenset({"periods"}),
     "user_structured_pointer": frozenset({"heading"}),

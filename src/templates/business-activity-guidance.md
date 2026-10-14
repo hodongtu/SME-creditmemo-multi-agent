@@ -37,9 +37,25 @@ description: >-
   ở MỨC TÀI KHOẢN, ngoài `rankings`, và chỉ nó mới là số của cả tài khoản. Cũng
   không cộng các bảng lại với nhau — một đối tác lớn có mặt ở nhiều bảng, cộng vào
   là đếm nó nhiều lần.
-  - CỘT TỶ TRỌNG KHÔNG CẦN CỘNG THÀNH 100%, và thường sẽ nhỏ hơn vì chỉ liệt kê 5
-  đối tác lớn nhất. Đó là ĐÚNG. Không co giãn các con số cho tổng thành 100%, không
-  thêm dòng "Khác" để bù cho đủ.
+  - DÒNG CUỐI BẢNG MỤC 2, 3, 4 LÀ PHẦN CÒN LẠI. Khi sổ có nhiều dòng hơn số dòng
+  bảng xếp hạng liệt kê, bảng đó kết thúc bằng MỘT dòng tên "Các đối tác còn lại (N)"
+  (sổ công nợ) hoặc "Các mặt hàng còn lại (N)" (sổ kho) — chương trình đã tính sẵn
+  bằng `totals` trừ các dòng phía trên. Đưa dòng đó vào bảng làm DÒNG CUỐI CÙNG, sau 5
+  dòng lớn nhất, giữ nguyên tên kèm số (N). Doanh số lấy đúng ô của cột đang đọc;
+  Tỷ trọng = ô đó chia `totals` của cùng cột, như mọi dòng khác. Các cột còn lại
+  (Mặt hàng, Phương thức ký HĐ, giao hàng, thanh toán) ghi "—": đó là nhiều đối tác
+  gộp lại, không có một phương thức chung.
+  - VÌ CÓ DÒNG ĐÓ, CỘT TỶ TRỌNG CỘNG LẠI ĐÚNG 100% (sai khác chỉ do làm tròn). Lệch
+  hẳn khỏi 100% là đã lấy sai mẫu số hoặc sai bảng — quay lại kiểm. KHÔNG tự co giãn
+  các con số cho tròn 100%, và KHÔNG tự dựng dòng "Khác" khi bảng không có sẵn dòng
+  phần còn lại: không có dòng đó nghĩa là 5 dòng đã là toàn bộ sổ, hoặc thiếu
+  `totals` để tính.
+  - Ô của dòng phần còn lại là null thì thiếu `totals` của cột đó: BỎ dòng phần còn
+  lại khỏi bảng, đừng ghi 0.
+  - DÒNG PHẦN CÒN LẠI CHỈ NẰM TRONG BẢNG, KHÔNG VẼ LÊN SƠ ĐỒ MỤC 1: sơ đồ nói về
+  từng đối tác cụ thể, còn dòng này là nhiều đối tác gộp lại. Câu văn nhận xét có
+  thể nêu tỷ trọng phần còn lại để nói về mức độ tập trung (ví dụ: 5 khách hàng lớn
+  nhất chiếm 78%, 31 khách hàng còn lại chiếm 22%).
   - MỘT Ô TỶ TRỌNG VƯỢT 100% GẦN NHƯ LUÔN LÀ MẪU SỐ SAI: một đối tác không thể lớn
   hơn cả tài khoản chứa nó. Gặp con số như vậy thì quay lại lấy đúng khoá `totals`,
   đừng đăng nó. Chỉ một trường hợp >100% là thật: tài khoản có dòng giá trị ÂM làm

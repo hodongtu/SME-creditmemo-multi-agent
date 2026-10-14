@@ -39,6 +39,14 @@ appearing in several lists is normal. "item_count" is how many rows the source s
 holds; "totals" is the figure for the WHOLE account, listed rows and unlisted alike. The
 analysis guidance says which list each report section reads.
 
+WHEN THE SHEET HAS MORE ROWS THAN A LIST SHOWS, THE LIST ENDS IN ONE MORE ROW, named
+"{{residual_label}} (N)" on a debt ledger or "{{residual_item_label}} (N)" on a stock
+ledger. It is everything that list leaves out — N rows — and the program computed it as
+"totals" minus the rows listed above it, so the listed rows plus this one add up to
+"totals" exactly. It is not a counterparty or an item: never rank it, never cite it as a
+name, and never count it among the five. A figure in it that is null means the total for
+that column was not available, so the remainder is UNKNOWN — not zero.
+
 Each row is an ARRAY of values in exactly the order declared in "item_columns" for that
 account — one "item_columns" governs every list of that account. Value i belongs to column
 name i. Two accounts may declare different column orders, so read the "item_columns" of
@@ -46,8 +54,7 @@ the account in front of you rather than reusing the previous one.
 
 Debt ledgers keep the counterparty in TWO columns: "counterparty_code" is the code,
 "counterparty_name" the name — cite by NAME, and fall back to the code only when there is
-no name. Stock ledgers use "item_name". A row named "{{residual_label}} (N)" is the
-aggregate of N small rows not listed individually WITHIN THAT LIST.
+no name. Stock ledgers use "item_name".
 
 "code_source": "printed" means the account number was printed in the file; "convention"
 means the file printed none and the program assigned one from the chart of accounts. Never

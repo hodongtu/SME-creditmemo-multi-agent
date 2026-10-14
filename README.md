@@ -357,6 +357,21 @@ answer itself. A counterparty leading two rankings appears in both, with the sam
 each report section reads the one list built for it (`TOP_ROW_CRITERIA`, traced line by line
 to the guidance templates, and rendered into the prompt from that same dict).
 
+**Each list then closes with one row for everything it leaves out** — "Các đối tác còn lại (N)"
+on a debt ledger, "Các mặt hàng còn lại (N)" on a stock ledger. It is computed in code, not
+asked of the model: the model already returns `totals` for the whole sheet, so the remainder is
+`totals` minus the rows listed, and `N` is `item_count` minus their number. By construction the
+listed rows plus the remainder add up to `totals`, so a share column built on them sums to exactly
+100% — on the sample, TK 341's five largest lenders hold 77.8% of the closing balance and the
+twelve others 22.2%, which a top-five table alone never showed. A column with no total leaves its
+remainder `null` rather than 0, and rows that already exceed the total give no remainder: the
+slice check names that inconsistency, and a negative "rest" would hide it. When `fit_to_budget`
+has to trim a list further, the remainder never competes for a place among the counterparties;
+it absorbs what is cut, counting every row it already stood for. The guidance for both reports
+used to forbid exactly this row ("không thêm dòng 'Khác' để bù cho đủ"); both now say how to use
+it, and the two-year tables of FA 1.1 deliberately leave it out — each year's remainder is taken
+against that year's own top five, so the two would describe different groups of counterparties.
+
 The criteria table also shrank. Nothing enumerates rows of TK 341, 338 or 138 — FA 2.2.2c is
 prose with no table, and 2.2.1e/2.2.2e take their figures from the balance sheet — so those
 categories get one list by their closing balance instead of two or three. On the sample

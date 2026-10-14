@@ -338,7 +338,9 @@ def _build_ledger_structured_block(
     parts = [
         LEDGER_BLOCK_HEADING,
         system_prompt(
-            "block_ledger", residual_label=ledger_extraction.RESIDUAL_LABEL
+            "block_ledger",
+            residual_label=ledger_extraction.RESIDUAL_LABEL,
+            residual_item_label=ledger_extraction.RESIDUAL_ITEM_LABEL,
         ).strip(),
     ]
     for record in records:

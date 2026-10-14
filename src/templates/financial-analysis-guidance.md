@@ -38,9 +38,21 @@ description: >-
   tài khoản.
   - Cũng KHÔNG cộng các bảng lại với nhau. Một đối tác lớn xuất hiện ở cả ba bảng
   của sổ 131, nên cộng ba bảng sẽ đếm nó ba lần.
-  - CỘT TỶ TRỌNG KHÔNG CẦN CỘNG THÀNH 100%, và thường sẽ nhỏ hơn — phần còn lại của
-  tài khoản không được liệt kê. Đó là ĐÚNG. Không co giãn các con số cho tổng thành
-  100%, không thêm dòng "Khác" để bù cho đủ.
+  - DÒNG PHẦN CÒN LẠI. Khi sổ có nhiều dòng hơn bảng xếp hạng liệt kê, bảng đó kết
+  thúc bằng MỘT dòng "Các đối tác còn lại (N)" (sổ công nợ) hoặc
+  "Các mặt hàng còn lại (N)" (sổ kho), chương trình tính sẵn bằng `totals` trừ các
+  dòng phía trên.
+    - Ở các bảng MỘT KỲ (phải thu, phải trả, hàng tồn kho — một kỳ sổ cho mọi cột):
+    đưa dòng đó vào làm DÒNG CUỐI, giữ nguyên tên kèm (N), mỗi ô lấy đúng cột tương
+    ứng; Tỷ trọng và cột số ngày tính như mọi dòng khác. Có dòng đó thì cột Tỷ trọng
+    cộng lại đúng 100% (sai khác chỉ do làm tròn); lệch hẳn là sai mẫu số hoặc sai bảng.
+    - Ở các bảng HAI NĂM của mục 1.1: KHÔNG đưa dòng phần còn lại vào. Phần còn lại
+    của mỗi năm được tính so với 5 dòng lớn nhất CỦA NĂM ĐÓ, nên hai năm có thể là
+    hai nhóm đối tác khác nhau — đặt cạnh nhau và tính chênh lệch là so hai thứ khác
+    nhau. Ở bảng này cột Tỷ trọng không cộng thành 100%, và đó là ĐÚNG.
+    - Ô của dòng phần còn lại là null thì thiếu `totals` của cột đó: bỏ dòng đó,
+    đừng ghi 0. Không co giãn các con số cho tròn 100%, và không tự dựng dòng "Khác"
+    khi bảng không có sẵn dòng phần còn lại.
   - MỘT Ô TỶ TRỌNG VƯỢT 100% GẦN NHƯ LUÔN LÀ MẪU SỐ SAI: một đối tác không thể lớn
   hơn cả tài khoản chứa nó. Gặp con số như vậy thì quay lại lấy đúng khoá `totals`,
   đừng đăng nó. Chỉ một trường hợp >100% là thật: tài khoản có dòng giá trị ÂM làm
