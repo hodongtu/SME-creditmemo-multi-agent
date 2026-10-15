@@ -20,6 +20,7 @@ all agent logic lives in the importable package [src/](src/).
 - [Installation](#installation)
 - [Configuration (.env)](#configuration-env)
 - [Running It](#running-it)
+- [Tests](#tests)
 - [Outputs](#outputs)
 
 ---
@@ -37,8 +38,12 @@ all agent logic lives in the importable package [src/](src/).
 - **Deterministic figures**: financial ratios (`FinancialRatioCalculator`) and the credit need
   (`credit_need_calculator`) are computed in code and handed to the agent as data, not left for
   the LLM to derive.
-- **Structured extraction gated by route**: five extraction passes exist; only the ones the chosen
+- **Structured extraction gated by route**: six extraction passes exist; only the ones the chosen
   agent actually reads are run, so a business-activity run costs a fraction of a proposal run.
+- **Exact figures where the customer filed them**: an e-tax XML (VAT return, small-enterprise
+  financial statement) is read straight from the filing — no OCR, no model.
+- **Every word the model reads lives in [config/prompts/](config/prompts/)** — system prompts,
+  human messages, and the prose around every data block — never in code.
 - **Evidence-gap check before spend**: a run missing its required documents stops and names them,
   before a single extraction or analysis call is made.
 
@@ -54,10 +59,10 @@ all agent logic lives in the importable package [src/](src/).
 | [src/agents/specialist.py](src/agents/specialist.py) | The four specialist agents |
 | [src/agents/prompt_blocks.py](src/agents/prompt_blocks.py) | Turns extracted JSON + computed figures into the labelled blocks an agent's prompt carries |
 | [src/agents/calculator/](src/agents/calculator/) | Deterministic financial ratios and credit-need computation |
-| [src/agents/extraction/](src/agents/extraction/) | The five structured-extraction passes (BCTC, proposal, CIC S10A, CIC R20, site visit) + VAT revenue parsing |
+| [src/agents/extraction/](src/agents/extraction/) | The six structured-extraction passes (BCTC, proposal, CIC S10A, CIC R20, site visit, ledger) + VAT revenue parsing |
 | [src/config.py](src/config.py) | LLM client factory + runtime `Config` |
 | [src/types.py](src/types.py) | Shared types (`AgentName`, `WorkflowMode`, `ClassifiedDocument`, `UnderwritingGraphState`…) |
-| [src/utils/reading/](src/utils/reading/) | OCR, PDF/CSV/XLSX extraction, tax-XML parsing |
+| [src/utils/reading/](src/utils/reading/) | OCR; spreadsheet readers (`.xlsx`, the four formats saved as `.xls`, `.csv`); PPTX/TXT/MD; the shared e-tax XML envelope (`etax_xml.py`); a model-free ledger table analyser |
 | [src/utils/report/](src/utils/report/) | Citations, money formatting (đồng → tỷ VNĐ), markdown repair, template-leak checks, and `visualization/` for charts, diagrams, HTML/PDF rendering |
 | [src/templates/](src/templates/) | Per-agent output structure + guidance Markdown |
 
@@ -141,8 +146,21 @@ the officer hunting for a document they already uploaded.
   | `ho_so_khac` | Hồ sơ khác | 0 — classifies nothing, by declaration |
 
 - **Text extraction** — PDF → OCR (`pypdfium2` renders pages → image preprocessing → Tesseract,
-  cached by file hash); spreadsheets → TSV per sheet; XML → tax-return parsing; TXT/MD read as
-  they are; PPTX → one block per slide, tables included.
+  cached by file hash); spreadsheets → TSV per sheet; XML → e-tax filing; TXT/MD read as they
+  are; PPTX → one block per slide, tables included.
+
+  **An e-tax XML is read, not OCR'd.** `etax_xml.py` holds the envelope every filing shares —
+  namespace, taxpayer header, period, form code — and dispatches on the form: `842` (VAT return
+  01/GTGT) to `vat_revenue.read_vat_revenue_xml`, `683` (financial statement B01a-DNN) to
+  `financial_statement_extraction.parse_financial_statement`. The figures come out exact, and
+  each filing is checked against its own arithmetic — VAT revenue `ct34` against `ct26 + ct27 +
+  ct32a`, which the form defines it as; total assets `ct200` against liabilities `ct300` plus
+  equity `ct400` — so a filing that disagrees with itself is named rather than passed on. This
+  is the split `4. SME_bankstatementanalyzer` uses.
+
+  A CSV's delimiter is sniffed from `, ; tab |` only. Left free, the sniffer took the `\r` of a
+  Windows line ending on one sample (`bad delimiter value` — the file did not open) and the
+  **space** on another, splitting `CÔNG TY TNHH AN CƯỜNG FARM` into five cells.
 
   A spreadsheet is dispatched on **what its first bytes say it is**, not on its extension.
   `.xls` is the extension four unrelated formats are saved under — the binary Excel 97–2003
@@ -166,9 +184,18 @@ the officer hunting for a document they already uploaded.
   never split. Filename abbreviations (`cdkt`, `kqkd`, `gtgt`, `nxt`, `dkkd`…) were moved here
   after an audit over the 39 sample documents of the four RADAR projects: in a body they are
   rare, and `gtgt` — the one that did occur — named a line item (*thuế GTGT được khấu trừ*) in
-  a financial statement and a bank statement, not the tax return it was meant to identify. Declaring such a
-  term under plain `keywords` instead would score every workbook that happens to print the
-  number, so the loader refuses a term that appears in both lists.
+  a financial statement and a bank statement, not the tax return it was meant to identify.
+  Declaring such a term under plain `keywords` would score every workbook that happens to print
+  the number, so the loader refuses a term that appears in both lists — judged after
+  normalisation, since `tai khoan: 131` and `tai khoan 131` were both listed for all seven
+  accounts and every hit on one counted twice.
+
+  The same audit found the rules could not recognise a bank statement at all: the core-banking
+  exports name their columns in English (`debit_amount`, `settlement_account_number`…) and scored
+  zero for every type. `settlement account number` and `transaction code` now identify them. `BS`
+  was deliberately **not** made a filename keyword despite matching all four samples — it is also
+  the usual abbreviation for a balance sheet, which shares the box.
+
   Knowing the upload box restricts the candidates to that group first. If confidence clears the
   threshold (0.80, `document_classifier_grouped_confidence_threshold` when the box is known,
   `document_classifier_rule_confidence_threshold` when it is not) the keyword result is used as-is;
@@ -258,8 +285,9 @@ agents read which block cannot drift from the gate that decides whether to run i
 The **ledger** pass is the odd one out twice over. It is `batch=True`, so however many detail
 ledgers a dossier holds it costs exactly **one** call, not one per file — the same account can
 arrive split across two files, and a single call sees the whole set. And its input is not a scan:
-`extract_excel_text` has already split the workbook by sheet and kept the `.xlsx` number formats,
-so the pass feeds that text back and asks for the finished record, **figures included**.
+`extract_excel_text` has already split the workbook by sheet and kept its number formats (those of
+a binary `.xls` too, through `xlrd`'s `formatting_info`), so the pass feeds that text back and
+asks for the finished record, **figures included**.
 
 The pass reads the workbook itself through `read_sheets`, which is the same reader
 `extract_excel_text` uses — one source, two shapes. It sends a JSON array of
@@ -392,24 +420,38 @@ unusable shape in the fourth. `gpt-4o-mini` is not usable for this pass — it r
 closing balance of 82,036,126,740 as `0`. Four structural guards remain (truncated output, sheet count,
 printed total row, misplaced top-level keys); none of them checks arithmetic.
 
-The first of those exists because `JsonOutputParser` **repairs** a truncated reply rather
-than raising: it closes the open braces and hands back a valid dict, so an answer cut off at
-the token ceiling arrives looking complete. One live run returned 2 accounts out of 15
-sheets that way, one of them declaring 26 rows and carrying 18. That used to be caught by
-comparing `item_count` to `len(items)`; since the two differ by design now, the guard reads
-what a set of single-criterion rankings still cannot do: skip a criterion the category calls
-for, name a `sorted_by` that is not a real column, come back out of order by its own column,
-give one counterparty different figures in two lists, return fewer than five rows from a
-sheet that has five, or sum past `totals`. Three of those six only became checkable once
-each list was cut down to one criterion. None of them catches a model that quietly picked the
-wrong five and ordered them correctly — that would need the rows it never sent.
-`LLM_MAX_TOKENS` now sets the ceiling explicitly — left unset, the gateway picks its own.
-A reply that hits the ceiling is **refused rather than parsed**: `finish_reason` is read before
-the JSON is, because `JsonOutputParser` repairs a string cut mid-object into a record that looks
-complete with sheets missing. One live run returned 2 accounts out of 15 sheets that way. The
-other cut in that path is the reader's own 500-row cap per sheet, which is now named in
-`extraction_notes` by code — a sheet read 500 rows deep out of 4,000 has no usable total, because
-the rows that would complete the sum, and usually the printed total row itself, were never sent.
+The first of those exists because `JsonOutputParser` **repairs** a truncated reply rather than
+raising: it closes the open braces and hands back a valid dict, so an answer cut off at the token
+ceiling arrives looking complete. One live run returned 2 accounts out of 15 sheets that way, one
+of them declaring 26 rows and carrying 18. So a reply that hits the ceiling is now **refused
+rather than parsed**: `build_extraction_chain` ends at the model instead of at the parser, and
+`run_extraction` reads `finish_reason` before the JSON — for all six passes, not only this one.
+`LLM_MAX_TOKENS` sets that ceiling explicitly; left unset, the gateway picks its own.
+
+What a reply that *finished* can still get wrong is checked from the rankings themselves: skip a
+criterion the category calls for, name a `sorted_by` that is not a real column, come back out of
+order by its own column, give one counterparty different figures in two lists, return fewer than
+five rows from a sheet that has five, or sum past `totals`. Three of those six only became
+checkable once each list was cut down to one criterion. None of them catches a model that quietly
+picked the wrong five and ordered them correctly — that would need the rows it never sent.
+
+**Two of the ledger prompt's failures came from the prompt contradicting itself** — worth
+knowing before editing it. It once asked for every figure "character for character" and,
+elsewhere, for figures without separators; the only answer obeying both was none, and a run
+returned the literal `null`, the one input `JsonOutputParser` turns into `None`. It now asks for
+the same *digit sequence*, leaves an unreadable cell empty with a note, and always returns the
+outer frame. Later it said "COPY EVERY DETAIL ROW" 180 lines above "Return the LARGEST rows, not
+all of them". At the measured 558 tokens an account for five rows per criterion, against 68.7 a
+row for every row, which instruction the model obeys decides whether some 57 accounts fit the
+32,000-token ceiling or, at 143 rows a sheet, about 3. That line now says *read* every row —
+totals and rankings need all of them — and `testing/test_extraction_limits.py` fails if
+"copy every detail row" comes back.
+
+The other cut in that path is the reader's own 500-row cap per sheet. It is named in
+`extraction_notes` by code, and the prompt quotes the marker from the same constant
+(`SHEET_ROW_CAP`), so the two cannot drift — a sheet read 500 rows deep out of 4,000 has no
+usable total, because the rows that would complete the sum, and usually the printed total row
+itself, were never sent.
 
 The ledger pass stays **one call** — the figures have to be comparable across files, and splitting
 it would multiply the calls. What it holds is `LEDGER_PAYLOAD_CHARS` (default **300,000**),
@@ -447,11 +489,12 @@ weakest, which throttles the ledger pass by a factor of eight even though it run
 larger model. So `build_llm` takes `max_tokens_env` alongside `timeout_env`, and the ledger
 pass reads `LLM_LEDGER_MAX_TOKENS`.
 
-Sizing it is arithmetic, not guesswork. A detail row costs **68.7 tokens** on average
-(58–80 depending on how long the counterparty name is), an account frame 298, the outer
-frame 73. A 6-sheet, 340-row dossier therefore needs 21,600–29,100 — predicted 25,219 and
-measured 24,638 on a real run, 2% out. 32,000 carries it with room; 16,000 would have cut
-it at about row 206.
+Sizing it is arithmetic, not guesswork. A returned row costs **68.7 tokens** on average
+(58–80 depending on how long the counterparty name is), an account frame 298, the outer frame
+73; when the pass still returned every row, that predicted 25,219 tokens for a 340-row dossier
+and a real run measured 24,638. Returning five per criterion, a whole account measures **558
+tokens** on the real record, so 24 accounts take about 13,400 of the 32,000. The output ceiling
+is no longer what limits this pass — the input budget above is.
 
 Going over the model's ceiling is a **400 that stops the run**, not a quiet trim, so the
 value cannot simply be set high. `run_extraction` recognises that refusal and names the
@@ -514,7 +557,7 @@ Applied to every branch before returning, in this order and for stated reasons:
 .
 ├── local_underwriting_agents.ipynb   # Entry point — driver notebook
 ├── config/
-│   └── prompts/                      # Every system prompt, one Markdown file each
+│   └── prompts/                      # Every word sent to a model, one Markdown file each (32)
 ├── src/
 │   ├── config.py                     # LLM factory + Config
 │   ├── prompts.py                    # The only reader of config/prompts/
@@ -527,13 +570,14 @@ Applied to every branch before returning, in this order and for stated reasons:
 │   │   │   ├── document_matrix.py    # Loads and validates the YAML
 │   │   │   └── document_matrix.yaml  # 22 document types -> consuming agents, per program
 │   │   ├── calculator/               # financial ratios, credit need
-│   │   └── extraction/               # BCTC, proposal, CIC S10A, CIC R20, site visit, VAT
+│   │   └── extraction/               # BCTC, proposal, CIC S10A, CIC R20, site visit, ledger, VAT
 │   ├── utils/
 │   │   ├── common.py, paths.py
-│   │   ├── reading/                  # ocr.py, extractors.py, tax_xml.py
+│   │   ├── reading/                  # ocr.py, extractors.py, etax_xml.py, ledger_table_analysis.py
 │   │   └── report/                   # citations, formatting, source_list,
 │   │       └── visualization/        #   charts, diagrams, graph_svg, report_html/style
 │   └── templates/                    # Per-agent structure + guidance Markdown
+├── testing/                          # unittest suites + probe_max_tokens.py (see Tests)
 ├── samples/<testcase>/               # Uploaded files, one folder per upload box (gitignored)
 ├── logs/                             # Run outputs (gitignored)
 ├── docs/                             # document_matrix.xlsx + reference documents
@@ -541,12 +585,16 @@ Applied to every branch before returning, in this order and for stated reasons:
 └── README.md
 ```
 
-### System prompts
+### Prompts
 
-Every system prompt lives in [config/prompts/](config/prompts/), one
-Markdown file each — the same layout as `4. SME_bankstatementanalyzer` and `3. SME_postcheck`: a
-frontmatter with `name` and `description`, then the prompt exactly as the model reads it.
-[src/prompts.py](src/prompts.py) is the only reader.
+**Every word a model reads lives in [config/prompts/](config/prompts/)** — 32 Markdown files,
+the same layout as `4. SME_bankstatementanalyzer` and `3. SME_postcheck`: a frontmatter with
+`name` and `description`, then the text exactly as the model reads it.
+[src/prompts.py](src/prompts.py) is the only reader. That covers the system prompts and also the
+text around them: the human message of each extraction pass and of the classifier, the paragraph
+explaining each data block, the relevance line above each document, the headings inside the
+metrics block. What stays in code is what is not instruction — the data itself, identifiers that
+other code matches on, and error messages.
 
 | File | Placeholder the code fills |
 |---|---|
@@ -556,6 +604,10 @@ frontmatter with `name` and `description`, then the prompt exactly as the model 
 | `specialist_rules.md` | `{{intro}}`, `{{citation_rule}}`, `{{analysis_guidance}}`, `{{output_template}}`, `{{slot_syntax}}` |
 | `specialist_citation_rule.md` | — (given to every specialist except financial analysis) |
 | `specialist_intro_<agent>.md` ×4 | — (the opening role statement of each specialist) |
+| `extraction_user.md`, `document_classification_user.md` | — (the human message of every extraction pass, and of the classifier) |
+| `block_*.md` ×11 | `block_ledger.md`: `{{residual_label}}`, `{{residual_item_label}}`; the rest — (how to read each data block, and the relevance line above each document) |
+| `user_*.md` ×3 | `user_reporting_periods.md`: `{{periods}}`; `user_structured_pointer.md`: `{{heading}}` (scaffolding of the specialist's user message) |
+| `metrics_*.md` ×3 | — (the instructions inside the pre-computed metrics block) |
 
 **The four specialists share one rules file.** Editing LANGUAGE, EVIDENCE, COMMENTARY or any
 other shared rule means editing `specialist_rules.md` once. Each agent fills it with its own
@@ -578,7 +630,10 @@ builders: byte for byte for the six extraction prompts and for the classifier un
 upload group. For the specialists, both paths — `create_agent` for agents with tools, the
 direct chain for the rest — carry the same words line for line; the Python indentation that
 used to prefix every line is gone (about 1,100–1,600 characters less per call), and one
-doubled blank line after the intro is now single.
+doubled blank line after the intro is now single. The second move, of the text around the
+system prompts, was checked the same way across 17 renders — each block, header and message in
+the context it belongs to: the words are identical, and the only differences are spaces that
+became line breaks when the paragraphs were wrapped.
 
 > There are **no `__init__.py` files** anywhere under `src/` — it is a namespace package, imported
 > as `src.agents.supervisor` from the project root.
@@ -635,14 +690,19 @@ git show :local_underwriting_agents.ipynb | grep -c '"output_type"'   # must pri
 
 Copy `.env.example` → `.env` and fill in the values.
 
-**Models** — three roles, each bound to its own variable. An unset one raises at startup naming
-the variable, before any call is made:
+**Models** — the notebook builds one client per role with `build_llm("<VARIABLE>")`, so each
+role names the variable it reads; an unset one raises at startup, before any call is made. As the
+notebook stands:
 
-```env
-MODEL_DOCUMENT=gpt-4o-mini    # document classification (LLM fallback), temperature 0.5
-MODEL_ANALYZER=gpt-4o-mini    # the specialist agents, temperature 0.1
-MODEL_ECONOMY=gpt-4o-mini     # all five structured-extraction passes, temperature 0.0
-```
+| Role | Variable | Temperature |
+|---|---|---|
+| document classifier (the LLM fallback) | `MODEL_PREMIUM` | 0.5 |
+| the specialist agent | `MODEL_PREMIUM` | 0.1 |
+| BCTC and ledger extraction | `MODEL_PREMIUM` | 0.0 |
+| proposal, CIC S10A, CIC R20 and site-visit extraction | `MODEL_ECONOMY` | 0.0 |
+
+`.env.example` also declares `MODEL_DOCUMENT` and `MODEL_ANALYZER`; the notebook does not read
+them at present.
 
 **API & endpoint:**
 
@@ -654,41 +714,32 @@ OPENAI_API_BASE=https://api.openai.com/v1   # change to use a compatible endpoin
 **Timeouts & retries:**
 
 ```env
-LLM_TIMEOUT_SECONDS=60        # per request
-LLM_CLIENT_MAX_RETRIES=3      # backs off on 429/5xx, honours Retry-After
+LLM_TIMEOUT_SECONDS=60            # per request
+LLM_ANALYZE_TIMEOUT_SECONDS=180   # the specialist call, which runs longest
+LLM_CLIENT_MAX_RETRIES=3          # backs off on 429/5xx, honours Retry-After
 ```
 
-**OCR** — all optional, defaults shown:
+**Ceilings and budgets:**
 
 ```env
-TESSERACT_CMD=tesseract
-OCR_LANG=vie+eng   OCR_DPI=300   OCR_PSM=6   OCR_OEM=3
-OCR_CACHE_DIR=                # empty = no cache
-OCR_TIMEOUT_SECONDS=          # per page
-OCR_MAX_WORKERS=              # pages OCR'd at once; empty/0 = min(8, CPU count)
-OCR_PREPROCESS=0  OCR_DESKEW=1  OCR_DENOISE=0  OCR_BINARIZE=0
-OCR_LAYOUT=1      OCR_DELINE=1  OCR_UPSCALE=1.0
-OCR_AUTO_ROTATE=0             # fix sideways scans; off by default, see below
+LLM_MAX_TOKENS=16000           # completion ceiling for every pass that names no other
+LLM_LEDGER_MAX_TOKENS=32000    # the ledger pass's own ceiling
+LEDGER_PAYLOAD_CHARS=300000    # ledger text in the one ledger call — 4 files x 6 sheets
+LEDGER_YEARS=2                 # most recent ledger years sent; older sheets are named, not sent
 ```
 
-**OCR is the slowest step in a run**, and pages are OCR'd concurrently because Tesseract works
-out-of-process — a 43-page statement went from **96s to 22s** at 8 workers. Pages are rendered in
-batches of `OCR_MAX_WORKERS` rather than all at once, which also keeps memory flat: a 300dpi page
-is ~25 MB, so an 87-page file would otherwise hold ~2.1 GB.
-
-`OCR_AUTO_ROTATE` is off because the detector's accuracy splits by angle, measured on the sample
-set: every **90°** verdict was correct (4/4 — genuinely sideways pages), every **180°** verdict was
-wrong (4/4 — upright pages flipped into unreadable noise). Off trades away the 90° repair to stop
-the 180° damage. Turn it on for a document set that really is sideways; it costs about 2.2s per
-43 pages now that pages run in parallel.
+A ceiling above what the model allows is a 400 that stops the run, so read the real figure with
+`testing/probe_max_tokens.py` — the request is refused before the model runs, so it costs nothing.
+`LEDGER_PAYLOAD_CHARS` is bounded by the model's **input context**, not by anything in this code.
 
 **Cost per run.** There is no rate limiter — the retry/back-off in the SDK is what stands between a
 burst of extractions and a 429. A run costs one classification call per document the keyword pass
 was unsure about, one extraction call per document per pass the chosen agent needs, and one
-analysis call. **Naming documents clearly is the biggest lever**: a file called `BCTC_2024.pdf` or
-`SO CHI TIET 331 - CONG NO PHAI TRA.xlsx` settles on the keyword pass, while `SO 331.xlsx` or
-`scan001.pdf` matches nothing and costs a classification call every run. Dropping files into the
-right upload folder has the same effect, for the same reason.
+analysis call. **Naming documents clearly is the biggest lever**: `BCTC_2024.pdf`,
+`SO CHI TIET 331 - CONG NO PHAI TRA.xlsx` and now `SO 331.xlsx` or `TK131.xls` — through the
+account-number filename keywords — settle on the keyword pass, while `scan001.pdf` matches
+nothing and costs a classification call every run. Dropping files into the right upload folder
+has the same effect, for the same reason.
 
 ---
 
@@ -704,7 +755,7 @@ right upload folder has the same effect, for the same reason.
                                              #    / CREDIT_PROPOSAL _AGENT
    INPUT_PATHS = [str(PROJECT_ROOT / "samples" / TESTCASE_ID)]
    ```
-4. **Cell 4** — builds `Config` with the three LLM clients.
+4. **Cell 4** — builds `Config` with one LLM client per role (eight).
 5. **Cells 5–7** — import types, document modules, agents.
 6. **Cell 8** — builds `Supervisor(config)`, draws the graph, calls
    `supervisor.process(INPUT_PATHS, agent=AGENT, loan_program=LOAN_PROGRAM)`, prints the report,
@@ -714,6 +765,36 @@ right upload folder has the same effect, for the same reason.
 
 > If you change `.env`, re-run cell 2 (`load_dotenv(override=True)`) **and** cell 4 to rebuild the
 > clients with the new values.
+
+---
+
+## Tests
+
+```bash
+PYTHONPATH=. python3 -m unittest discover -s testing -p "test_*.py"
+```
+
+No model is called and no network is touched; the suite runs in under a second.
+
+| Suite | What it holds the code to |
+|---|---|
+| `test_prompts.py` | every prompt has a file and every file a declaration; placeholders match what the code fills; no prompt is written back into code |
+| `test_document_classification.py` | a single accidental keyword hit cannot classify a document; filename keywords match whole words, never the body, and survive a code glued to a number |
+| `test_csv_reading.py` | a Windows CSV and a comma-padded first line split on their real delimiter |
+| `test_extraction_limits.py` | a reply cut at the token ceiling is refused, not repaired; a sheet cut at 500 rows is named; 4 files x 6 sheets fit the ledger budget; the ledger prompt cannot again ask for every row |
+| `test_ledger_years.py` | how a sheet's period is read; which years are sent; the banner line the row counter used to delete |
+| `test_ledger_remainder.py` | each top-five closes with the rest of the sheet, adding back to `totals`; the guidance names the labels the code writes |
+| `test_ledger_table_analysis.py` | the model-free table analyser on the sample workbook |
+
+Each guard in these suites was checked the other way too — broken on purpose, after a run that
+passed, to see that its test fails. Several did not on the first try, which is why some tests go
+end to end through the pass rather than calling a function on its own: a correct function that
+the pass never calls is invisible to a unit test.
+
+`ledger_table_analysis.py` reads a ledger workbook's tables without a model — banner, header,
+data rows, printed total and per-column totals, found from the table's structure rather than from
+a vocabulary of column names. It is not in the run path (the ledger pass still has the model read
+the sheets); it is the reference for what a sheet holds.
 
 ---
 
@@ -736,3 +817,4 @@ Each run creates a `logs/<testcase>_<timestamp>/` directory containing:
 | `cic_s10a_extraction.json` | CIC S10A extraction JSON, per document |
 | `cic_r20_extraction.json` | CIC R20 extraction JSON, per document |
 | `sitevisit_extraction.json` | Site-visit extraction JSON, per document |
+| `ledger_extraction.json` | The one ledger record shared by every ledger file |

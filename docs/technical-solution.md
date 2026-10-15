@@ -126,7 +126,7 @@ flowchart TD
     subgraph L2["Text acquisition"]
         T1["PDF -> pypdfium2 -> preprocess -> Tesseract<br/>cached by file hash"]
         T2["Spreadsheet -> engine by file signature<br/>openpyxl, xlrd, SpreadsheetML, HTML, CSV"]
-        T3["Tax return XML -> tax_xml.py"]
+        T3["e-tax XML -> etax_xml.py<br/>VAT 01/GTGT, BCTC B01a-DNN"]
     end
     subgraph L3["Understanding"]
         C1["Keyword classification<br/>scored against document_matrix.yaml"]
@@ -325,7 +325,7 @@ src/
 │   ├── cic.py                   # Bureau credit report
 │   └── customer_key.py          # Resolves the tax code the tools query with
 ├── utils/
-│   ├── reading/                 # ocr.py, extractors.py, tax_xml.py
+│   ├── reading/                 # ocr.py, extractors.py, etax_xml.py, ledger_table_analysis.py
 │   └── report/                  # citations, formatting, source_list
 │       └── visualization/       # charts, diagrams, graph_svg, report_html, report_style
 └── templates/                   # Per-agent structure + guidance Markdown
