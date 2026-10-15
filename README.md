@@ -399,6 +399,10 @@ it absorbs what is cut, counting every row it already stood for. The guidance fo
 used to forbid exactly this row ("không thêm dòng 'Khác' để bù cho đủ"); both now say how to use
 it, and the two-year tables of FA 1.1 deliberately leave it out — each year's remainder is taken
 against that year's own top five, so the two would describe different groups of counterparties.
+The business-activity tables for outputs and inputs (sections 3 and 4) then close with a
+**"Tổng" row** pre-filled in the skeleton at 100%, whose figure is the same `totals` the share
+column divides by — so the rows above it must add up to it, and a table that does not is a
+mistake the reader can see.
 
 The criteria table also shrank. Nothing enumerates rows of TK 341, 338 or 138 — FA 2.2.2c is
 prose with no table, and 2.2.1e/2.2.2e take their figures from the balance sheet — so those

@@ -40,8 +40,9 @@ description: >-
   - DÒNG CUỐI BẢNG MỤC 2, 3, 4 LÀ PHẦN CÒN LẠI. Khi sổ có nhiều dòng hơn số dòng
   bảng xếp hạng liệt kê, bảng đó kết thúc bằng MỘT dòng tên "Các đối tác còn lại (N)"
   (sổ công nợ) hoặc "Các mặt hàng còn lại (N)" (sổ kho) — chương trình đã tính sẵn
-  bằng `totals` trừ các dòng phía trên. Đưa dòng đó vào bảng làm DÒNG CUỐI CÙNG, sau 5
-  dòng lớn nhất, giữ nguyên tên kèm số (N). Doanh số lấy đúng ô của cột đang đọc;
+  bằng `totals` trừ các dòng phía trên. Đưa dòng đó vào bảng ngay sau 5 dòng lớn nhất,
+  giữ nguyên tên kèm số (N) — ở mục 3 và 4 thì nó nằm ngay TRÊN dòng Tổng, mục 2 không có
+  dòng Tổng nên nó là dòng cuối. Doanh số lấy đúng ô của cột đang đọc;
   Tỷ trọng = ô đó chia `totals` của cùng cột, như mọi dòng khác. Các cột còn lại
   (Mặt hàng, Phương thức ký HĐ, giao hàng, thanh toán) ghi "—": đó là nhiều đối tác
   gộp lại, không có một phương thức chung.
@@ -52,6 +53,19 @@ description: >-
   `totals` để tính.
   - Ô của dòng phần còn lại là null thì thiếu `totals` của cột đó: BỎ dòng phần còn
   lại khỏi bảng, đừng ghi 0.
+  - DÒNG TỔNG Ở MỤC 3 VÀ 4 ĐÃ CÓ SẴN TRONG KHUNG: `| Tổng | — |  | 100% | — | — | — |`.
+  Giữ nó làm DÒNG CUỐI của bảng; các dòng đối tác và dòng phần còn lại chèn LÊN TRÊN nó.
+    - Doanh số của dòng Tổng = `totals` của ĐÚNG CỘT bảng đó đọc — `debit_movement` của
+    sổ 131 ở mục 3, `credit_movement` của sổ 331 ở mục 4 — tức chính mẫu số của cột Tỷ
+    trọng. Ghi cùng đơn vị với các dòng phía trên.
+    - Ô Tỷ trọng "100%" đã điền sẵn: giữ nguyên. Các cột còn lại giữ "—".
+    - Các dòng phía trên cộng lại phải BẰNG dòng Tổng (sai khác chỉ do làm tròn). Lệch là
+    đã bỏ sót dòng phần còn lại, lấy nhầm bảng, hoặc lấy nhầm cột `totals` — quay lại
+    kiểm. Kiểm rồi vẫn lệch thì giữ nguyên số, không sửa cho khớp, và nói rõ chỗ lệch
+    trong câu văn ngay dưới bảng.
+    - Thiếu `totals` của cột đó thì BỎ dòng Tổng — lúc đó cột Tỷ trọng cũng đã để trống
+    theo quy tắc trên. Mục ghi "Không có dữ liệu" thì bỏ cả bảng như cũ.
+    - Dòng Tổng cũng không vẽ lên sơ đồ mục 1.
   - DÒNG PHẦN CÒN LẠI CHỈ NẰM TRONG BẢNG, KHÔNG VẼ LÊN SƠ ĐỒ MỤC 1: sơ đồ nói về
   từng đối tác cụ thể, còn dòng này là nhiều đối tác gộp lại. Câu văn nhận xét có
   thể nêu tỷ trọng phần còn lại để nói về mức độ tập trung (ví dụ: 5 khách hàng lớn

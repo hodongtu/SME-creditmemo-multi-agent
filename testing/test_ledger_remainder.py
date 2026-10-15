@@ -181,6 +181,23 @@ class GuidanceAgreesTest(unittest.TestCase):
                 with self.subTest(path=path, label=label):
                     self.assertIn(label, text)
 
+    def test_business_activity_tables_end_in_the_total_row(self) -> None:
+        """Sections 3 and 4 close with a pre-filled "Tổng" row at 100%, and the
+        guidance quotes that row — so the two must be the same row."""
+
+        from src.agents.specialist import BusinessActivityAnalysis
+
+        row = "| Tổng | — |  | 100% | — | — | — |"
+        sent = BusinessActivityAnalysis(llm=None).system_prompt.replace(
+            "{{", "{").replace("}}", "}")
+        for section in ("## 3. Đầu ra", "## 4. Đầu vào"):
+            with self.subTest(section=section):
+                table = sent[sent.index(section):].split("(Đơn vị")[0]
+                rows = [line for line in table.splitlines() if line.startswith("|")]
+                self.assertEqual(rows[-1], row)
+        guidance = (ROOT / self.GUIDANCE[0]).read_text(encoding="utf-8")
+        self.assertIn(f"`{row}`", guidance, "the guidance must quote the skeleton's row")
+
     def test_the_ledger_block_names_both_labels(self) -> None:
         text = system_prompt("block_ledger",
                              residual_label=ledger.RESIDUAL_LABEL,

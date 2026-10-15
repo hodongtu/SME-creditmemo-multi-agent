@@ -48,6 +48,7 @@ flowchart LR
  
 | Đầu ra chính | Mặt hàng | Doanh số {{Nam}} | Tỷ trọng | Phương thức ký HĐ | Phương thức giao hàng | Phương thức thanh toán |
 |---|---|---:|---:|---|---|---|
+| Tổng | — |  | 100% | — | — | — |
  
 (Đơn vị: tỷ VNĐ)
  
@@ -56,6 +57,7 @@ flowchart LR
  
 | Đầu vào chính | Mặt hàng | Doanh số {{Nam}} | Tỷ trọng | Phương thức ký HĐ | Phương thức giao hàng | Phương thức thanh toán |
 |---|---|---:|---:|---|---|---|
+| Tổng | — |  | 100% | — | — | — |
  
 (Đơn vị: tỷ VNĐ)
  
