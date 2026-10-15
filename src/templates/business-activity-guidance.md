@@ -190,6 +190,32 @@ chia cho `totals.credit_movement` của chính sổ đó.
 doanh thu, vốn chủ sở hữu CHỈ KHI hồ sơ có tài liệu chứng minh (hợp đồng, báo cáo
 khảo sát, CIC, báo cáo ngành). KHÔNG tra cứu ngoài, KHÔNG dẫn masothue.com hay GSO
 theo trí nhớ.
+
+- CỘT "Phương thức ký HĐ" (mục 3 và 4) GHI SỐ HIỆU HỢP ĐỒNG với đối tác của dòng đó,
+KHÔNG ghi chung chung "Hợp đồng kinh tế". Nguồn là văn bản hợp đồng trong hồ sơ:
+hợp đồng đầu ra/đầu vào, hồ sơ tiến độ và năng lực thực hiện hợp đồng, biên bản
+nghiệm thu/quyết toán, và bảng hợp đồng của Giấy đề nghị cấp tín dụng.
+  - CHỈ GHI KHI VĂN BẢN HỢP ĐỒNG NÊU TÊN ĐÚNG ĐỐI TÁC CỦA DÒNG ĐÓ. Tên đối tác trong
+  bảng lấy từ sổ 131/331, còn tên trên hợp đồng có thể viết khác — "CTY TNHH ABC" và
+  "Công ty Trách nhiệm hữu hạn ABC" là một khi phần tên riêng trùng nhau. Còn phân
+  vân là cùng một bên hay không thì KHÔNG gán.
+  - Ghi theo khuôn `HĐ <loại hợp đồng> số <số hiệu> ngày <dd/mm/yyyy>`, ví dụ dạng
+  "HĐ nguyên tắc số … ngày …". Số hiệu CHÉP NGUYÊN VĂN như in trên hợp đồng — không
+  chuẩn hoá, không rút gọn, không tự thêm năm hay ký hiệu. Loại hợp đồng và ngày ký
+  chỉ ghi khi văn bản có ghi; thiếu thì bỏ phần đó, giữ số hiệu.
+  - Nhiều hợp đồng với cùng một đối tác: ghi nhiều nhất 2 hợp đồng có ngày ký gần
+  nhất, phần còn lại ghi "và N HĐ khác".
+  - Số hiệu hợp đồng là dữ kiện then chốt: gắn footnote tới file hợp đồng theo
+  CITATION RULE.
+  - KHÔNG BAO GIỜ chép số hiệu của đối tác này sang đối tác khác, và KHÔNG suy ra một
+  số hiệu từ cách đánh số của các hợp đồng khác — một số hiệu không có trên văn bản
+  là số bịa.
+  - Hồ sơ không có hợp đồng nào với đối tác đó: nếu báo cáo khảo sát hoặc tài liệu
+  khác mô tả cách ký với RIÊNG đối tác đó (ví dụ ký hợp đồng nguyên tắc hằng năm) thì
+  ghi đúng mô tả đó; không có cả mô tả thì ghi "Không có dữ liệu" theo EVIDENCE RULE.
+  KHÔNG lấp chỗ trống bằng "Hợp đồng kinh tế" hay một phương thức chung chung — câu đó
+  đúng với mọi doanh nghiệp nên không cho người đọc biết gì.
+  - Dòng "Các đối tác còn lại (N)" và dòng Tổng vẫn ghi "—" ở cột này.
  
 - Mục 5: Vẽ sơ đồ quy trình sản xuất, quy trình ký kết hợp đồng theo báo cáo am hiểu ngành (nếu có).
  
